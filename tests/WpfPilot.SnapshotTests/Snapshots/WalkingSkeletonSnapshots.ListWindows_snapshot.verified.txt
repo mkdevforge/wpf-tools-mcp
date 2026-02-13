@@ -1,0 +1,15 @@
+﻿{
+  ProcessId: -1,
+  ProcessName: WpfPilot.TestApp,
+  Windows: [
+    {
+      Title: WpfPilot TestApp,
+      Bounds: {
+        Width: 900,
+        Height: 650
+      },
+      IsVisible: true,
+      IsEnabled: true
+    }
+  ]
+}

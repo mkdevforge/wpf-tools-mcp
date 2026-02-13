@@ -1,0 +1,75 @@
+<Window x:Class="WpfPilot.TestApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:WpfPilot.TestApp"
+        mc:Ignorable="d"
+        Title="WpfPilot TestApp"
+        Width="900"
+        Height="650"
+        ResizeMode="NoResize"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        Left="100"
+        Top="100"
+        Background="White"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   AutomationProperties.AutomationId="Basic_Header"
+                   Text="WpfPilot.TestApp — Basic Controls"
+                   FontSize="24"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <StackPanel Grid.Row="1" Width="420">
+            <Button AutomationProperties.AutomationId="Basic_Button"
+                    Content="Click me"
+                    Width="160"
+                    Margin="0,0,0,12"
+                    HorizontalAlignment="Left" />
+
+            <TextBlock Text="TextBox:"
+                       Margin="0,0,0,4" />
+            <TextBox AutomationProperties.AutomationId="Basic_TextBox"
+                     Text="Hello WpfPilot"
+                     Width="240"
+                     Margin="0,0,0,12"
+                     HorizontalAlignment="Left" />
+
+            <CheckBox AutomationProperties.AutomationId="Basic_CheckBox"
+                      Content="I agree"
+                      IsChecked="True"
+                      Margin="0,0,0,12" />
+
+            <TextBlock Text="ComboBox:"
+                       Margin="0,0,0,4" />
+            <ComboBox AutomationProperties.AutomationId="Basic_ComboBox"
+                      SelectedIndex="0"
+                      Width="240"
+                      Margin="0,0,0,12"
+                      HorizontalAlignment="Left">
+                <ComboBoxItem Content="One" />
+                <ComboBoxItem Content="Two" />
+                <ComboBoxItem Content="Three" />
+            </ComboBox>
+
+            <TextBlock Text="Slider:"
+                       Margin="0,0,0,4" />
+            <Slider AutomationProperties.AutomationId="Basic_Slider"
+                    Minimum="0"
+                    Maximum="100"
+                    Value="25"
+                    Width="240"
+                    Margin="0,0,0,12"
+                    HorizontalAlignment="Left" />
+        </StackPanel>
+    </Grid>
+</Window>

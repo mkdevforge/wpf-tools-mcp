@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>wpfpilot</ToolCommandName>
+
+    <ServerPublishDir>$(BaseIntermediateOutputPath)server-publish\\</ServerPublishDir>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackServerPayload</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <Target Name="PublishServerForTool">
+    <RemoveDir Directories="$(ServerPublishDir)" />
+    <Exec Command="dotnet publish ..\\WpfPilot.McpServer\\WpfPilot.McpServer.csproj -c $(Configuration) -o &quot;$(ServerPublishDir)&quot;" />
+  </Target>
+
+  <Target Name="PackServerPayload" DependsOnTargets="PublishServerForTool" Returns="@(TfmSpecificPackageFile)">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="$(ServerPublishDir)**\\*">
+        <PackagePath>tools/$(TargetFramework)/any/server/</PackagePath>
+      </TfmSpecificPackageFile>
+    </ItemGroup>
+  </Target>
+
+</Project>

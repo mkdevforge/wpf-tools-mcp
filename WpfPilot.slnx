@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WpfPilot.Automation/WpfPilot.Automation.csproj" />
+    <Project Path="src/WpfPilot.Contracts/WpfPilot.Contracts.csproj" />
+    <Project Path="src/WpfPilot.McpServer/WpfPilot.McpServer.csproj" />
+    <Project Path="src/WpfPilot.TestApp/WpfPilot.TestApp.csproj" />
+    <Project Path="src/WpfPilot.Tool/WpfPilot.Tool.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WpfPilot.SnapshotTests/WpfPilot.SnapshotTests.csproj" />
+  </Folder>
+</Solution>
