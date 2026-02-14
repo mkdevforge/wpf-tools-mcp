@@ -191,12 +191,17 @@ In addition, the repo contains focused, deterministic test apps to validate tric
 
 - **Tabs** (`WpfPilot.TestApp.Tabs`) — TabControl selection, including nested selectable controls to ensure `select_item` targets the intended container.
 - **TreeView** (`WpfPilot.TestApp.TreeView`) — TreeView selection across hierarchical items.
+- **Minimal** (`WpfPilot.TestApp.Minimal`) — No `AutomationId`s. Validates ambiguity handling and fallback locator strategies (`name`, `className`, `index`).
+- **BrokenAutomation** (`WpfPilot.TestApp.BrokenAutomation`) — Includes a control that is intentionally not exposed via UIA to validate expected limitations and clean failure modes.
+
+**UIA limits:** If a control is not exposed via UI Automation (no AutomationPeer / no useful patterns), locator-based tools cannot interact with it without breaking abstraction (e.g., image/coordinate hacks), which this project intentionally avoids.
 
 ### Test App Requirements
 
-- Every interactive element MUST have a unique, stable `AutomationId`
-- Navigation between pages must be automatable (tab control or programmatic)
 - The app should start in a known, deterministic state every launch
+- The primary test app (`WpfPilot.TestApp`) should use unique, stable `AutomationId`s for interactive elements
+- Focused apps may intentionally omit `AutomationId`s to validate fallback locators and failure modes
+- Navigation between pages (if present) must be automatable (tab control or programmatic)
 - No special instrumentation required — Snoop injection handles all introspection
 
 ---

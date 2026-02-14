@@ -335,7 +335,7 @@ public sealed class InteractionSnapshots
                 },
                 ["itemLocator"] = new Dictionary<string, object?>
                 {
-                    ["automationId"] = "Item 42"
+                    ["name"] = "Item 42"
                 }
             });
 

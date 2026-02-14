@@ -30,4 +30,9 @@ internal static class TestAppPaths
     public static string FindTabsTestAppExecutable() => FindExecutable("WpfPilot.TestApp.Tabs", "WpfPilot.TestApp.Tabs");
 
     public static string FindTreeViewTestAppExecutable() => FindExecutable("WpfPilot.TestApp.TreeView", "WpfPilot.TestApp.TreeView");
+
+    public static string FindMinimalTestAppExecutable() => FindExecutable("WpfPilot.TestApp.Minimal", "WpfPilot.TestApp.Minimal");
+
+    public static string FindBrokenAutomationTestAppExecutable() =>
+        FindExecutable("WpfPilot.TestApp.BrokenAutomation", "WpfPilot.TestApp.BrokenAutomation");
 }

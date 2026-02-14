@@ -1,0 +1,163 @@
+using System.Threading;
+using NUnit.Framework;
+using VerifyNUnit;
+using VerifyTests;
+using WpfPilot.Contracts;
+
+namespace WpfPilot.SnapshotTests;
+
+[TestFixture]
+[NonParallelizable]
+[Apartment(ApartmentState.STA)]
+public sealed class MinimalInteractionSnapshots
+{
+    private McpTestContext _mcp = null!;
+
+    [OneTimeSetUp]
+    public async Task OneTimeSetUp()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        _mcp = await McpTestContext.StartAsync(serverExe);
+    }
+
+    [OneTimeTearDown]
+    public async Task OneTimeTearDown()
+    {
+        if (_mcp is null)
+        {
+            return;
+        }
+
+        await _mcp.DisposeAsync();
+    }
+
+    private async Task LaunchMinimalAppAsync()
+    {
+        var exePath = TestAppPaths.FindMinimalTestAppExecutable();
+        var workingDirectory = Path.GetDirectoryName(exePath)!;
+
+        _ = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        {
+            ["exePath"] = exePath,
+            ["workingDirectory"] = workingDirectory,
+        });
+    }
+
+    private async Task CloseAppAsync()
+    {
+        try
+        {
+            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+            {
+                ["force"] = true,
+                ["timeoutMs"] = 2000
+            });
+        }
+        catch
+        {
+        }
+    }
+
+    [Test]
+    public async Task ClickElement_name_ambiguous_returns_error_snapshot()
+    {
+        await LaunchMinimalAppAsync();
+        try
+        {
+            InvalidOperationException? ex = null;
+            try
+            {
+                _ = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+                {
+                    ["locator"] = new Dictionary<string, object?>
+                    {
+                        ["name"] = "OK"
+                    }
+                });
+                Assert.Fail("Expected click_element to fail due to ambiguous name 'OK'.");
+            }
+            catch (InvalidOperationException caught)
+            {
+                ex = caught;
+            }
+
+            var message = ex!.Message.Split("--- server stderr", StringSplitOptions.None)[0].TrimEnd();
+            await Verifier.Verify(message);
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task ClickElement_name_with_index_updates_click_count_snapshot()
+    {
+        await LaunchMinimalAppAsync();
+        try
+        {
+            var click = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["name"] = "OK",
+                    ["index"] = 0
+                }
+            });
+
+            var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["name"] = "Clicks: 1"
+                }
+            });
+
+            await Verifier.Verify(new
+            {
+                Click = click,
+                Status = status.Element.Name
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task SelectItem_listbox_by_text_updates_status_snapshot()
+    {
+        await LaunchMinimalAppAsync();
+        try
+        {
+            var selected = await _mcp.CallToolAsync<SelectItemResponse>("select_item", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["className"] = "ListBox"
+                },
+                ["text"] = "Item 10"
+            });
+
+            var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["name"] = "Selected: Item 10"
+                }
+            });
+
+            await Verifier.Verify(new
+            {
+                Selected = selected,
+                Status = status.Element.Name
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+}
+

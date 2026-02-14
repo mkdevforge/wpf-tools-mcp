@@ -76,11 +76,6 @@
                      Margin="0,0,0,6"
                      SelectionChanged="BasicListBox_SelectionChanged"
                      HorizontalAlignment="Left">
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="AutomationProperties.AutomationId" Value="{Binding}" />
-                    </Style>
-                </ListBox.ItemContainerStyle>
             </ListBox>
 
             <TextBlock x:Name="BasicListBoxStatus"

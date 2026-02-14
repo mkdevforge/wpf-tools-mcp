@@ -261,7 +261,7 @@
         Children: [
           {
             ElementType: ListItem,
-            AutomationId: Item 0,
+            AutomationId: ,
             Name: Item 0,
             ClassName: ListBoxItem,
             Bounds: {
@@ -289,7 +289,7 @@
           },
           {
             ElementType: ListItem,
-            AutomationId: Item 1,
+            AutomationId: ,
             Name: Item 1,
             ClassName: ListBoxItem,
             Bounds: {
@@ -317,7 +317,7 @@
           },
           {
             ElementType: ListItem,
-            AutomationId: Item 2,
+            AutomationId: ,
             Name: Item 2,
             ClassName: ListBoxItem,
             Bounds: {
@@ -345,7 +345,7 @@
           },
           {
             ElementType: ListItem,
-            AutomationId: Item 3,
+            AutomationId: ,
             Name: Item 3,
             ClassName: ListBoxItem,
             Bounds: {
@@ -373,7 +373,7 @@
           },
           {
             ElementType: ListItem,
-            AutomationId: Item 4,
+            AutomationId: ,
             Name: Item 4,
             ClassName: ListBoxItem,
             Bounds: {
@@ -401,7 +401,7 @@
           },
           {
             ElementType: ListItem,
-            AutomationId: Item 5,
+            AutomationId: ,
             Name: Item 5,
             ClassName: ListBoxItem,
             Bounds: {
@@ -429,7 +429,7 @@
           },
           {
             ElementType: ListItem,
-            AutomationId: Item 6,
+            AutomationId: ,
             Name: Item 6,
             ClassName: ListBoxItem,
             Bounds: {
@@ -457,7 +457,7 @@
           },
           {
             ElementType: ListItem,
-            AutomationId: Item 7,
+            AutomationId: ,
             Name: Item 7,
             ClassName: ListBoxItem,
             Bounds: {
