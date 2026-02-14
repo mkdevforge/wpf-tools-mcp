@@ -105,6 +105,19 @@
       },
       {
         ElementType: Text,
+        AutomationId: Basic_ClickStatus,
+        Name: Clicks: 0,
+        ClassName: TextBlock,
+        Bounds: {
+          Width: 420,
+          Height: 16
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBlock[2]
+      },
+      {
+        ElementType: Text,
         AutomationId: ,
         Name: TextBox:,
         ClassName: TextBlock,
@@ -114,7 +127,7 @@
         },
         IsEnabled: true,
         IsOffscreen: false,
-        XPath: /Window/TextBlock[2]
+        XPath: /Window/TextBlock[3]
       },
       {
         ElementType: Edit,
@@ -205,7 +218,7 @@
         },
         IsEnabled: true,
         IsOffscreen: false,
-        XPath: /Window/TextBlock[3]
+        XPath: /Window/TextBlock[4]
       },
       {
         ElementType: ComboBox,
@@ -231,7 +244,7 @@
         },
         IsEnabled: true,
         IsOffscreen: false,
-        XPath: /Window/TextBlock[4]
+        XPath: /Window/TextBlock[5]
       },
       {
         ElementType: Slider,
@@ -298,7 +311,7 @@
         },
         IsEnabled: true,
         IsOffscreen: false,
-        XPath: /Window/TextBlock[5]
+        XPath: /Window/TextBlock[6]
       },
       {
         ElementType: Text,
@@ -311,7 +324,7 @@
         },
         IsEnabled: true,
         IsOffscreen: false,
-        XPath: /Window/TextBlock[6]
+        XPath: /Window/TextBlock[7]
       },
       {
         ElementType: Button,
@@ -380,7 +393,7 @@
         },
         IsEnabled: true,
         IsOffscreen: false,
-        XPath: /Window/TextBlock[7]
+        XPath: /Window/TextBlock[8]
       },
       {
         ElementType: Button,

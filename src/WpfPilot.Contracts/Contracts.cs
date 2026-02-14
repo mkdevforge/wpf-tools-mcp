@@ -78,3 +78,35 @@ public sealed record TakeScreenshotRequest(
     ScreenshotCaptureMode CaptureMode = ScreenshotCaptureMode.Screen);
 
 public sealed record TakeScreenshotResponse(string PngBase64, int Width, int Height);
+
+public sealed record FocusWindowRequest(long? WindowHandle = null, string? Title = null);
+
+public sealed record FocusWindowResponse(bool Focused, long Handle, string Title);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ClickType
+{
+    Single,
+    Double,
+    Right
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ClickMode
+{
+    Auto,
+    MouseAlways,
+    InvokePreferred
+}
+
+public sealed record ClickElementRequest(
+    ElementLocator Locator,
+    long? WindowHandle = null,
+    ClickType ClickType = ClickType.Single,
+    ClickMode ClickMode = ClickMode.Auto);
+
+public sealed record ClickElementResponse(bool Clicked, string MethodUsed);
+
+public sealed record InvokeRequest(ElementLocator Locator, long? WindowHandle = null);
+
+public sealed record InvokeResponse(bool Invoked);

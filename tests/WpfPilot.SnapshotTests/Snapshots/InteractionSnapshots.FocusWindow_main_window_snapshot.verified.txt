@@ -1,0 +1,4 @@
+﻿{
+  Focused: true,
+  Title: WpfPilot TestApp
+}

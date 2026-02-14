@@ -9,6 +9,7 @@ using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Capturing;
 using FlaUI.Core.Definitions;
+using FlaUI.Core.Input;
 using FlaUI.UIA3;
 using WpfPilot.Contracts;
 
@@ -173,6 +174,132 @@ public sealed class AutomationController : IDisposable
         bitmapToSave.Save(stream, ImageFormat.Png);
         var bytes = stream.ToArray();
         return new TakeScreenshotResponse(Convert.ToBase64String(bytes), bitmapToSave.Width, bitmapToSave.Height);
+    }
+
+    public async Task<FocusWindowResponse> FocusWindowAsync(
+        FocusWindowRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var application = EnsureAttached();
+        var automation = EnsureAutomation();
+
+        if (request.WindowHandle is not null && !string.IsNullOrWhiteSpace(request.Title))
+        {
+            throw new ArgumentException("Provide either windowHandle or title, not both.");
+        }
+
+        var window = request.WindowHandle is long requestedHandle
+            ? FindWindowByHandle(application, automation, requestedHandle)
+            : !string.IsNullOrWhiteSpace(request.Title)
+                ? FindWindowByTitle(application, automation, request.Title!)
+                : FindMainWindow(application, automation);
+
+        var windowPattern = window.Patterns.Window.PatternOrDefault;
+        if (windowPattern is not null && windowPattern.WindowVisualState == WindowVisualState.Minimized)
+        {
+            windowPattern.SetWindowVisualState(WindowVisualState.Normal);
+        }
+
+        window.SetForeground();
+        window.Focus();
+        await Task.Delay(100, cancellationToken);
+
+        return new FocusWindowResponse(
+            Focused: true,
+            Handle: window.Properties.NativeWindowHandle.Value.ToInt64(),
+            Title: window.Title);
+    }
+
+    public async Task<ClickElementResponse> ClickElementAsync(
+        ClickElementRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Locator);
+
+        var application = EnsureAttached();
+        var automation = EnsureAutomation();
+
+        var window = request.WindowHandle is long requestedHandle
+            ? FindWindowByHandle(application, automation, requestedHandle)
+            : FindMainWindow(application, automation);
+
+        window.SetForeground();
+        window.Focus();
+        await Task.Delay(100, cancellationToken);
+
+        var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+        var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+        var element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
+
+        TryScrollIntoView(element);
+
+        if (request.ClickType == ClickType.Single &&
+            request.ClickMode != ClickMode.MouseAlways)
+        {
+            var invoke = element.Patterns.Invoke.PatternOrDefault;
+            if (invoke is not null)
+            {
+                invoke.Invoke();
+                await Task.Delay(75, cancellationToken);
+                return new ClickElementResponse(Clicked: true, MethodUsed: "invoke");
+            }
+        }
+
+        var point = GetClickPoint(element);
+        switch (request.ClickType)
+        {
+            case ClickType.Single:
+                Mouse.LeftClick(point);
+                break;
+            case ClickType.Double:
+                Mouse.LeftDoubleClick(point);
+                break;
+            case ClickType.Right:
+                Mouse.RightClick(point);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(request), $"Unknown clickType '{request.ClickType}'.");
+        }
+
+        await Task.Delay(75, cancellationToken);
+        return new ClickElementResponse(Clicked: true, MethodUsed: "mouse");
+    }
+
+    public async Task<InvokeResponse> InvokeAsync(
+        InvokeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Locator);
+
+        var application = EnsureAttached();
+        var automation = EnsureAutomation();
+
+        var window = request.WindowHandle is long requestedHandle
+            ? FindWindowByHandle(application, automation, requestedHandle)
+            : FindMainWindow(application, automation);
+
+        window.SetForeground();
+        window.Focus();
+        await Task.Delay(100, cancellationToken);
+
+        var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+        var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+        var element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
+
+        TryScrollIntoView(element);
+
+        var invoke = element.Patterns.Invoke.PatternOrDefault;
+        if (invoke is null)
+        {
+            throw new InvalidOperationException(
+                $"InvokePattern not supported for element (ControlType={element.ControlType}, AutomationId={GetAutomationId(element)}, Name={GetName(element)}).");
+        }
+
+        invoke.Invoke();
+        await Task.Delay(75, cancellationToken);
+        return new InvokeResponse(Invoked: true);
     }
 
     private static Bitmap CaptureWindowScreen(Window window, CaptureSettings captureSettings)
@@ -535,6 +662,43 @@ public sealed class AutomationController : IDisposable
         return window;
     }
 
+    private static Window FindWindowByTitle(Application application, UIA3Automation automation, string title)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+
+        var windows = application.GetAllTopLevelWindows(automation).ToArray();
+
+        var exact = windows
+            .Where(w => w is not null && string.Equals(w.Title, title, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (exact.Length == 1)
+        {
+            return exact[0];
+        }
+
+        if (exact.Length > 1)
+        {
+            throw new InvalidOperationException($"Multiple windows found with title '{title}'. Provide windowHandle instead.");
+        }
+
+        var contains = windows
+            .Where(w => w is not null && w.Title?.Contains(title, StringComparison.OrdinalIgnoreCase) == true)
+            .ToArray();
+
+        if (contains.Length == 1)
+        {
+            return contains[0];
+        }
+
+        if (contains.Length > 1)
+        {
+            throw new InvalidOperationException($"Multiple windows contain title '{title}'. Provide windowHandle instead.");
+        }
+
+        throw new InvalidOperationException($"No window found with title '{title}'.");
+    }
+
     private static WindowInfo ToWindowInfo(Window window)
     {
         var bounds = window.BoundingRectangle;
@@ -741,6 +905,36 @@ public sealed class AutomationController : IDisposable
         }
 
         return matches[index];
+    }
+
+    private static void TryScrollIntoView(AutomationElement element)
+    {
+        try
+        {
+            if (element.IsOffscreen)
+            {
+                element.Patterns.ScrollItem.PatternOrDefault?.ScrollIntoView();
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static Point GetClickPoint(AutomationElement element)
+    {
+        if (element.TryGetClickablePoint(out var point))
+        {
+            return point;
+        }
+
+        var bounds = element.BoundingRectangle;
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            throw new InvalidOperationException("Element has no clickable point and has invalid bounds.");
+        }
+
+        return new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2);
     }
 
     private static IEnumerable<AutomationElement> EnumerateSelfAndDescendantsDepthFirst(AutomationElement root, ITreeWalker walker)

@@ -6,10 +6,18 @@ namespace WpfPilot.TestApp;
 
 public partial class MainWindow : Window
 {
+    private int _basicClickCount;
+
     public MainWindow()
     {
         InitializeComponent();
         SourceInitialized += (_, _) => DisableWindowRounding();
+    }
+
+    private void BasicButton_Click(object sender, RoutedEventArgs e)
+    {
+        _basicClickCount++;
+        BasicClickStatus.Text = $"Clicks: {_basicClickCount}";
     }
 
     private void DisableWindowRounding()

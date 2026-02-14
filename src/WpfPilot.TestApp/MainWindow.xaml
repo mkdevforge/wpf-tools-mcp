@@ -32,9 +32,15 @@
         <StackPanel Grid.Row="1" Width="420">
             <Button AutomationProperties.AutomationId="Basic_Button"
                     Content="Click me"
+                    Click="BasicButton_Click"
                     Width="160"
-                    Margin="0,0,0,12"
+                    Margin="0,0,0,6"
                     HorizontalAlignment="Left" />
+
+            <TextBlock x:Name="BasicClickStatus"
+                       AutomationProperties.AutomationId="Basic_ClickStatus"
+                       Text="Clicks: 0"
+                       Margin="0,0,0,12" />
 
             <TextBlock Text="TextBox:"
                        Margin="0,0,0,4" />
