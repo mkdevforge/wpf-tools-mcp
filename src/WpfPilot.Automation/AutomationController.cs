@@ -460,17 +460,19 @@ public sealed class AutomationController : IDisposable
             return new SelectItemResponse(Selected: true);
         }
 
-        var items = EnumerateSelectableItems(container, controlWalker).ToArray();
-
-        if (items.Length == 0)
+        var allItems = EnumerateSelectableItems(container, controlWalker).ToArray();
+        if (allItems.Length == 0)
         {
             throw new InvalidOperationException(
                 $"No selectable items found under locator (ControlType={container.ControlType}, AutomationId={GetAutomationId(container)}, Name={GetName(container)}).");
         }
 
-        AutomationElement? selectedItem;
+        var preferredItems = TryFilterItemsToSelectionContainer(container, allItems);
+
+        AutomationElement? selectedItem = null;
         if (hasIndex)
         {
+            var items = preferredItems is not null && preferredItems.Length > 0 ? preferredItems : allItems;
             var index = request.Index!.Value;
             if (index < 0 || index >= items.Length)
             {
@@ -482,20 +484,31 @@ public sealed class AutomationController : IDisposable
         else
         {
             var text = request.Text!;
-            selectedItem = FindUniqueItemByName(items, text, out var matches);
-
-            if (matches > 1)
+            if (preferredItems is not null && preferredItems.Length > 0)
             {
-                throw new InvalidOperationException($"Item text '{text}' is ambiguous (found {matches}). Provide index or itemLocator.");
+                selectedItem = FindUniqueItemByName(preferredItems, text, out var matches);
+                if (matches > 1)
+                {
+                    throw new InvalidOperationException($"Item text '{text}' is ambiguous (found {matches}). Provide index or itemLocator.");
+                }
             }
 
             if (selectedItem is null)
             {
-                selectedItem = await ScrollSearchUniqueItemByNameAsync(
-                    container,
-                    text,
-                    controlWalker,
-                    cancellationToken);
+                selectedItem = FindUniqueItemByName(allItems, text, out var matches);
+                if (matches > 1)
+                {
+                    throw new InvalidOperationException($"Item text '{text}' is ambiguous (found {matches}). Provide index or itemLocator.");
+                }
+
+                if (selectedItem is null)
+                {
+                    selectedItem = await ScrollSearchUniqueItemByNameAsync(
+                        container,
+                        text,
+                        controlWalker,
+                        cancellationToken);
+                }
             }
         }
 
@@ -532,7 +545,7 @@ public sealed class AutomationController : IDisposable
                 .Where(e => string.Equals(GetAutomationId(e), locator.AutomationId, StringComparison.Ordinal))
                 .ToArray();
 
-            var resolved = SelectMatch(matches, locator, "automationId");
+            var resolved = SelectMatchForItemLocator(matches, root, locator, "automationId");
             if (resolved is not null)
             {
                 return resolved;
@@ -545,7 +558,7 @@ public sealed class AutomationController : IDisposable
                 .Where(e => string.Equals(GetName(e), locator.Name, StringComparison.Ordinal))
                 .ToArray();
 
-            var resolved = SelectMatch(matches, locator, "name");
+            var resolved = SelectMatchForItemLocator(matches, root, locator, "name");
             if (resolved is not null)
             {
                 return resolved;
@@ -558,7 +571,7 @@ public sealed class AutomationController : IDisposable
                 .Where(e => string.Equals(GetClassName(e), locator.ClassName, StringComparison.Ordinal))
                 .ToArray();
 
-            var resolved = SelectMatch(matches, locator, "className");
+            var resolved = SelectMatchForItemLocator(matches, root, locator, "className");
             if (resolved is not null)
             {
                 return resolved;
@@ -585,6 +598,65 @@ public sealed class AutomationController : IDisposable
         }
 
         return null;
+    }
+
+    private static AutomationElement? SelectMatchForItemLocator(
+        IReadOnlyList<AutomationElement> matches,
+        AutomationElement rootContainer,
+        ElementLocator locator,
+        string strategyName)
+    {
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        if (matches.Count == 1)
+        {
+            return matches[0];
+        }
+
+        if (locator.Index is int index)
+        {
+            if (index < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(locator), "index must be >= 0.");
+            }
+
+            if (index >= matches.Count)
+            {
+                throw new InvalidOperationException(
+                    $"Locator strategy '{strategyName}' index {index} is out of range (found {matches.Count}).");
+            }
+
+            return matches[index];
+        }
+
+        var selectionItemCandidates = matches.Where(HasSelectionItemPattern).ToArray();
+        if (selectionItemCandidates.Length > 1)
+        {
+            var owned = selectionItemCandidates
+                .Where(e => TryGetSelectionContainer(e, out var container) && AreSameElement(container, rootContainer))
+                .ToArray();
+
+            if (owned.Length == 1)
+            {
+                return owned[0];
+            }
+
+            if (owned.Length > 1)
+            {
+                selectionItemCandidates = owned;
+            }
+        }
+
+        if (selectionItemCandidates.Length == 1)
+        {
+            return selectionItemCandidates[0];
+        }
+
+        throw new InvalidOperationException(
+            $"Locator strategy '{strategyName}' is ambiguous (found {matches.Count}). Provide 'index' to disambiguate.");
     }
 
     private static async Task<AutomationElement> ResolveElementWithinRootOrScrollAsync(
@@ -668,6 +740,66 @@ public sealed class AutomationController : IDisposable
         }
 
         return ResolveElementWithinRoot(container, locator, walker);
+    }
+
+    private static AutomationElement[]? TryFilterItemsToSelectionContainer(
+        AutomationElement container,
+        IReadOnlyList<AutomationElement> items)
+    {
+        if (!SupportsSelectionPattern(container))
+        {
+            return null;
+        }
+
+        var owned = new List<AutomationElement>();
+        foreach (var item in items)
+        {
+            if (!TryGetSelectionContainer(item, out var selectionContainer))
+            {
+                continue;
+            }
+
+            if (AreSameElement(selectionContainer, container))
+            {
+                owned.Add(item);
+            }
+        }
+
+        return owned.Count > 0 ? owned.ToArray() : null;
+    }
+
+    private static bool SupportsSelectionPattern(AutomationElement element)
+    {
+        try
+        {
+            return element.Patterns.Selection.IsSupported;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetSelectionContainer(AutomationElement item, out AutomationElement selectionContainer)
+    {
+        selectionContainer = null!;
+
+        try
+        {
+            var selectionItem = item.Patterns.SelectionItem.PatternOrDefault;
+            var container = selectionItem?.SelectionContainer.ValueOrDefault;
+            if (container is null)
+            {
+                return false;
+            }
+
+            selectionContainer = container;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static IEnumerable<AutomationElement> EnumerateSelectableItems(AutomationElement root, ITreeWalker walker) =>
@@ -806,18 +938,38 @@ public sealed class AutomationController : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var items = EnumerateSelectableItems(container, walker).ToArray();
-            scanned += items.Length;
+            var allItems = EnumerateSelectableItems(container, walker).ToArray();
+            scanned += allItems.Length;
 
-            var candidate = FindUniqueItemByName(items, text, out var matches);
-            if (matches == 1 && candidate is not null)
+            var preferredItems = TryFilterItemsToSelectionContainer(container, allItems);
+
+            if (preferredItems is not null && preferredItems.Length > 0)
             {
-                return candidate;
+                var candidate = FindUniqueItemByName(preferredItems, text, out var matches);
+                if (matches == 1 && candidate is not null)
+                {
+                    return candidate;
+                }
+
+                if (matches > 1)
+                {
+                    throw new InvalidOperationException(
+                        $"Item text '{text}' is ambiguous (found {matches}). Provide index or itemLocator.");
+                }
             }
 
-            if (matches > 1)
             {
-                throw new InvalidOperationException($"Item text '{text}' is ambiguous (found {matches}). Provide index or itemLocator.");
+                var candidate = FindUniqueItemByName(allItems, text, out var matches);
+                if (matches == 1 && candidate is not null)
+                {
+                    return candidate;
+                }
+
+                if (matches > 1)
+                {
+                    throw new InvalidOperationException(
+                        $"Item text '{text}' is ambiguous (found {matches}). Provide index or itemLocator.");
+                }
             }
 
             var beforePercent = TryGetScrollPercent(scroll, vertical: true);

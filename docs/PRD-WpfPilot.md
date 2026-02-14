@@ -118,7 +118,7 @@ The MCP server manages both channels in Phase 2. Inspection tools route through 
 | `click_element` | Click an element | Locator strategy + optional click type (single/double/right) |
 | `type_text` | Type text into a focused or specified element | Locator + text. Supports ValuePattern or keyboard input fallback. |
 | `set_value` | Set value directly via ValuePattern | Locator + value |
-| `select_item` | Select item in combo box, list box, tab control | Locator + item identifier (text or index) |
+| `select_item` | Select item in combo box, list box, tab control | Locator + item identifier (`text`, `index`, or `itemLocator`) |
 | `invoke` | Invoke a button or menu item via InvokePattern | Locator |
 | `scroll_to_element` | Scroll a container to bring an element into view | Locator of the target element |
 | `focus_window` | Bring a window to the foreground | Window handle or title |
@@ -187,6 +187,11 @@ The test app contains pages/views covering these scenarios:
 - **Dialogs** — Modal and non-modal dialogs, message boxes. Tests window enumeration and multi-window interaction.
 - **CustomControls** — User controls and templated controls to verify automation peer behavior with non-standard controls.
 
+In addition, the repo contains focused, deterministic test apps to validate tricky UIA interactions without relying on the target app's control templates:
+
+- **Tabs** (`WpfPilot.TestApp.Tabs`) — TabControl selection, including nested selectable controls to ensure `select_item` targets the intended container.
+- **TreeView** (`WpfPilot.TestApp.TreeView`) — TreeView selection across hierarchical items.
+
 ### Test App Requirements
 
 - Every interactive element MUST have a unique, stable `AutomationId`
@@ -196,9 +201,9 @@ The test app contains pages/views covering these scenarios:
 
 ---
 
-## Testing Strategy: SpecTests with RegNroll
+## Testing Strategy: Snapshot tests with Verify
 
-Approval testing with [Verify](https://github.com/VerifyTests/Verify) (RegNroll pattern) is the primary testing strategy. This is a natural fit because:
+Approval testing with [Verify](https://github.com/VerifyTests/Verify) is the primary testing strategy. This is a natural fit because:
 
 - MCP tool outputs (visual trees, element properties, binding errors) are structured data that's easy to snapshot but tedious to assert field-by-field.
 - Screenshots can be snapshot-tested as image files — visual regressions become PR-visible diffs.

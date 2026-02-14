@@ -1,0 +1,6 @@
+﻿{
+  Selected: {
+    Selected: true
+  },
+  Status: Selected: Node 3.2
+}
