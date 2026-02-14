@@ -1,0 +1,7 @@
+﻿{
+  Typed: {
+    Typed: true,
+    MethodUsed: valuePattern
+  },
+  Value: Hello from tests
+}

@@ -1,0 +1,7 @@
+﻿{
+  Set: {
+    Set: true,
+    MethodUsed: rangeValue
+  },
+  Value: 70.0
+}

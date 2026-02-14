@@ -43,6 +43,34 @@ public static class InteractionTools
         CancellationToken cancellationToken = default) =>
         automation.InvokeAsync(new InvokeRequest(locator, windowHandle), cancellationToken);
 
+    [McpServerTool(Name = "type_text"), Description("Type text into a focused or specified element.")]
+    public static Task<TypeTextResponse> TypeText(
+        AutomationController automation,
+        [Description("Element locator")] ElementLocator locator,
+        [Description("Text to enter")] string text,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        CancellationToken cancellationToken = default) =>
+        automation.TypeTextAsync(new TypeTextRequest(locator, text, windowHandle), cancellationToken);
+
+    [McpServerTool(Name = "set_value"), Description("Set a numeric value (RangeValue/ValuePattern).")]
+    public static Task<SetValueResponse> SetValue(
+        AutomationController automation,
+        [Description("Element locator")] ElementLocator locator,
+        [Description("Numeric value to set")] double value,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        CancellationToken cancellationToken = default) =>
+        automation.SetValueAsync(new SetValueRequest(locator, value, windowHandle), cancellationToken);
+
+    [McpServerTool(Name = "select_item"), Description("Select an item in a combo box, list box, or tab control.")]
+    public static Task<SelectItemResponse> SelectItem(
+        AutomationController automation,
+        [Description("Element locator")] ElementLocator locator,
+        [Description("Item text to select")] string? text = null,
+        [Description("Item index to select (0-based)")] int? index = null,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        CancellationToken cancellationToken = default) =>
+        automation.SelectItemAsync(new SelectItemRequest(locator, text, index, windowHandle), cancellationToken);
+
     private static ClickType ParseClickType(string? clickType)
     {
         if (string.IsNullOrWhiteSpace(clickType))
@@ -111,4 +139,3 @@ public static class InteractionTools
         throw new ArgumentException($"Unknown clickMode '{clickMode}'. Valid values: auto, mouseAlways, invokePreferred.");
     }
 }
-

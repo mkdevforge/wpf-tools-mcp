@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Text.Json.Nodes;
 using NUnit.Framework;
 using VerifyNUnit;
 using VerifyTests;
@@ -172,5 +173,136 @@ public sealed class InteractionSnapshots
         {
             await CloseTestAppAsync();
         }
+    }
+
+    [Test]
+    public async Task TypeText_textbox_updates_value_snapshot()
+    {
+        await LaunchTestAppAsync();
+        try
+        {
+            var typed = await _mcp.CallToolAsync<TypeTextResponse>("type_text", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_TextBox"
+                },
+                ["text"] = "Hello from tests"
+            });
+
+            var textbox = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_TextBox"
+                }
+            });
+
+            var valuePatternValue = GetPatternValue(textbox, "Value", "Value")?.GetValue<string>();
+
+            await Verifier.Verify(new
+            {
+                Typed = typed,
+                Value = valuePatternValue
+            });
+        }
+        finally
+        {
+            await CloseTestAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task SetValue_slider_updates_value_snapshot()
+    {
+        await LaunchTestAppAsync();
+        try
+        {
+            var set = await _mcp.CallToolAsync<SetValueResponse>("set_value", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_Slider"
+                },
+                ["value"] = 70
+            });
+
+            var slider = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_Slider"
+                }
+            });
+
+            var rangeValue = GetPatternValue(slider, "RangeValue", "Value")?.GetValue<double>();
+
+            await Verifier.Verify(new
+            {
+                Set = set,
+                Value = rangeValue
+            });
+        }
+        finally
+        {
+            await CloseTestAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task SelectItem_combobox_by_text_updates_value_snapshot()
+    {
+        await LaunchTestAppAsync();
+        try
+        {
+            var selected = await _mcp.CallToolAsync<SelectItemResponse>("select_item", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_ComboBox"
+                },
+                ["text"] = "Two"
+            });
+
+            var comboBox = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_ComboBox"
+                }
+            });
+
+            var valuePatternValue = GetPatternValue(comboBox, "Value", "Value")?.GetValue<string>();
+
+            await Verifier.Verify(new
+            {
+                Selected = selected,
+                Value = valuePatternValue
+            });
+        }
+        finally
+        {
+            await CloseTestAppAsync();
+        }
+    }
+
+    private static JsonNode? GetPatternValue(GetElementPropertiesResponse response, string patternName, string valueName)
+    {
+        if (!response.Patterns.TryGetValue(patternName, out var patternNode))
+        {
+            return null;
+        }
+
+        if (patternNode is not JsonObject obj)
+        {
+            return null;
+        }
+
+        if (obj["values"] is not JsonObject values)
+        {
+            return null;
+        }
+
+        return values[valueName];
     }
 }

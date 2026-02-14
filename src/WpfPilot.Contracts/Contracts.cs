@@ -110,3 +110,19 @@ public sealed record ClickElementResponse(bool Clicked, string MethodUsed);
 public sealed record InvokeRequest(ElementLocator Locator, long? WindowHandle = null);
 
 public sealed record InvokeResponse(bool Invoked);
+
+public sealed record TypeTextRequest(ElementLocator Locator, string Text, long? WindowHandle = null);
+
+public sealed record TypeTextResponse(bool Typed, string MethodUsed);
+
+public sealed record SetValueRequest(ElementLocator Locator, double Value, long? WindowHandle = null);
+
+public sealed record SetValueResponse(bool Set, string MethodUsed);
+
+public sealed record SelectItemRequest(
+    ElementLocator Locator,
+    string? Text = null,
+    int? Index = null,
+    long? WindowHandle = null);
+
+public sealed record SelectItemResponse(bool Selected);

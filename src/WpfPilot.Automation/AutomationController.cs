@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -10,6 +11,7 @@ using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Capturing;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
+using FlaUI.Core.WindowsAPI;
 using FlaUI.UIA3;
 using WpfPilot.Contracts;
 
@@ -300,6 +302,181 @@ public sealed class AutomationController : IDisposable
         invoke.Invoke();
         await Task.Delay(75, cancellationToken);
         return new InvokeResponse(Invoked: true);
+    }
+
+    public async Task<TypeTextResponse> TypeTextAsync(
+        TypeTextRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Locator);
+
+        var application = EnsureAttached();
+        var automation = EnsureAutomation();
+
+        var window = request.WindowHandle is long requestedHandle
+            ? FindWindowByHandle(application, automation, requestedHandle)
+            : FindMainWindow(application, automation);
+
+        window.SetForeground();
+        window.Focus();
+        await Task.Delay(100, cancellationToken);
+
+        var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+        var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+        var element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
+
+        TryScrollIntoView(element);
+
+        var valuePattern = element.Patterns.Value.PatternOrDefault;
+        if (valuePattern is not null && valuePattern.IsReadOnly == false)
+        {
+            valuePattern.SetValue(request.Text);
+            await Task.Delay(75, cancellationToken);
+            return new TypeTextResponse(Typed: true, MethodUsed: "valuePattern");
+        }
+
+        element.Focus();
+        await Task.Delay(50, cancellationToken);
+
+        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
+        Keyboard.Type(VirtualKeyShort.DELETE);
+        Keyboard.Type(request.Text);
+
+        await Task.Delay(75, cancellationToken);
+        return new TypeTextResponse(Typed: true, MethodUsed: "keyboard");
+    }
+
+    public async Task<SetValueResponse> SetValueAsync(
+        SetValueRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Locator);
+
+        var application = EnsureAttached();
+        var automation = EnsureAutomation();
+
+        var window = request.WindowHandle is long requestedHandle
+            ? FindWindowByHandle(application, automation, requestedHandle)
+            : FindMainWindow(application, automation);
+
+        window.SetForeground();
+        window.Focus();
+        await Task.Delay(100, cancellationToken);
+
+        var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+        var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+        var element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
+
+        TryScrollIntoView(element);
+
+        var rangeValue = element.Patterns.RangeValue.PatternOrDefault;
+        if (rangeValue is not null && rangeValue.IsReadOnly == false)
+        {
+            rangeValue.SetValue(request.Value);
+            await Task.Delay(75, cancellationToken);
+            return new SetValueResponse(Set: true, MethodUsed: "rangeValue");
+        }
+
+        var valuePattern = element.Patterns.Value.PatternOrDefault;
+        if (valuePattern is not null && valuePattern.IsReadOnly == false)
+        {
+            valuePattern.SetValue(request.Value.ToString(CultureInfo.InvariantCulture));
+            await Task.Delay(75, cancellationToken);
+            return new SetValueResponse(Set: true, MethodUsed: "valuePattern");
+        }
+
+        throw new InvalidOperationException(
+            "Element supports neither writable RangeValuePattern nor writable ValuePattern.");
+    }
+
+    public async Task<SelectItemResponse> SelectItemAsync(
+        SelectItemRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Locator);
+
+        if (request.Index is null && string.IsNullOrWhiteSpace(request.Text))
+        {
+            throw new ArgumentException("select_item requires either text or index.");
+        }
+
+        if (request.Index is not null && !string.IsNullOrWhiteSpace(request.Text))
+        {
+            throw new ArgumentException("Provide either text or index, not both.");
+        }
+
+        var application = EnsureAttached();
+        var automation = EnsureAutomation();
+
+        var window = request.WindowHandle is long requestedHandle
+            ? FindWindowByHandle(application, automation, requestedHandle)
+            : FindMainWindow(application, automation);
+
+        window.SetForeground();
+        window.Focus();
+        await Task.Delay(100, cancellationToken);
+
+        var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+        var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+        var element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
+
+        TryScrollIntoView(element);
+
+        var className = GetClassName(element);
+        var controlType = element.ControlType;
+
+        if (controlType == ControlType.ComboBox || string.Equals(className, "ComboBox", StringComparison.OrdinalIgnoreCase))
+        {
+            var comboBox = element.AsComboBox();
+            if (request.Index is int index)
+            {
+                comboBox.Select(index);
+            }
+            else
+            {
+                comboBox.Select(request.Text!);
+            }
+
+            await Task.Delay(75, cancellationToken);
+            return new SelectItemResponse(Selected: true);
+        }
+
+        if (controlType == ControlType.List || string.Equals(className, "ListBox", StringComparison.OrdinalIgnoreCase))
+        {
+            var listBox = element.AsListBox();
+            if (request.Index is int index)
+            {
+                listBox.Select(index);
+            }
+            else
+            {
+                listBox.Select(request.Text!);
+            }
+
+            await Task.Delay(75, cancellationToken);
+            return new SelectItemResponse(Selected: true);
+        }
+
+        if (controlType == ControlType.Tab || string.Equals(className, "TabControl", StringComparison.OrdinalIgnoreCase))
+        {
+            var tab = element.AsTab();
+            if (request.Index is int index)
+            {
+                tab.SelectTabItem(index);
+            }
+            else
+            {
+                tab.SelectTabItem(request.Text!);
+            }
+
+            await Task.Delay(75, cancellationToken);
+            return new SelectItemResponse(Selected: true);
+        }
+
+        throw new InvalidOperationException($"select_item is not supported for element type '{controlType}' (ClassName='{className}').");
     }
 
     private static Bitmap CaptureWindowScreen(Window window, CaptureSettings captureSettings)
