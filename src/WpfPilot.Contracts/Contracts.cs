@@ -123,6 +123,7 @@ public sealed record SelectItemRequest(
     ElementLocator Locator,
     string? Text = null,
     int? Index = null,
-    long? WindowHandle = null);
+    long? WindowHandle = null,
+    ElementLocator? ItemLocator = null);
 
 public sealed record SelectItemResponse(bool Selected);

@@ -101,7 +101,8 @@ public sealed class InspectionSnapshots
             ["locator"] = new Dictionary<string, object?>
             {
                 ["automationId"] = "Basic_Button"
-            }
+            },
+            ["captureMode"] = "auto",
         });
 
         Assert.That(screenshot.Width, Is.GreaterThan(0));

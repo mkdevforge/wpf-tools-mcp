@@ -28,7 +28,7 @@
       },
       IsEnabled: true,
       IsOffscreen: false,
-      XPath: /Window/TextBlock[8]
+      XPath: /Window/TextBlock[10]
     }
   },
   {

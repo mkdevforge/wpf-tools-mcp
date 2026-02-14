@@ -67,9 +67,10 @@ public static class InteractionTools
         [Description("Element locator")] ElementLocator locator,
         [Description("Item text to select")] string? text = null,
         [Description("Item index to select (0-based)")] int? index = null,
+        [Description("Optional item locator (select a specific item element)")] ElementLocator? itemLocator = null,
         [Description("Optional native window handle")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
-        automation.SelectItemAsync(new SelectItemRequest(locator, text, index, windowHandle), cancellationToken);
+        automation.SelectItemAsync(new SelectItemRequest(locator, text, index, windowHandle, itemLocator), cancellationToken);
 
     private static ClickType ParseClickType(string? clickType)
     {

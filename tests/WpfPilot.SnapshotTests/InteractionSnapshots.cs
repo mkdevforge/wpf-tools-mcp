@@ -286,6 +286,79 @@ public sealed class InteractionSnapshots
         }
     }
 
+    [Test]
+    public async Task SelectItem_listbox_by_text_scroll_search_updates_status_snapshot()
+    {
+        await LaunchTestAppAsync();
+        try
+        {
+            var selected = await _mcp.CallToolAsync<SelectItemResponse>("select_item", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_ListBox"
+                },
+                ["text"] = "Item 75"
+            });
+
+            var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_ListBoxStatus"
+                }
+            });
+
+            await Verifier.Verify(new
+            {
+                Selected = selected,
+                Status = status.Element.Name
+            });
+        }
+        finally
+        {
+            await CloseTestAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task SelectItem_listbox_by_item_locator_updates_status_snapshot()
+    {
+        await LaunchTestAppAsync();
+        try
+        {
+            var selected = await _mcp.CallToolAsync<SelectItemResponse>("select_item", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_ListBox"
+                },
+                ["itemLocator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Item 42"
+                }
+            });
+
+            var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_ListBoxStatus"
+                }
+            });
+
+            await Verifier.Verify(new
+            {
+                Selected = selected,
+                Status = status.Element.Name
+            });
+        }
+        finally
+        {
+            await CloseTestAppAsync();
+        }
+    }
+
     private static JsonNode? GetPatternValue(GetElementPropertiesResponse response, string patternName, string valueName)
     {
         if (!response.Patterns.TryGetValue(patternName, out var patternNode))

@@ -236,7 +236,7 @@
       {
         ElementType: Text,
         AutomationId: ,
-        Name: Slider:,
+        Name: ListBox:,
         ClassName: TextBlock,
         Bounds: {
           Width: 420,
@@ -245,6 +245,271 @@
         IsEnabled: true,
         IsOffscreen: false,
         XPath: /Window/TextBlock[5]
+      },
+      {
+        ElementType: List,
+        AutomationId: Basic_ListBox,
+        Name: ,
+        ClassName: ListBox,
+        Bounds: {
+          Width: 240,
+          Height: 140
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/ListBox,
+        Children: [
+          {
+            ElementType: ListItem,
+            AutomationId: Item 0,
+            Name: Item 0,
+            ClassName: ListBoxItem,
+            Bounds: {
+              Width: 219,
+              Height: 20
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/ListBox/ListBoxItem[1],
+            Children: [
+              {
+                ElementType: Text,
+                AutomationId: ,
+                Name: Item 0,
+                ClassName: TextBlock,
+                Bounds: {
+                  Width: 34,
+                  Height: 16
+                },
+                IsEnabled: true,
+                IsOffscreen: false,
+                XPath: /Window/ListBox/ListBoxItem[1]/TextBlock
+              }
+            ]
+          },
+          {
+            ElementType: ListItem,
+            AutomationId: Item 1,
+            Name: Item 1,
+            ClassName: ListBoxItem,
+            Bounds: {
+              Width: 219,
+              Height: 20
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/ListBox/ListBoxItem[2],
+            Children: [
+              {
+                ElementType: Text,
+                AutomationId: ,
+                Name: Item 1,
+                ClassName: TextBlock,
+                Bounds: {
+                  Width: 34,
+                  Height: 16
+                },
+                IsEnabled: true,
+                IsOffscreen: false,
+                XPath: /Window/ListBox/ListBoxItem[2]/TextBlock
+              }
+            ]
+          },
+          {
+            ElementType: ListItem,
+            AutomationId: Item 2,
+            Name: Item 2,
+            ClassName: ListBoxItem,
+            Bounds: {
+              Width: 219,
+              Height: 20
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/ListBox/ListBoxItem[3],
+            Children: [
+              {
+                ElementType: Text,
+                AutomationId: ,
+                Name: Item 2,
+                ClassName: TextBlock,
+                Bounds: {
+                  Width: 34,
+                  Height: 16
+                },
+                IsEnabled: true,
+                IsOffscreen: false,
+                XPath: /Window/ListBox/ListBoxItem[3]/TextBlock
+              }
+            ]
+          },
+          {
+            ElementType: ListItem,
+            AutomationId: Item 3,
+            Name: Item 3,
+            ClassName: ListBoxItem,
+            Bounds: {
+              Width: 219,
+              Height: 20
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/ListBox/ListBoxItem[4],
+            Children: [
+              {
+                ElementType: Text,
+                AutomationId: ,
+                Name: Item 3,
+                ClassName: TextBlock,
+                Bounds: {
+                  Width: 34,
+                  Height: 16
+                },
+                IsEnabled: true,
+                IsOffscreen: false,
+                XPath: /Window/ListBox/ListBoxItem[4]/TextBlock
+              }
+            ]
+          },
+          {
+            ElementType: ListItem,
+            AutomationId: Item 4,
+            Name: Item 4,
+            ClassName: ListBoxItem,
+            Bounds: {
+              Width: 219,
+              Height: 20
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/ListBox/ListBoxItem[5],
+            Children: [
+              {
+                ElementType: Text,
+                AutomationId: ,
+                Name: Item 4,
+                ClassName: TextBlock,
+                Bounds: {
+                  Width: 34,
+                  Height: 16
+                },
+                IsEnabled: true,
+                IsOffscreen: false,
+                XPath: /Window/ListBox/ListBoxItem[5]/TextBlock
+              }
+            ]
+          },
+          {
+            ElementType: ListItem,
+            AutomationId: Item 5,
+            Name: Item 5,
+            ClassName: ListBoxItem,
+            Bounds: {
+              Width: 219,
+              Height: 20
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/ListBox/ListBoxItem[6],
+            Children: [
+              {
+                ElementType: Text,
+                AutomationId: ,
+                Name: Item 5,
+                ClassName: TextBlock,
+                Bounds: {
+                  Width: 34,
+                  Height: 16
+                },
+                IsEnabled: true,
+                IsOffscreen: false,
+                XPath: /Window/ListBox/ListBoxItem[6]/TextBlock
+              }
+            ]
+          },
+          {
+            ElementType: ListItem,
+            AutomationId: Item 6,
+            Name: Item 6,
+            ClassName: ListBoxItem,
+            Bounds: {
+              Width: 219,
+              Height: 20
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/ListBox/ListBoxItem[7],
+            Children: [
+              {
+                ElementType: Text,
+                AutomationId: ,
+                Name: Item 6,
+                ClassName: TextBlock,
+                Bounds: {
+                  Width: 34,
+                  Height: 16
+                },
+                IsEnabled: true,
+                IsOffscreen: false,
+                XPath: /Window/ListBox/ListBoxItem[7]/TextBlock
+              }
+            ]
+          },
+          {
+            ElementType: ListItem,
+            AutomationId: Item 7,
+            Name: Item 7,
+            ClassName: ListBoxItem,
+            Bounds: {
+              Width: 219,
+              Height: 20
+            },
+            IsEnabled: true,
+            IsOffscreen: true,
+            XPath: /Window/ListBox/ListBoxItem[8],
+            Children: [
+              {
+                ElementType: Text,
+                AutomationId: ,
+                Name: Item 7,
+                ClassName: TextBlock,
+                Bounds: {
+                  Width: 34,
+                  Height: 16
+                },
+                IsEnabled: true,
+                IsOffscreen: false,
+                XPath: /Window/ListBox/ListBoxItem[8]/TextBlock
+              }
+            ]
+          }
+        ]
+      },
+      {
+        ElementType: Text,
+        AutomationId: Basic_ListBoxStatus,
+        Name: Selected: (none),
+        ClassName: TextBlock,
+        Bounds: {
+          Width: 420,
+          Height: 16
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBlock[6]
+      },
+      {
+        ElementType: Text,
+        AutomationId: ,
+        Name: Slider:,
+        ClassName: TextBlock,
+        Bounds: {
+          Width: 420,
+          Height: 16
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBlock[7]
       },
       {
         ElementType: Slider,
@@ -311,7 +576,7 @@
         },
         IsEnabled: true,
         IsOffscreen: false,
-        XPath: /Window/TextBlock[6]
+        XPath: /Window/TextBlock[8]
       },
       {
         ElementType: Text,
@@ -324,7 +589,7 @@
         },
         IsEnabled: true,
         IsOffscreen: false,
-        XPath: /Window/TextBlock[7]
+        XPath: /Window/TextBlock[9]
       },
       {
         ElementType: Button,
@@ -393,7 +658,7 @@
         },
         IsEnabled: true,
         IsOffscreen: false,
-        XPath: /Window/TextBlock[8]
+        XPath: /Window/TextBlock[10]
       },
       {
         ElementType: Button,

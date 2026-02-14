@@ -67,6 +67,27 @@
                 <ComboBoxItem Content="Three" />
             </ComboBox>
 
+            <TextBlock Text="ListBox:"
+                       Margin="0,0,0,4" />
+            <ListBox x:Name="BasicListBox"
+                     AutomationProperties.AutomationId="Basic_ListBox"
+                     Height="140"
+                     Width="240"
+                     Margin="0,0,0,6"
+                     SelectionChanged="BasicListBox_SelectionChanged"
+                     HorizontalAlignment="Left">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="AutomationProperties.AutomationId" Value="{Binding}" />
+                    </Style>
+                </ListBox.ItemContainerStyle>
+            </ListBox>
+
+            <TextBlock x:Name="BasicListBoxStatus"
+                       AutomationProperties.AutomationId="Basic_ListBoxStatus"
+                       Text="Selected: (none)"
+                       Margin="0,0,0,12" />
+
             <TextBlock Text="Slider:"
                        Margin="0,0,0,4" />
             <Slider AutomationProperties.AutomationId="Basic_Slider"

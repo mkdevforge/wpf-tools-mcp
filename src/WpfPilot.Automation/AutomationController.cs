@@ -11,6 +11,7 @@ using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Capturing;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
+using FlaUI.Core.Patterns;
 using FlaUI.Core.WindowsAPI;
 using FlaUI.UIA3;
 using WpfPilot.Contracts;
@@ -398,14 +399,18 @@ public sealed class AutomationController : IDisposable
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Locator);
 
-        if (request.Index is null && string.IsNullOrWhiteSpace(request.Text))
+        var hasItemLocator = request.ItemLocator is not null;
+        var hasText = !string.IsNullOrWhiteSpace(request.Text);
+        var hasIndex = request.Index is not null;
+
+        if (hasItemLocator && (hasText || hasIndex))
         {
-            throw new ArgumentException("select_item requires either text or index.");
+            throw new ArgumentException("Provide either itemLocator or text/index, not both.");
         }
 
-        if (request.Index is not null && !string.IsNullOrWhiteSpace(request.Text))
+        if (!hasItemLocator && !(hasText ^ hasIndex))
         {
-            throw new ArgumentException("Provide either text or index, not both.");
+            throw new ArgumentException("select_item requires exactly one of: itemLocator OR text OR index.");
         }
 
         var application = EnsureAttached();
@@ -421,19 +426,30 @@ public sealed class AutomationController : IDisposable
 
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
-        var element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
+        var container = ResolveElement(window, request.Locator, controlWalker, rawWalker);
 
-        TryScrollIntoView(element);
+        TryScrollIntoView(container);
 
-        var className = GetClassName(element);
-        var controlType = element.ControlType;
-
-        if (controlType == ControlType.ComboBox || string.Equals(className, "ComboBox", StringComparison.OrdinalIgnoreCase))
+        if (hasItemLocator)
         {
-            var comboBox = element.AsComboBox();
-            if (request.Index is int index)
+            var itemLocator = request.ItemLocator!;
+            var item = !string.IsNullOrWhiteSpace(itemLocator.XPath)
+                ? ResolveElement(window, itemLocator, controlWalker, rawWalker)
+                : await ResolveElementWithinRootOrScrollAsync(container, itemLocator, controlWalker, cancellationToken);
+
+            TryScrollIntoView(item);
+            SelectItemElement(item);
+
+            await Task.Delay(75, cancellationToken);
+            return new SelectItemResponse(Selected: true);
+        }
+
+        if (container.ControlType == ControlType.ComboBox)
+        {
+            var comboBox = container.AsComboBox();
+            if (hasIndex)
             {
-                comboBox.Select(index);
+                comboBox.Select(request.Index!.Value);
             }
             else
             {
@@ -444,39 +460,420 @@ public sealed class AutomationController : IDisposable
             return new SelectItemResponse(Selected: true);
         }
 
-        if (controlType == ControlType.List || string.Equals(className, "ListBox", StringComparison.OrdinalIgnoreCase))
+        var items = EnumerateSelectableItems(container, controlWalker).ToArray();
+
+        if (items.Length == 0)
         {
-            var listBox = element.AsListBox();
-            if (request.Index is int index)
+            throw new InvalidOperationException(
+                $"No selectable items found under locator (ControlType={container.ControlType}, AutomationId={GetAutomationId(container)}, Name={GetName(container)}).");
+        }
+
+        AutomationElement? selectedItem;
+        if (hasIndex)
+        {
+            var index = request.Index!.Value;
+            if (index < 0 || index >= items.Length)
             {
-                listBox.Select(index);
+                throw new InvalidOperationException($"index {index} is out of range (found {items.Length} selectable items).");
             }
-            else
+
+            selectedItem = items[index];
+        }
+        else
+        {
+            var text = request.Text!;
+            selectedItem = FindUniqueItemByName(items, text, out var matches);
+
+            if (matches > 1)
             {
-                listBox.Select(request.Text!);
+                throw new InvalidOperationException($"Item text '{text}' is ambiguous (found {matches}). Provide index or itemLocator.");
+            }
+
+            if (selectedItem is null)
+            {
+                selectedItem = await ScrollSearchUniqueItemByNameAsync(
+                    container,
+                    text,
+                    controlWalker,
+                    cancellationToken);
+            }
+        }
+
+        if (selectedItem is null)
+        {
+            throw new InvalidOperationException("Selected item could not be resolved.");
+        }
+
+        TryScrollIntoView(selectedItem);
+        SelectItemElement(selectedItem);
+
+        await Task.Delay(75, cancellationToken);
+        return new SelectItemResponse(Selected: true);
+    }
+
+    private static AutomationElement ResolveElementWithinRoot(AutomationElement root, ElementLocator locator, ITreeWalker walker)
+    {
+        return TryResolveElementWithinRoot(root, locator, walker)
+            ?? throw new InvalidOperationException("itemLocator did not match any element under the selection container.");
+    }
+
+    private static AutomationElement? TryResolveElementWithinRoot(AutomationElement root, ElementLocator locator, ITreeWalker walker)
+    {
+        if (locator is null)
+        {
+            throw new ArgumentNullException(nameof(locator));
+        }
+
+        var descendants = EnumerateSelfAndDescendantsDepthFirst(root, walker).Skip(1).ToArray();
+
+        if (!string.IsNullOrWhiteSpace(locator.AutomationId))
+        {
+            var matches = descendants
+                .Where(e => string.Equals(GetAutomationId(e), locator.AutomationId, StringComparison.Ordinal))
+                .ToArray();
+
+            var resolved = SelectMatch(matches, locator, "automationId");
+            if (resolved is not null)
+            {
+                return resolved;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.Name))
+        {
+            var matches = descendants
+                .Where(e => string.Equals(GetName(e), locator.Name, StringComparison.Ordinal))
+                .ToArray();
+
+            var resolved = SelectMatch(matches, locator, "name");
+            if (resolved is not null)
+            {
+                return resolved;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ClassName))
+        {
+            var matches = descendants
+                .Where(e => string.Equals(GetClassName(e), locator.ClassName, StringComparison.Ordinal))
+                .ToArray();
+
+            var resolved = SelectMatch(matches, locator, "className");
+            if (resolved is not null)
+            {
+                return resolved;
+            }
+        }
+
+        if (locator.Index is int index &&
+            string.IsNullOrWhiteSpace(locator.AutomationId) &&
+            string.IsNullOrWhiteSpace(locator.Name) &&
+            string.IsNullOrWhiteSpace(locator.ClassName) &&
+            string.IsNullOrWhiteSpace(locator.XPath))
+        {
+            if (index < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(locator), "index must be >= 0.");
+            }
+
+            if (index >= descendants.Length)
+            {
+                return null;
+            }
+
+            return descendants[index];
+        }
+
+        return null;
+    }
+
+    private static async Task<AutomationElement> ResolveElementWithinRootOrScrollAsync(
+        AutomationElement container,
+        ElementLocator locator,
+        ITreeWalker walker,
+        CancellationToken cancellationToken)
+    {
+        var resolved = TryResolveElementWithinRoot(container, locator, walker);
+        if (resolved is not null)
+        {
+            return resolved;
+        }
+
+        if (!TryGetScrollable(container, walker, out var scrollElement))
+        {
+            return ResolveElementWithinRoot(container, locator, walker);
+        }
+
+        var scroll = scrollElement.Patterns.Scroll.PatternOrDefault;
+        if (scroll is null || !scroll.VerticallyScrollable)
+        {
+            return ResolveElementWithinRoot(container, locator, walker);
+        }
+
+        try
+        {
+            var horizontal = scroll.HorizontallyScrollable ? scroll.HorizontalScrollPercent : -1d;
+            scroll.SetScrollPercent(horizontal, 0);
+        }
+        catch
+        {
+        }
+
+        await Task.Delay(75, cancellationToken);
+
+        var maxScrollSteps = 50;
+        double? lastPercent = null;
+        for (var step = 0; step <= maxScrollSteps; step++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            resolved = TryResolveElementWithinRoot(container, locator, walker);
+            if (resolved is not null)
+            {
+                return resolved;
+            }
+
+            var beforePercent = TryGetScrollPercent(scroll, vertical: true);
+            if (beforePercent is not null && beforePercent >= 100)
+            {
+                break;
+            }
+
+            try
+            {
+                scrollElement.Focus();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                scroll.Scroll(ScrollAmount.NoAmount, ScrollAmount.LargeIncrement);
+            }
+            catch
+            {
+                break;
             }
 
             await Task.Delay(75, cancellationToken);
-            return new SelectItemResponse(Selected: true);
+
+            var afterPercent = TryGetScrollPercent(scroll, vertical: true);
+            if (afterPercent is not null && lastPercent is not null && Math.Abs(afterPercent.Value - lastPercent.Value) < 0.0001)
+            {
+                break;
+            }
+
+            lastPercent = afterPercent;
         }
 
-        if (controlType == ControlType.Tab || string.Equals(className, "TabControl", StringComparison.OrdinalIgnoreCase))
+        return ResolveElementWithinRoot(container, locator, walker);
+    }
+
+    private static IEnumerable<AutomationElement> EnumerateSelectableItems(AutomationElement root, ITreeWalker walker) =>
+        EnumerateSelfAndDescendantsDepthFirst(root, walker)
+            .Skip(1)
+            .Where(HasSelectionItemPattern);
+
+    private static bool HasSelectionItemPattern(AutomationElement element)
+    {
+        try
         {
-            var tab = element.AsTab();
-            if (request.Index is int index)
+            return element.Patterns.SelectionItem.IsSupported;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void SelectItemElement(AutomationElement item)
+    {
+        try
+        {
+            var selectionItem = item.Patterns.SelectionItem.PatternOrDefault;
+            if (selectionItem is not null)
             {
-                tab.SelectTabItem(index);
+                selectionItem.Select();
+                return;
             }
-            else
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var invoke = item.Patterns.Invoke.PatternOrDefault;
+            if (invoke is not null)
             {
-                tab.SelectTabItem(request.Text!);
+                invoke.Invoke();
+                return;
+            }
+        }
+        catch
+        {
+        }
+
+        var point = GetClickPoint(item);
+        Mouse.LeftClick(point);
+    }
+
+    private static AutomationElement? FindUniqueItemByName(
+        IReadOnlyList<AutomationElement> items,
+        string text,
+        out int matches)
+    {
+        matches = 0;
+        AutomationElement? match = null;
+
+        foreach (var item in items)
+        {
+            var name = GetName(item);
+            if (!string.Equals(name, text, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            matches++;
+            if (matches == 1)
+            {
+                match = item;
+            }
+        }
+
+        return match;
+    }
+
+    private static bool TryGetScrollable(AutomationElement root, ITreeWalker walker, out AutomationElement scrollElement)
+    {
+        scrollElement = null!;
+
+        foreach (var element in EnumerateSelfAndDescendantsDepthFirst(root, walker))
+        {
+            try
+            {
+                var scroll = element.Patterns.Scroll.PatternOrDefault;
+                if (scroll is not null && scroll.VerticallyScrollable)
+                {
+                    scrollElement = element;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task<AutomationElement> ScrollSearchUniqueItemByNameAsync(
+        AutomationElement container,
+        string text,
+        ITreeWalker walker,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetScrollable(container, walker, out var scrollElement))
+        {
+            throw new InvalidOperationException(
+                $"Item text '{text}' not found (scanned current view) and container is not scrollable. Consider itemLocator.");
+        }
+
+        var scroll = scrollElement.Patterns.Scroll.PatternOrDefault;
+        if (scroll is null || !scroll.VerticallyScrollable)
+        {
+            throw new InvalidOperationException(
+                $"Item text '{text}' not found (scanned current view) and container is not vertically scrollable. Consider itemLocator.");
+        }
+
+        try
+        {
+            var horizontal = scroll.HorizontallyScrollable ? scroll.HorizontalScrollPercent : -1d;
+            scroll.SetScrollPercent(horizontal, 0);
+        }
+        catch
+        {
+        }
+
+        await Task.Delay(75, cancellationToken);
+
+        var maxScrollSteps = 50;
+        var scanned = 0;
+
+        double? lastPercent = null;
+        for (var step = 0; step <= maxScrollSteps; step++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var items = EnumerateSelectableItems(container, walker).ToArray();
+            scanned += items.Length;
+
+            var candidate = FindUniqueItemByName(items, text, out var matches);
+            if (matches == 1 && candidate is not null)
+            {
+                return candidate;
+            }
+
+            if (matches > 1)
+            {
+                throw new InvalidOperationException($"Item text '{text}' is ambiguous (found {matches}). Provide index or itemLocator.");
+            }
+
+            var beforePercent = TryGetScrollPercent(scroll, vertical: true);
+            if (beforePercent is not null && beforePercent >= 100)
+            {
+                break;
+            }
+
+            try
+            {
+                scrollElement.Focus();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                scroll.Scroll(ScrollAmount.NoAmount, ScrollAmount.LargeIncrement);
+            }
+            catch
+            {
+                break;
             }
 
             await Task.Delay(75, cancellationToken);
-            return new SelectItemResponse(Selected: true);
+
+            var afterPercent = TryGetScrollPercent(scroll, vertical: true);
+            if (afterPercent is not null && lastPercent is not null && Math.Abs(afterPercent.Value - lastPercent.Value) < 0.0001)
+            {
+                break;
+            }
+
+            lastPercent = afterPercent;
         }
 
-        throw new InvalidOperationException($"select_item is not supported for element type '{controlType}' (ClassName='{className}').");
+        throw new InvalidOperationException(
+            $"Item text '{text}' not found (scanned ~{scanned} items across scroll attempts). Consider itemLocator.");
+    }
+
+    private static double? TryGetScrollPercent(IScrollPattern scrollPattern, bool vertical)
+    {
+        try
+        {
+            var value = vertical ? scrollPattern.VerticalScrollPercent : scrollPattern.HorizontalScrollPercent;
+            if (double.IsNaN(value))
+            {
+                return null;
+            }
+
+            return value;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static Bitmap CaptureWindowScreen(Window window, CaptureSettings captureSettings)
