@@ -1,0 +1,415 @@
+﻿{
+  Root: {
+    ElementType: Window,
+    AutomationId: ,
+    Name: WpfPilot TestApp,
+    ClassName: Window,
+    Bounds: {
+      Width: 900,
+      Height: 650
+    },
+    IsEnabled: true,
+    IsOffscreen: false,
+    XPath: /Window,
+    Children: [
+      {
+        ElementType: TitleBar,
+        AutomationId: TitleBar,
+        Bounds: {
+          Width: 868,
+          Height: 28
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TitleBar,
+        Children: [
+          {
+            ElementType: MenuBar,
+            AutomationId: SystemMenuBar,
+            Name: System,
+            Bounds: {
+              Width: 22,
+              Height: 22
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/TitleBar/MenuBar,
+            Children: [
+              {
+                ElementType: MenuItem,
+                Name: System,
+                Bounds: {
+                  Width: 22,
+                  Height: 22
+                },
+                IsEnabled: true,
+                IsOffscreen: false,
+                XPath: /Window/TitleBar/MenuBar/MenuItem
+              }
+            ]
+          },
+          {
+            ElementType: Button,
+            AutomationId: Close,
+            Name: Close,
+            Bounds: {
+              Width: 34,
+              Height: 30
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/TitleBar/Button
+          }
+        ]
+      },
+      {
+        ElementType: Text,
+        AutomationId: Basic_Header,
+        Name: WpfPilot.TestApp — Basic Controls,
+        ClassName: TextBlock,
+        Bounds: {
+          Width: 852,
+          Height: 32
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBlock[1]
+      },
+      {
+        ElementType: Button,
+        AutomationId: Basic_Button,
+        Name: Click me,
+        ClassName: Button,
+        Bounds: {
+          Width: 160,
+          Height: 20
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/Button[1],
+        Children: [
+          {
+            ElementType: Text,
+            AutomationId: ,
+            Name: Click me,
+            ClassName: TextBlock,
+            Bounds: {
+              Width: 45,
+              Height: 16
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/Button[1]/TextBlock
+          }
+        ]
+      },
+      {
+        ElementType: Text,
+        AutomationId: ,
+        Name: TextBox:,
+        ClassName: TextBlock,
+        Bounds: {
+          Width: 420,
+          Height: 16
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBlock[2]
+      },
+      {
+        ElementType: Edit,
+        AutomationId: Basic_TextBox,
+        Name: ,
+        ClassName: TextBox,
+        Bounds: {
+          Width: 240,
+          Height: 18
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBox,
+        Children: [
+          {
+            ElementType: Pane,
+            AutomationId: PART_ContentHost,
+            Name: ,
+            ClassName: ScrollViewer,
+            Bounds: {
+              Width: 238,
+              Height: 16
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/TextBox/ScrollViewer,
+            Children: [
+              {
+                ElementType: ScrollBar,
+                AutomationId: VerticalScrollBar,
+                Name: ,
+                ClassName: ScrollBar,
+                Bounds: {},
+                IsEnabled: false,
+                IsOffscreen: true,
+                XPath: /Window/TextBox/ScrollViewer/ScrollBar[1]
+              },
+              {
+                ElementType: ScrollBar,
+                AutomationId: HorizontalScrollBar,
+                Name: ,
+                ClassName: ScrollBar,
+                Bounds: {},
+                IsEnabled: false,
+                IsOffscreen: true,
+                XPath: /Window/TextBox/ScrollViewer/ScrollBar[2]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        ElementType: CheckBox,
+        AutomationId: Basic_CheckBox,
+        Name: I agree,
+        ClassName: CheckBox,
+        Bounds: {
+          Width: 420,
+          Height: 15
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/CheckBox,
+        Children: [
+          {
+            ElementType: Text,
+            AutomationId: ,
+            Name: I agree,
+            ClassName: TextBlock,
+            Bounds: {
+              Width: 36,
+              Height: 16
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/CheckBox/TextBlock
+          }
+        ]
+      },
+      {
+        ElementType: Text,
+        AutomationId: ,
+        Name: ComboBox:,
+        ClassName: TextBlock,
+        Bounds: {
+          Width: 420,
+          Height: 16
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBlock[3]
+      },
+      {
+        ElementType: ComboBox,
+        AutomationId: Basic_ComboBox,
+        Name: ,
+        ClassName: ComboBox,
+        Bounds: {
+          Width: 240,
+          Height: 22
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/ComboBox
+      },
+      {
+        ElementType: Text,
+        AutomationId: ,
+        Name: Slider:,
+        ClassName: TextBlock,
+        Bounds: {
+          Width: 420,
+          Height: 16
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBlock[4]
+      },
+      {
+        ElementType: Slider,
+        AutomationId: Basic_Slider,
+        Name: ,
+        ClassName: Slider,
+        Bounds: {
+          Width: 240,
+          Height: 18
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/Slider,
+        Children: [
+          {
+            ElementType: Button,
+            AutomationId: DecreaseLarge,
+            Name: ,
+            ClassName: RepeatButton,
+            Bounds: {
+              Width: 57,
+              Height: 18
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/Slider/RepeatButton[1]
+          },
+          {
+            ElementType: Button,
+            AutomationId: IncreaseLarge,
+            Name: ,
+            ClassName: RepeatButton,
+            Bounds: {
+              Width: 172,
+              Height: 18
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/Slider/RepeatButton[2]
+          },
+          {
+            ElementType: Thumb,
+            AutomationId: Thumb,
+            Name: ,
+            ClassName: Thumb,
+            Bounds: {
+              Width: 11,
+              Height: 18
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/Slider/Thumb
+          }
+        ]
+      },
+      {
+        ElementType: Text,
+        AutomationId: ,
+        Name: XPath Demo:,
+        ClassName: TextBlock,
+        Bounds: {
+          Width: 420,
+          Height: 16
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBlock[5]
+      },
+      {
+        ElementType: Text,
+        AutomationId: ,
+        Name: Left Panel,
+        ClassName: TextBlock,
+        Bounds: {
+          Width: 198,
+          Height: 16
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBlock[6]
+      },
+      {
+        ElementType: Button,
+        AutomationId: XPathDemo_Left_Button1,
+        Name: Alpha,
+        ClassName: Button,
+        Bounds: {
+          Width: 120,
+          Height: 20
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/Button[2],
+        Children: [
+          {
+            ElementType: Text,
+            AutomationId: ,
+            Name: Alpha,
+            ClassName: TextBlock,
+            Bounds: {
+              Width: 31,
+              Height: 16
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/Button[2]/TextBlock
+          }
+        ]
+      },
+      {
+        ElementType: Button,
+        AutomationId: XPathDemo_Left_Button2,
+        Name: Alpha,
+        ClassName: Button,
+        Bounds: {
+          Width: 120,
+          Height: 20
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/Button[3],
+        Children: [
+          {
+            ElementType: Text,
+            AutomationId: ,
+            Name: Alpha,
+            ClassName: TextBlock,
+            Bounds: {
+              Width: 31,
+              Height: 16
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/Button[3]/TextBlock
+          }
+        ]
+      },
+      {
+        ElementType: Text,
+        AutomationId: ,
+        Name: Right Panel,
+        ClassName: TextBlock,
+        Bounds: {
+          Width: 210,
+          Height: 16
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/TextBlock[7]
+      },
+      {
+        ElementType: Button,
+        AutomationId: XPathDemo_Right_Button1,
+        Name: Beta,
+        ClassName: Button,
+        Bounds: {
+          Width: 120,
+          Height: 20
+        },
+        IsEnabled: true,
+        IsOffscreen: false,
+        XPath: /Window/Button[4],
+        Children: [
+          {
+            ElementType: Text,
+            AutomationId: ,
+            Name: Beta,
+            ClassName: TextBlock,
+            Bounds: {
+              Width: 23,
+              Height: 16
+            },
+            IsEnabled: true,
+            IsOffscreen: false,
+            XPath: /Window/Button[4]/TextBlock
+          }
+        ]
+      }
+    ]
+  }
+}

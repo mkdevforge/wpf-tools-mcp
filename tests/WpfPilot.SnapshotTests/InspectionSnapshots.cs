@@ -1,0 +1,162 @@
+using System.Threading;
+using ImageMagick;
+using NUnit.Framework;
+using VerifyNUnit;
+using VerifyTests;
+using WpfPilot.Contracts;
+
+namespace WpfPilot.SnapshotTests;
+
+[TestFixture]
+[NonParallelizable]
+[Apartment(ApartmentState.STA)]
+public sealed class InspectionSnapshots
+{
+    private McpTestContext _mcp = null!;
+
+    [OneTimeSetUp]
+    public async Task OneTimeSetUp()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        _mcp = await McpTestContext.StartAsync(serverExe);
+
+        var exePath = TestAppPaths.FindTestAppExecutable();
+        var workingDirectory = Path.GetDirectoryName(exePath)!;
+
+        _ = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        {
+            ["exePath"] = exePath,
+            ["workingDirectory"] = workingDirectory,
+        });
+    }
+
+    [OneTimeTearDown]
+    public async Task OneTimeTearDown()
+    {
+        if (_mcp is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+            {
+                ["force"] = true,
+                ["timeoutMs"] = 2000
+            });
+        }
+        catch
+        {
+        }
+
+        await _mcp.DisposeAsync();
+    }
+
+    [Test]
+    public async Task GetVisualTree_main_window_snapshot()
+    {
+        var result = await _mcp.CallToolAsync<GetVisualTreeResponse>("get_visual_tree", new Dictionary<string, object?>
+        {
+            ["depth"] = 4
+        });
+
+        static VisualTreeNode Scrub(VisualTreeNode node) =>
+            node with
+            {
+                Bounds = node.Bounds with { X = 0, Y = 0 },
+                Children = node.Children.Select(Scrub).ToArray()
+            };
+
+        await Verifier.Verify(result with { Root = Scrub(result.Root) });
+    }
+
+    [Test]
+    public async Task GetElementProperties_textbox_snapshot()
+    {
+        var result = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+        {
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "Basic_TextBox"
+            }
+        });
+
+        var stable = new
+        {
+            Element = result.Element with { Bounds = result.Element.Bounds with { X = 0, Y = 0 } },
+            PropertyKeys = result.Properties.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray(),
+            PatternKeys = result.Patterns.Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray(),
+            ValuePattern = result.Patterns.TryGetValue("Value", out var valuePattern) ? valuePattern?.ToJsonString() : null
+        };
+
+        await Verifier.Verify(stable);
+    }
+
+    [Test]
+    public async Task TakeScreenshot_element_verified_png()
+    {
+        var screenshot = await _mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
+        {
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "Basic_Button"
+            }
+        });
+
+        Assert.That(screenshot.Width, Is.GreaterThan(0));
+        Assert.That(screenshot.Height, Is.GreaterThan(0));
+
+        var bytes = Convert.FromBase64String(screenshot.PngBase64);
+        var path = Path.Combine(Path.GetTempPath(), $"WpfPilot.TestApp.Element.{Guid.NewGuid():N}.png");
+        await File.WriteAllBytesAsync(path, bytes);
+
+        try
+        {
+            var settings = new VerifySettings();
+            settings.ImageMagickComparer(threshold: 0.02, metric: ErrorMetric.Fuzz);
+            await Verifier.VerifyFile(path, settings);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Test]
+    public async Task LocatorStrategies_resolve_snapshot()
+    {
+        async Task<ElementSummary> ResolveAsync(Dictionary<string, object?> locator) =>
+            (await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = locator
+            })).Element;
+
+        var xpathTarget = await ResolveAsync(new Dictionary<string, object?> { ["automationId"] = "XPathDemo_Right_Button1" });
+
+        var resolved = new[]
+        {
+            new { Strategy = "automationId", Element = await ResolveAsync(new Dictionary<string, object?> { ["automationId"] = "Basic_TextBox" }) },
+            new { Strategy = "name", Element = await ResolveAsync(new Dictionary<string, object?> { ["name"] = "Right Panel" }) },
+            new { Strategy = "className", Element = await ResolveAsync(new Dictionary<string, object?> { ["className"] = "Slider" }) },
+            new { Strategy = "xpath", Element = await ResolveAsync(new Dictionary<string, object?> { ["xpath"] = xpathTarget.XPath }) },
+            new { Strategy = "index-disambiguation", Element = await ResolveAsync(new Dictionary<string, object?> { ["name"] = "Alpha", ["index"] = 0 }) },
+        };
+
+        var stable = resolved
+            .Select(r => new
+            {
+                r.Strategy,
+                Element = r.Element with { Bounds = r.Element.Bounds with { X = 0, Y = 0 } }
+            })
+            .ToArray();
+
+        await Verifier.Verify(stable);
+    }
+}

@@ -1,0 +1,82 @@
+﻿[
+  {
+    Strategy: automationId,
+    Element: {
+      ElementType: Edit,
+      AutomationId: Basic_TextBox,
+      Name: ,
+      ClassName: TextBox,
+      Bounds: {
+        Width: 240,
+        Height: 18
+      },
+      IsEnabled: true,
+      IsOffscreen: false,
+      XPath: /Window/TextBox
+    }
+  },
+  {
+    Strategy: name,
+    Element: {
+      ElementType: Text,
+      AutomationId: ,
+      Name: Right Panel,
+      ClassName: TextBlock,
+      Bounds: {
+        Width: 210,
+        Height: 16
+      },
+      IsEnabled: true,
+      IsOffscreen: false,
+      XPath: /Window/TextBlock[7]
+    }
+  },
+  {
+    Strategy: className,
+    Element: {
+      ElementType: Slider,
+      AutomationId: Basic_Slider,
+      Name: ,
+      ClassName: Slider,
+      Bounds: {
+        Width: 240,
+        Height: 18
+      },
+      IsEnabled: true,
+      IsOffscreen: false,
+      XPath: /Window/Slider
+    }
+  },
+  {
+    Strategy: xpath,
+    Element: {
+      ElementType: Button,
+      AutomationId: XPathDemo_Right_Button1,
+      Name: Beta,
+      ClassName: Button,
+      Bounds: {
+        Width: 120,
+        Height: 20
+      },
+      IsEnabled: true,
+      IsOffscreen: false,
+      XPath: /Window/Button[4]
+    }
+  },
+  {
+    Strategy: index-disambiguation,
+    Element: {
+      ElementType: Button,
+      AutomationId: XPathDemo_Left_Button1,
+      Name: Alpha,
+      ClassName: Button,
+      Bounds: {
+        Width: 120,
+        Height: 20
+      },
+      IsEnabled: true,
+      IsOffscreen: false,
+      XPath: /Window/Button[2]
+    }
+  }
+]
