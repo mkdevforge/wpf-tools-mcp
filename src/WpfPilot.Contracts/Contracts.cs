@@ -1,5 +1,8 @@
 namespace WpfPilot.Contracts;
 
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+
 public sealed record LaunchAppRequest(
     string ExePath,
     IReadOnlyList<string>? Args = null,
@@ -26,6 +29,52 @@ public sealed record WindowInfo(
 
 public sealed record Rect(int X, int Y, int Width, int Height);
 
-public sealed record TakeScreenshotRequest(long? WindowHandle = null);
+public sealed record ElementLocator(
+    [property: JsonPropertyName("automationId")] string? AutomationId = null,
+    [property: JsonPropertyName("name")] string? Name = null,
+    [property: JsonPropertyName("className")] string? ClassName = null,
+    [property: JsonPropertyName("xpath")] string? XPath = null,
+    [property: JsonPropertyName("index")] int? Index = null);
+
+public sealed record VisualTreeNode(
+    string ElementType,
+    string? AutomationId,
+    string? Name,
+    string? ClassName,
+    Rect Bounds,
+    bool IsEnabled,
+    bool IsOffscreen,
+    string XPath,
+    IReadOnlyList<VisualTreeNode> Children);
+
+public sealed record GetVisualTreeResponse(VisualTreeNode Root);
+
+public sealed record ElementSummary(
+    string ElementType,
+    string? AutomationId,
+    string? Name,
+    string? ClassName,
+    Rect Bounds,
+    bool IsEnabled,
+    bool IsOffscreen,
+    string XPath);
+
+public sealed record GetElementPropertiesResponse(
+    ElementSummary Element,
+    IReadOnlyDictionary<string, JsonNode?> Properties,
+    IReadOnlyDictionary<string, JsonNode?> Patterns);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ScreenshotCaptureMode
+{
+    Screen,
+    PrintWindow,
+    Auto
+}
+
+public sealed record TakeScreenshotRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    ScreenshotCaptureMode CaptureMode = ScreenshotCaptureMode.Screen);
 
 public sealed record TakeScreenshotResponse(string PngBase64, int Width, int Height);

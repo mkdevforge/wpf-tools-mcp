@@ -70,6 +70,45 @@
                     Width="240"
                     Margin="0,0,0,12"
                     HorizontalAlignment="Left" />
+
+            <TextBlock Text="XPath Demo:"
+                       Margin="0,8,0,4" />
+
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0"
+                            Margin="0,0,12,0">
+                    <TextBlock Text="Left Panel"
+                               Foreground="Gray"
+                               Margin="0,0,0,4" />
+
+                    <Button AutomationProperties.AutomationId="XPathDemo_Left_Button1"
+                            Content="Alpha"
+                            Width="120"
+                            Margin="0,0,0,6"
+                            HorizontalAlignment="Left" />
+
+                    <Button AutomationProperties.AutomationId="XPathDemo_Left_Button2"
+                            Content="Alpha"
+                            Width="120"
+                            HorizontalAlignment="Left" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Right Panel"
+                               Foreground="Gray"
+                               Margin="0,0,0,4" />
+
+                    <Button AutomationProperties.AutomationId="XPathDemo_Right_Button1"
+                            Content="Beta"
+                            Width="120"
+                            HorizontalAlignment="Left" />
+                </StackPanel>
+            </Grid>
         </StackPanel>
     </Grid>
 </Window>

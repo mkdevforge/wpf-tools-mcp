@@ -480,3 +480,7 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Verify (approval test) artifacts
+*.received.*
+tests/WpfPilot.SnapshotTests/_Artifacts/

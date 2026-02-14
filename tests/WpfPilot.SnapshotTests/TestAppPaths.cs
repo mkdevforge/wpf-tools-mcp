@@ -4,18 +4,8 @@ internal static class TestAppPaths
 {
     public static string FindTestAppExecutable()
     {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null && !File.Exists(Path.Combine(current.FullName, "WpfPilot.slnx")))
-        {
-            current = current.Parent;
-        }
-
-        if (current is null)
-        {
-            throw new DirectoryNotFoundException("Could not locate repo root containing 'WpfPilot.slnx'.");
-        }
-
-        var binRoot = Path.Combine(current.FullName, "src", "WpfPilot.TestApp", "bin");
+        var repoRoot = RepoRoot.Find();
+        var binRoot = Path.Combine(repoRoot, "src", "WpfPilot.TestApp", "bin");
         if (!Directory.Exists(binRoot))
         {
             throw new DirectoryNotFoundException($"Could not find test app output directory: '{binRoot}'.");
@@ -35,4 +25,3 @@ internal static class TestAppPaths
             .First();
     }
 }
-

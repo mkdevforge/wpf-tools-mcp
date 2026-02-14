@@ -3,7 +3,6 @@ using ImageMagick;
 using NUnit.Framework;
 using VerifyNUnit;
 using VerifyTests;
-using WpfPilot.Automation;
 using WpfPilot.Contracts;
 
 namespace WpfPilot.SnapshotTests;
@@ -13,42 +12,51 @@ namespace WpfPilot.SnapshotTests;
 [Apartment(ApartmentState.STA)]
 public sealed class WalkingSkeletonSnapshots
 {
-    private AutomationController _automation = null!;
+    private McpTestContext _mcp = null!;
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
     {
-        _automation = new AutomationController();
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        _mcp = await McpTestContext.StartAsync(serverExe);
 
         var exePath = TestAppPaths.FindTestAppExecutable();
         var workingDirectory = Path.GetDirectoryName(exePath)!;
 
-        await _automation.LaunchAsync(new LaunchAppRequest(exePath, WorkingDirectory: workingDirectory));
+        _ = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        {
+            ["exePath"] = exePath,
+            ["workingDirectory"] = workingDirectory,
+        });
     }
 
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
-        if (_automation is null)
+        if (_mcp is null)
         {
             return;
         }
 
         try
         {
-            await _automation.CloseAsync(new CloseAppRequest(Force: true, TimeoutMs: 2000));
+            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+            {
+                ["force"] = true,
+                ["timeoutMs"] = 2000
+            });
         }
         catch
         {
         }
 
-        _automation.Dispose();
+        await _mcp.DisposeAsync();
     }
 
     [Test]
     public async Task ListWindows_snapshot()
     {
-        var result = await _automation.ListWindowsAsync();
+        var result = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows");
 
         var stable = result with
         {
@@ -64,7 +72,10 @@ public sealed class WalkingSkeletonSnapshots
     [Test]
     public async Task TakeScreenshot_main_window_verified_png()
     {
-        var screenshot = await _automation.TakeScreenshotAsync(new TakeScreenshotRequest());
+        var screenshot = await _mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
+        {
+            ["captureMode"] = "auto"
+        });
         Assert.That(screenshot.Width, Is.GreaterThan(0));
         Assert.That(screenshot.Height, Is.GreaterThan(0));
 

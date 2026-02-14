@@ -50,6 +50,41 @@ public static class AppTools
     public static Task<TakeScreenshotResponse> TakeScreenshot(
         AutomationController automation,
         [Description("Native window handle")] long? windowHandle = null,
+        [Description("Optional element locator for element-only screenshot")] ElementLocator? locator = null,
+        [Description("Capture mode: screen | printWindow | auto")] string? captureMode = null,
         CancellationToken cancellationToken = default) =>
-        automation.TakeScreenshotAsync(new TakeScreenshotRequest(windowHandle), cancellationToken);
+        automation.TakeScreenshotAsync(
+            new TakeScreenshotRequest(windowHandle, locator, ParseCaptureMode(captureMode)),
+            cancellationToken);
+
+    private static ScreenshotCaptureMode ParseCaptureMode(string? captureMode)
+    {
+        if (string.IsNullOrWhiteSpace(captureMode))
+        {
+            return ScreenshotCaptureMode.Screen;
+        }
+
+        var value = captureMode.Trim();
+        if (value.Equals("screen", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("bitblt", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("gdi", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScreenshotCaptureMode.Screen;
+        }
+
+        if (value.Equals("printWindow", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("print_window", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("printwindow", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("pw", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScreenshotCaptureMode.PrintWindow;
+        }
+
+        if (value.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScreenshotCaptureMode.Auto;
+        }
+
+        throw new ArgumentException($"Unknown captureMode '{captureMode}'. Valid values: screen, printWindow, auto.");
+    }
 }
