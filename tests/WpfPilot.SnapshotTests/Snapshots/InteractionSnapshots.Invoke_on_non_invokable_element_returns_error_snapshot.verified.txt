@@ -1,1 +1,1 @@
-﻿Tool 'invoke' failed: An error occurred invoking 'invoke'.
+Tool 'invoke' failed: An error occurred invoking 'invoke': InvokePattern not supported for element (ControlType=Slider, AutomationId=Basic_Slider, Name=).

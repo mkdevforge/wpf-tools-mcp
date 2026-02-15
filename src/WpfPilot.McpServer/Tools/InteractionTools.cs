@@ -15,12 +15,15 @@ public static class InteractionTools
         [Description("Window title (exact match first, then contains)")] string? title = null,
         CancellationToken cancellationToken = default)
     {
-        if (windowHandle is not null && !string.IsNullOrWhiteSpace(title))
+        return McpToolErrors.RunAsync(() =>
         {
-            throw new ArgumentException("Provide either windowHandle or title, not both.");
-        }
+            if (windowHandle is not null && !string.IsNullOrWhiteSpace(title))
+            {
+                throw new ArgumentException("Provide either windowHandle or title, not both.");
+            }
 
-        return automation.FocusWindowAsync(new FocusWindowRequest(windowHandle, title), cancellationToken);
+            return automation.FocusWindowAsync(new FocusWindowRequest(windowHandle, title), cancellationToken);
+        });
     }
 
     [McpServerTool(Name = "click_element"), Description("Click an element by locator.")]
@@ -31,9 +34,10 @@ public static class InteractionTools
         [Description("Click type: single | double | right")] string? clickType = null,
         [Description("Click mode: auto | mouseAlways | invokePreferred")] string? clickMode = null,
         CancellationToken cancellationToken = default) =>
-        automation.ClickElementAsync(
-            new ClickElementRequest(locator, windowHandle, ParseClickType(clickType), ParseClickMode(clickMode)),
-            cancellationToken);
+        McpToolErrors.RunAsync(() =>
+            automation.ClickElementAsync(
+                new ClickElementRequest(locator, windowHandle, ParseClickType(clickType), ParseClickMode(clickMode)),
+                cancellationToken));
 
     [McpServerTool(Name = "invoke"), Description("Invoke an element via InvokePattern.")]
     public static Task<InvokeResponse> Invoke(
@@ -41,7 +45,7 @@ public static class InteractionTools
         [Description("Element locator")] ElementLocator locator,
         [Description("Optional native window handle")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
-        automation.InvokeAsync(new InvokeRequest(locator, windowHandle), cancellationToken);
+        McpToolErrors.RunAsync(() => automation.InvokeAsync(new InvokeRequest(locator, windowHandle), cancellationToken));
 
     [McpServerTool(Name = "type_text"), Description("Type text into a focused or specified element.")]
     public static Task<TypeTextResponse> TypeText(
@@ -50,7 +54,7 @@ public static class InteractionTools
         [Description("Text to enter")] string text,
         [Description("Optional native window handle")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
-        automation.TypeTextAsync(new TypeTextRequest(locator, text, windowHandle), cancellationToken);
+        McpToolErrors.RunAsync(() => automation.TypeTextAsync(new TypeTextRequest(locator, text, windowHandle), cancellationToken));
 
     [McpServerTool(Name = "set_value"), Description("Set a numeric value (RangeValue/ValuePattern).")]
     public static Task<SetValueResponse> SetValue(
@@ -59,7 +63,7 @@ public static class InteractionTools
         [Description("Numeric value to set")] double value,
         [Description("Optional native window handle")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
-        automation.SetValueAsync(new SetValueRequest(locator, value, windowHandle), cancellationToken);
+        McpToolErrors.RunAsync(() => automation.SetValueAsync(new SetValueRequest(locator, value, windowHandle), cancellationToken));
 
     [McpServerTool(Name = "select_item"), Description("Select an item in a combo box, list box, or tab control.")]
     public static Task<SelectItemResponse> SelectItem(
@@ -70,7 +74,8 @@ public static class InteractionTools
         [Description("Optional item locator (select a specific item element)")] ElementLocator? itemLocator = null,
         [Description("Optional native window handle")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
-        automation.SelectItemAsync(new SelectItemRequest(locator, text, index, windowHandle, itemLocator), cancellationToken);
+        McpToolErrors.RunAsync(() =>
+            automation.SelectItemAsync(new SelectItemRequest(locator, text, index, windowHandle, itemLocator), cancellationToken));
 
     private static ClickType ParseClickType(string? clickType)
     {
