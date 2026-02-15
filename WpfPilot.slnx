@@ -6,6 +6,7 @@
     <Project Path="src/WpfPilot.TestApp/WpfPilot.TestApp.csproj" />
     <Project Path="src/WpfPilot.TestApp.Minimal/WpfPilot.TestApp.Minimal.csproj" />
     <Project Path="src/WpfPilot.TestApp.BrokenAutomation/WpfPilot.TestApp.BrokenAutomation.csproj" />
+    <Project Path="src/WpfPilot.TestApp.Scroll/WpfPilot.TestApp.Scroll.csproj" />
     <Project Path="src/WpfPilot.TestApp.Tabs/WpfPilot.TestApp.Tabs.csproj" />
     <Project Path="src/WpfPilot.TestApp.TreeView/WpfPilot.TestApp.TreeView.csproj" />
     <Project Path="src/WpfPilot.Tool/WpfPilot.Tool.csproj" />

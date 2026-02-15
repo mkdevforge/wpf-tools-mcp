@@ -127,3 +127,10 @@ public sealed record SelectItemRequest(
     ElementLocator? ItemLocator = null);
 
 public sealed record SelectItemResponse(bool Selected);
+
+public sealed record ScrollToElementRequest(
+    ElementLocator Locator,
+    long? WindowHandle = null,
+    ElementLocator? ContainerLocator = null);
+
+public sealed record ScrollToElementResponse(bool Scrolled, string MethodUsed);

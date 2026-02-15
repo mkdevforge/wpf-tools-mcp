@@ -33,6 +33,8 @@ internal static class TestAppPaths
 
     public static string FindMinimalTestAppExecutable() => FindExecutable("WpfPilot.TestApp.Minimal", "WpfPilot.TestApp.Minimal");
 
+    public static string FindScrollTestAppExecutable() => FindExecutable("WpfPilot.TestApp.Scroll", "WpfPilot.TestApp.Scroll");
+
     public static string FindBrokenAutomationTestAppExecutable() =>
         FindExecutable("WpfPilot.TestApp.BrokenAutomation", "WpfPilot.TestApp.BrokenAutomation");
 }

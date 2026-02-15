@@ -524,10 +524,413 @@ public sealed class AutomationController : IDisposable
         return new SelectItemResponse(Selected: true);
     }
 
+    public async Task<ScrollToElementResponse> ScrollToElementAsync(
+        ScrollToElementRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Locator);
+
+        var application = EnsureAttached();
+        var automation = EnsureAutomation();
+
+        var window = request.WindowHandle is long requestedHandle
+            ? FindWindowByHandle(application, automation, requestedHandle)
+            : FindMainWindow(application, automation);
+
+        window.SetForeground();
+        window.Focus();
+        await Task.Delay(100, cancellationToken);
+
+        var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+        var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+
+        AutomationElement? container = null;
+        if (request.ContainerLocator is not null)
+        {
+            container = ResolveElement(window, request.ContainerLocator, controlWalker, rawWalker);
+            TryScrollIntoView(container);
+        }
+
+        AutomationElement element;
+        var scrolledDuringSearch = false;
+
+        if (container is not null && string.IsNullOrWhiteSpace(request.Locator.XPath))
+        {
+            (element, scrolledDuringSearch) = await ResolveElementWithinContainerOrScrollAsync(
+                container,
+                request.Locator,
+                controlWalker,
+                cancellationToken);
+        }
+        else
+        {
+            element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
+        }
+
+        var (bringIntoViewMethod, scrolledBringingIntoView) = await ScrollElementIntoViewAsync(
+            container,
+            element,
+            controlWalker,
+            rawWalker,
+            cancellationToken);
+
+        var methodUsed = scrolledDuringSearch
+            ? bringIntoViewMethod == "alreadyVisible"
+                ? "scrollSearch"
+                : $"scrollSearch+{bringIntoViewMethod}"
+            : bringIntoViewMethod;
+
+        return new ScrollToElementResponse(
+            Scrolled: scrolledDuringSearch || scrolledBringingIntoView,
+            MethodUsed: methodUsed);
+    }
+
     private static AutomationElement ResolveElementWithinRoot(AutomationElement root, ElementLocator locator, ITreeWalker walker)
     {
         return TryResolveElementWithinRoot(root, locator, walker)
             ?? throw new InvalidOperationException("itemLocator did not match any element under the selection container.");
+    }
+
+    private static async Task<(AutomationElement Element, bool Scrolled)> ResolveElementWithinContainerOrScrollAsync(
+        AutomationElement container,
+        ElementLocator locator,
+        ITreeWalker walker,
+        CancellationToken cancellationToken)
+    {
+        var resolved = TryResolveElementWithinRoot(container, locator, walker);
+        if (resolved is not null)
+        {
+            return (resolved, false);
+        }
+
+        if (!TryGetScrollable(container, walker, out var scrollElement))
+        {
+            throw new InvalidOperationException(
+                "Locator did not match any element under the container and the container is not scrollable. Consider a different containerLocator.");
+        }
+
+        var scroll = scrollElement.Patterns.Scroll.PatternOrDefault;
+        if (scroll is null || !scroll.VerticallyScrollable)
+        {
+            throw new InvalidOperationException(
+                "Locator did not match any element under the container and the container is not vertically scrollable. Consider a different containerLocator.");
+        }
+
+        try
+        {
+            var horizontal = scroll.HorizontallyScrollable ? scroll.HorizontalScrollPercent : -1d;
+            scroll.SetScrollPercent(horizontal, 0);
+        }
+        catch
+        {
+        }
+
+        await Task.Delay(75, cancellationToken);
+
+        var maxScrollSteps = 50;
+        double? lastPercent = null;
+        for (var step = 0; step <= maxScrollSteps; step++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            resolved = TryResolveElementWithinRoot(container, locator, walker);
+            if (resolved is not null)
+            {
+                return (resolved, true);
+            }
+
+            var beforePercent = TryGetScrollPercent(scroll, vertical: true);
+            if (beforePercent is not null && beforePercent >= 100)
+            {
+                break;
+            }
+
+            try
+            {
+                scrollElement.Focus();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                scroll.Scroll(ScrollAmount.NoAmount, ScrollAmount.LargeIncrement);
+            }
+            catch
+            {
+                break;
+            }
+
+            await Task.Delay(75, cancellationToken);
+
+            var afterPercent = TryGetScrollPercent(scroll, vertical: true);
+            if (afterPercent is not null && lastPercent is not null && Math.Abs(afterPercent.Value - lastPercent.Value) < 0.0001)
+            {
+                break;
+            }
+
+            lastPercent = afterPercent;
+        }
+
+        throw new InvalidOperationException(
+            "Locator did not match any element under the container (after scrolling). Consider refining the locator.");
+    }
+
+    private static async Task<(string MethodUsed, bool Scrolled)> ScrollElementIntoViewAsync(
+        AutomationElement? preferredContainer,
+        AutomationElement element,
+        ITreeWalker controlWalker,
+        ITreeWalker rawWalker,
+        CancellationToken cancellationToken)
+    {
+        AutomationElement? scrollElement = null;
+        IScrollPattern? scrollPattern = null;
+
+        if (preferredContainer is not null &&
+            TryGetScrollableAny(preferredContainer, controlWalker, out scrollElement, out scrollPattern))
+        {
+        }
+        else if (TryGetScrollableAncestor(element, rawWalker, out scrollElement, out scrollPattern))
+        {
+        }
+
+        var needsScroll = element.IsOffscreen ||
+            (scrollElement is not null && IsElementOutsideViewport(scrollElement, element));
+
+        if (!needsScroll)
+        {
+            return ("alreadyVisible", false);
+        }
+
+        try
+        {
+            var scrollItem = element.Patterns.ScrollItem.PatternOrDefault;
+            if (scrollItem is not null)
+            {
+                scrollItem.ScrollIntoView();
+                await Task.Delay(75, cancellationToken);
+
+                needsScroll = element.IsOffscreen ||
+                    (scrollElement is not null && IsElementOutsideViewport(scrollElement, element));
+
+                if (!needsScroll)
+                {
+                    return ("scrollItem", true);
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        if (scrollElement is null || scrollPattern is null)
+        {
+            if (!TryGetScrollableAncestor(element, rawWalker, out scrollElement, out scrollPattern))
+            {
+                throw new InvalidOperationException(
+                    "Failed to scroll element into view because no scrollable container was found (no ScrollItemPattern and no ScrollPattern).");
+            }
+        }
+
+        await ScrollPatternBringIntoViewAsync(scrollElement, scrollPattern, element, cancellationToken);
+        return ("scrollPattern", true);
+    }
+
+    private static async Task ScrollPatternBringIntoViewAsync(
+        AutomationElement scrollElement,
+        IScrollPattern scrollPattern,
+        AutomationElement element,
+        CancellationToken cancellationToken)
+    {
+        var maxScrollSteps = 60;
+        double? lastVertical = null;
+        double? lastHorizontal = null;
+
+        for (var step = 0; step < maxScrollSteps; step++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!IsElementOutsideViewport(scrollElement, element))
+            {
+                return;
+            }
+
+            var containerBounds = scrollElement.BoundingRectangle;
+            var elementBounds = element.BoundingRectangle;
+
+            var vertical = ScrollAmount.NoAmount;
+            var horizontal = ScrollAmount.NoAmount;
+
+            if (scrollPattern.VerticallyScrollable)
+            {
+                if (elementBounds.Bottom <= containerBounds.Top)
+                {
+                    vertical = ScrollAmount.LargeDecrement;
+                }
+                else if (elementBounds.Top >= containerBounds.Bottom)
+                {
+                    vertical = ScrollAmount.LargeIncrement;
+                }
+            }
+
+            if (horizontal == ScrollAmount.NoAmount && scrollPattern.HorizontallyScrollable)
+            {
+                if (elementBounds.Right <= containerBounds.Left)
+                {
+                    horizontal = ScrollAmount.LargeDecrement;
+                }
+                else if (elementBounds.Left >= containerBounds.Right)
+                {
+                    horizontal = ScrollAmount.LargeIncrement;
+                }
+            }
+
+            if (vertical == ScrollAmount.NoAmount && horizontal == ScrollAmount.NoAmount)
+            {
+                break;
+            }
+
+            try
+            {
+                scrollElement.Focus();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                scrollPattern.Scroll(horizontal, vertical);
+            }
+            catch
+            {
+                break;
+            }
+
+            await Task.Delay(75, cancellationToken);
+
+            if (scrollPattern.VerticallyScrollable)
+            {
+                var percent = TryGetScrollPercent(scrollPattern, vertical: true);
+                if (percent is not null && lastVertical is not null && Math.Abs(percent.Value - lastVertical.Value) < 0.0001)
+                {
+                    break;
+                }
+
+                lastVertical = percent;
+            }
+
+            if (scrollPattern.HorizontallyScrollable)
+            {
+                var percent = TryGetScrollPercent(scrollPattern, vertical: false);
+                if (percent is not null && lastHorizontal is not null && Math.Abs(percent.Value - lastHorizontal.Value) < 0.0001)
+                {
+                    break;
+                }
+
+                lastHorizontal = percent;
+            }
+        }
+
+        if (IsElementOutsideViewport(scrollElement, element))
+        {
+            throw new InvalidOperationException("Failed to scroll element into view.");
+        }
+    }
+
+    private static bool IsElementOutsideViewport(AutomationElement scrollElement, AutomationElement element)
+    {
+        try
+        {
+            var containerBounds = scrollElement.BoundingRectangle;
+            var elementBounds = element.BoundingRectangle;
+
+            if (containerBounds.Width <= 0 || containerBounds.Height <= 0 ||
+                elementBounds.Width <= 0 || elementBounds.Height <= 0)
+            {
+                return element.IsOffscreen;
+            }
+
+            return element.IsOffscreen ||
+                elementBounds.Bottom <= containerBounds.Top ||
+                elementBounds.Top >= containerBounds.Bottom ||
+                elementBounds.Right <= containerBounds.Left ||
+                elementBounds.Left >= containerBounds.Right;
+        }
+        catch
+        {
+            return element.IsOffscreen;
+        }
+    }
+
+    private static bool TryGetScrollableAny(
+        AutomationElement root,
+        ITreeWalker walker,
+        out AutomationElement scrollElement,
+        out IScrollPattern scrollPattern)
+    {
+        scrollElement = null!;
+        scrollPattern = null!;
+
+        foreach (var element in EnumerateSelfAndDescendantsDepthFirst(root, walker))
+        {
+            try
+            {
+                var scroll = element.Patterns.Scroll.PatternOrDefault;
+                if (scroll is not null && (scroll.VerticallyScrollable || scroll.HorizontallyScrollable))
+                {
+                    scrollElement = element;
+                    scrollPattern = scroll;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetScrollableAncestor(
+        AutomationElement element,
+        ITreeWalker walker,
+        out AutomationElement scrollElement,
+        out IScrollPattern scrollPattern)
+    {
+        scrollElement = null!;
+        scrollPattern = null!;
+
+        AutomationElement? current = element;
+        for (var step = 0; step < 200 && current is not null; step++)
+        {
+            try
+            {
+                var scroll = current.Patterns.Scroll.PatternOrDefault;
+                if (scroll is not null && (scroll.VerticallyScrollable || scroll.HorizontallyScrollable))
+                {
+                    scrollElement = current;
+                    scrollPattern = scroll;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                current = walker.GetParent(current);
+            }
+            catch
+            {
+                current = null;
+            }
+        }
+
+        return false;
     }
 
     private static AutomationElement? TryResolveElementWithinRoot(AutomationElement root, ElementLocator locator, ITreeWalker walker)

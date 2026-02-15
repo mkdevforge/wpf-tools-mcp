@@ -77,6 +77,16 @@ public static class InteractionTools
         McpToolErrors.RunAsync(() =>
             automation.SelectItemAsync(new SelectItemRequest(locator, text, index, windowHandle, itemLocator), cancellationToken));
 
+    [McpServerTool(Name = "scroll_to_element"), Description("Scroll a container to bring an element into view.")]
+    public static Task<ScrollToElementResponse> ScrollToElement(
+        AutomationController automation,
+        [Description("Target element locator")] ElementLocator locator,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Optional container locator (preferred scroll root)")] ElementLocator? containerLocator = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+            automation.ScrollToElementAsync(new ScrollToElementRequest(locator, windowHandle, containerLocator), cancellationToken));
+
     private static ClickType ParseClickType(string? clickType)
     {
         if (string.IsNullOrWhiteSpace(clickType))
