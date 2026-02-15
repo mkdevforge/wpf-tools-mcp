@@ -1,0 +1,96 @@
+<Window x:Class="WpfPilot.TestApp.DataGrid.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="WpfPilot DataGrid TestApp"
+        Width="900"
+        Height="650"
+        ResizeMode="NoResize"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        Left="100"
+        Top="100"
+        Background="White"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="WpfPilot.TestApp.DataGrid — DataGrid"
+                   FontSize="24"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <StackPanel Grid.Row="1" Width="740">
+            <TextBlock Text="Double-click the Name cell to edit, then use type_text on the editor."
+                       Foreground="Gray"
+                       Margin="0,0,0,8" />
+
+            <DataGrid x:Name="PeopleGrid"
+                      AutomationProperties.AutomationId="DataGrid_PeopleGrid"
+                      ItemsSource="{Binding People}"
+                      SelectedItem="{Binding SelectedPerson, Mode=TwoWay}"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      IsReadOnly="False"
+                      SelectionUnit="FullRow"
+                      Height="420"
+                      Width="740"
+                      Margin="0,0,0,12"
+                      HorizontalAlignment="Left">
+                <DataGrid.RowStyle>
+                    <Style TargetType="{x:Type DataGridRow}">
+                        <Setter Property="AutomationProperties.AutomationId"
+                                Value="{Binding AutomationId}" />
+                    </Style>
+                </DataGrid.RowStyle>
+
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Name"
+                                        Binding="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                        <DataGridTextColumn.CellStyle>
+                            <Style TargetType="{x:Type DataGridCell}">
+                                <Setter Property="AutomationProperties.AutomationId"
+                                        Value="{Binding AutomationId, StringFormat={}{0}_NameCell}" />
+                            </Style>
+                        </DataGridTextColumn.CellStyle>
+                        <DataGridTextColumn.EditingElementStyle>
+                            <Style TargetType="{x:Type TextBox}">
+                                <Setter Property="AutomationProperties.AutomationId"
+                                        Value="DataGrid_NameEditor" />
+                            </Style>
+                        </DataGridTextColumn.EditingElementStyle>
+                    </DataGridTextColumn>
+
+                    <DataGridTextColumn Header="Age"
+                                        Binding="{Binding Age, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                        <DataGridTextColumn.CellStyle>
+                            <Style TargetType="{x:Type DataGridCell}">
+                                <Setter Property="AutomationProperties.AutomationId"
+                                        Value="{Binding AutomationId, StringFormat={}{0}_AgeCell}" />
+                            </Style>
+                        </DataGridTextColumn.CellStyle>
+                        <DataGridTextColumn.EditingElementStyle>
+                            <Style TargetType="{x:Type TextBox}">
+                                <Setter Property="AutomationProperties.AutomationId"
+                                        Value="DataGrid_AgeEditor" />
+                            </Style>
+                        </DataGridTextColumn.EditingElementStyle>
+                    </DataGridTextColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <TextBlock AutomationProperties.AutomationId="DataGrid_SelectedStatus"
+                       Text="{Binding SelectedStatus}"
+                       Margin="0,0,0,12" />
+        </StackPanel>
+    </Grid>
+</Window>
+

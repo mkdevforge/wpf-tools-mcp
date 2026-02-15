@@ -1,0 +1,11 @@
+﻿{
+  Add: {
+    Clicked: true,
+    MethodUsed: invoke
+  },
+  Click: {
+    Clicked: true,
+    MethodUsed: mouse
+  },
+  Status: Clicks: 1
+}

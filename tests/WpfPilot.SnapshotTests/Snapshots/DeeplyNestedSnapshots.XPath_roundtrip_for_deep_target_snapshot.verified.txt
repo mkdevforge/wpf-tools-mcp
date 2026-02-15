@@ -1,0 +1,30 @@
+﻿{
+  Target: {
+    ElementType: Button,
+    AutomationId: Nested_TargetButton,
+    Name: Deep target,
+    ClassName: Button,
+    Bounds: {
+      Width: 160,
+      Height: 32
+    },
+    IsEnabled: true,
+    IsOffscreen: false,
+    XPath: /Window/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/Button
+  },
+  XPath: /Window/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/Button,
+  SegmentCount: 20,
+  Resolved: {
+    ElementType: Button,
+    AutomationId: Nested_TargetButton,
+    Name: Deep target,
+    ClassName: Button,
+    Bounds: {
+      Width: 160,
+      Height: 32
+    },
+    IsEnabled: true,
+    IsOffscreen: false,
+    XPath: /Window/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/LevelBorder/Button
+  }
+}

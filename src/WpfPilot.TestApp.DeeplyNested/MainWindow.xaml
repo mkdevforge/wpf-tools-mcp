@@ -1,0 +1,35 @@
+<Window x:Class="WpfPilot.TestApp.DeeplyNested.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="WpfPilot DeeplyNested TestApp"
+        Width="900"
+        Height="650"
+        ResizeMode="NoResize"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        Left="100"
+        Top="100"
+        Background="White"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="WpfPilot.TestApp.DeeplyNested — Deep nesting"
+                   FontSize="24"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <Grid Grid.Row="1">
+            <ContentControl x:Name="RootHost" />
+        </Grid>
+    </Grid>
+</Window>
+

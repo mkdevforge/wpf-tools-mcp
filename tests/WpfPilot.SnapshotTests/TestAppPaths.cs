@@ -33,6 +33,19 @@ internal static class TestAppPaths
 
     public static string FindMinimalTestAppExecutable() => FindExecutable("WpfPilot.TestApp.Minimal", "WpfPilot.TestApp.Minimal");
 
+    public static string FindDataGridTestAppExecutable() => FindExecutable("WpfPilot.TestApp.DataGrid", "WpfPilot.TestApp.DataGrid");
+
+    public static string FindDialogsTestAppExecutable() => FindExecutable("WpfPilot.TestApp.Dialogs", "WpfPilot.TestApp.Dialogs");
+
+    public static string FindDynamicContentTestAppExecutable() =>
+        FindExecutable("WpfPilot.TestApp.DynamicContent", "WpfPilot.TestApp.DynamicContent");
+
+    public static string FindDeeplyNestedTestAppExecutable() =>
+        FindExecutable("WpfPilot.TestApp.DeeplyNested", "WpfPilot.TestApp.DeeplyNested");
+
+    public static string FindCustomControlsTestAppExecutable() =>
+        FindExecutable("WpfPilot.TestApp.CustomControls", "WpfPilot.TestApp.CustomControls");
+
     public static string FindScrollTestAppExecutable() => FindExecutable("WpfPilot.TestApp.Scroll", "WpfPilot.TestApp.Scroll");
 
     public static string FindBrokenAutomationTestAppExecutable() =>

@@ -1,0 +1,16 @@
+﻿{
+  SelectCell: {
+    Clicked: true,
+    MethodUsed: mouse
+  },
+  StatusBefore: Selected: Alice (Age=30),
+  EnterEdit: {
+    Clicked: true,
+    MethodUsed: mouse
+  },
+  Typed: {
+    Typed: true,
+    MethodUsed: valuePattern
+  },
+  StatusAfter: Selected: Alicia (Age=30)
+}

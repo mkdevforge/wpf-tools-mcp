@@ -128,7 +128,7 @@ public sealed class AutomationController : IDisposable
 
         application.WaitWhileMainHandleIsMissing(TimeSpan.FromSeconds(10));
 
-        var windows = application.GetAllTopLevelWindows(automation)
+        var windows = GetAllTopLevelWindows(application, automation)
             .Select(ToWindowInfo)
             .ToArray();
 
@@ -1650,6 +1650,17 @@ public sealed class AutomationController : IDisposable
         return ClientToScreen(hwnd, ref clientTopLeft);
     }
 
+    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
+
     [DllImport("user32.dll")]
     private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
 
@@ -1779,9 +1790,81 @@ public sealed class AutomationController : IDisposable
         return window;
     }
 
+    private static IReadOnlyList<Window> GetAllTopLevelWindows(Application application, UIA3Automation automation)
+    {
+        var windows = application.GetAllTopLevelWindows(automation).ToList();
+        var handles = new HashSet<long>(windows.Select(w => w.Properties.NativeWindowHandle.Value.ToInt64()));
+
+        foreach (var hwnd in EnumerateVisibleTopLevelWindowHandles(application.ProcessId))
+        {
+            var handle = hwnd.ToInt64();
+            if (!handles.Add(handle))
+            {
+                continue;
+            }
+
+            try
+            {
+                var element = automation.FromHandle(hwnd);
+                var window = element.AsWindow();
+
+                var bounds = window.BoundingRectangle;
+                if (bounds.Width <= 0 || bounds.Height <= 0)
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(window.Title))
+                {
+                    continue;
+                }
+
+                windows.Add(window);
+            }
+            catch
+            {
+            }
+        }
+
+        return windows;
+    }
+
+    private static IReadOnlyList<IntPtr> EnumerateVisibleTopLevelWindowHandles(int processId)
+    {
+        var handles = new List<IntPtr>();
+
+        EnumWindows(
+            (hwnd, lParam) =>
+            {
+                try
+                {
+                    GetWindowThreadProcessId(hwnd, out var windowProcessId);
+                    if (windowProcessId != processId)
+                    {
+                        return true;
+                    }
+
+                    if (!IsWindowVisible(hwnd))
+                    {
+                        return true;
+                    }
+
+                    handles.Add(hwnd);
+                    return true;
+                }
+                catch
+                {
+                    return true;
+                }
+            },
+            IntPtr.Zero);
+
+        return handles;
+    }
+
     private static Window FindWindowByHandle(Application application, UIA3Automation automation, long nativeWindowHandle)
     {
-        var windows = application.GetAllTopLevelWindows(automation);
+        var windows = GetAllTopLevelWindows(application, automation);
         var window = windows.FirstOrDefault(w => w.Properties.NativeWindowHandle.Value.ToInt64() == nativeWindowHandle);
         if (window is null)
         {
@@ -1795,7 +1878,7 @@ public sealed class AutomationController : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
 
-        var windows = application.GetAllTopLevelWindows(automation).ToArray();
+        var windows = GetAllTopLevelWindows(application, automation).ToArray();
 
         var exact = windows
             .Where(w => w is not null && string.Equals(w.Title, title, StringComparison.OrdinalIgnoreCase))

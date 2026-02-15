@@ -1,0 +1,48 @@
+<Window x:Class="WpfPilot.TestApp.DynamicContent.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="WpfPilot DynamicContent TestApp"
+        Width="900"
+        Height="650"
+        ResizeMode="NoResize"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        Left="100"
+        Top="100"
+        Background="White"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="WpfPilot.TestApp.DynamicContent — Dynamic UI"
+                   FontSize="24"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <StackPanel Grid.Row="1" Width="520">
+            <Button AutomationProperties.AutomationId="Dynamic_AddButton"
+                    Content="Add dynamic button"
+                    Width="200"
+                    Margin="0,0,0,12"
+                    HorizontalAlignment="Left"
+                    Click="AddDynamicButton_Click" />
+
+            <StackPanel x:Name="DynamicHost"
+                        Margin="0,0,0,12" />
+
+            <TextBlock x:Name="DynamicStatus"
+                       AutomationProperties.AutomationId="Dynamic_Status"
+                       Text="Clicks: 0"
+                       Margin="0,0,0,12" />
+        </StackPanel>
+    </Grid>
+</Window>
+

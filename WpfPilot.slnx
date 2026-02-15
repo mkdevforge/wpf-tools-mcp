@@ -6,6 +6,11 @@
     <Project Path="src/WpfPilot.TestApp/WpfPilot.TestApp.csproj" />
     <Project Path="src/WpfPilot.TestApp.Minimal/WpfPilot.TestApp.Minimal.csproj" />
     <Project Path="src/WpfPilot.TestApp.BrokenAutomation/WpfPilot.TestApp.BrokenAutomation.csproj" />
+    <Project Path="src/WpfPilot.TestApp.CustomControls/WpfPilot.TestApp.CustomControls.csproj" />
+    <Project Path="src/WpfPilot.TestApp.DataGrid/WpfPilot.TestApp.DataGrid.csproj" />
+    <Project Path="src/WpfPilot.TestApp.DeeplyNested/WpfPilot.TestApp.DeeplyNested.csproj" />
+    <Project Path="src/WpfPilot.TestApp.Dialogs/WpfPilot.TestApp.Dialogs.csproj" />
+    <Project Path="src/WpfPilot.TestApp.DynamicContent/WpfPilot.TestApp.DynamicContent.csproj" />
     <Project Path="src/WpfPilot.TestApp.Scroll/WpfPilot.TestApp.Scroll.csproj" />
     <Project Path="src/WpfPilot.TestApp.Tabs/WpfPilot.TestApp.Tabs.csproj" />
     <Project Path="src/WpfPilot.TestApp.TreeView/WpfPilot.TestApp.TreeView.csproj" />

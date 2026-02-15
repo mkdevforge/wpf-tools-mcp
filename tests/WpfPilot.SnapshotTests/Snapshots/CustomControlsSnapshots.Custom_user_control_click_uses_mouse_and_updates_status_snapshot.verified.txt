@@ -1,0 +1,7 @@
+﻿{
+  Click: {
+    Clicked: true,
+    MethodUsed: mouse
+  },
+  Status: Clicks: 1
+}
