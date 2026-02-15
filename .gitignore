@@ -484,3 +484,6 @@ $RECYCLE.BIN/
 # Verify (approval test) artifacts
 *.received.*
 tests/WpfPilot.SnapshotTests/_Artifacts/
+
+# local refs
+references/
