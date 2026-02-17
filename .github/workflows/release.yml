@@ -25,7 +25,9 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Restore
-        run: dotnet restore src/WpfPilot.Tool/WpfPilot.Tool.csproj
+        run: |
+          dotnet restore src/WpfPilot.Tool/WpfPilot.Tool.csproj
+          dotnet restore tests/WpfPilot.SnapshotTests/WpfPilot.SnapshotTests.csproj
 
       - name: Build Snoop payloads (Release)
         run: pwsh scripts/build-snoop.ps1 -Configuration Release
@@ -47,4 +49,3 @@ jobs:
 
       - name: Publish packages
         run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
-
