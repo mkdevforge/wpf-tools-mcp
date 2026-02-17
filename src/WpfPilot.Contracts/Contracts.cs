@@ -18,6 +18,8 @@ public sealed record CloseAppRequest(bool Force = false, int TimeoutMs = 5000);
 
 public sealed record CloseAppResponse(bool Closed);
 
+public sealed record ResetStateResponse(bool Reset);
+
 public sealed record ListWindowsResponse(int ProcessId, string ProcessName, IReadOnlyList<WindowInfo> Windows);
 
 public sealed record WindowInfo(

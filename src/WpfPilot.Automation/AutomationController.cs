@@ -28,7 +28,7 @@ public sealed partial class AutomationController : IDisposable
     private static readonly int UiDelayScrollMs = GetEnvInt("WPFPILOT_UI_SCROLL_DELAY_MS", defaultValue: 35, minValue: 0, maxValue: 1000);
     private static readonly int UiDelayWindowSettleMs = GetEnvInt("WPFPILOT_UI_WINDOW_SETTLE_MS", defaultValue: 60, minValue: 0, maxValue: 5000);
 
-    public bool IsAttached => _application is not null && !_application.HasExited;
+    public bool IsAttached => IsApplicationRunning(_application);
 
     public void Dispose()
     {
@@ -118,14 +118,22 @@ public sealed partial class AutomationController : IDisposable
             }
         }
 
-        _application = Application.Launch(startInfo);
-        _application.WaitWhileMainHandleIsMissing(TimeSpan.FromSeconds(10));
-        _application.WaitWhileBusy(TimeSpan.FromSeconds(10));
-        _automation = new UIA3Automation();
-        _ = FindMainWindow(_application, _automation);
+        try
+        {
+            _application = Application.Launch(startInfo);
+            _application.WaitWhileMainHandleIsMissing(TimeSpan.FromSeconds(10));
+            _application.WaitWhileBusy(TimeSpan.FromSeconds(10));
+            _automation = new UIA3Automation();
+            _ = FindMainWindow(_application, _automation);
 
-        var response = new LaunchAppResponse(_application.ProcessId, _application.Name);
-        return Task.FromResult(response);
+            var response = new LaunchAppResponse(_application.ProcessId, _application.Name);
+            return Task.FromResult(response);
+        }
+        catch
+        {
+            Cleanup();
+            throw;
+        }
     }
 
     public Task<AttachToAppResponse> AttachAsync(AttachToAppRequest request, CancellationToken cancellationToken = default)
@@ -137,35 +145,63 @@ public sealed partial class AutomationController : IDisposable
             throw new ArgumentException("Provide either pid or processName, not both.");
         }
 
-        if (request.Pid is int pid)
+        try
         {
-            _application = Application.Attach(pid);
-        }
-        else if (!string.IsNullOrWhiteSpace(request.ProcessName))
-        {
-            _application = Application.Attach(request.ProcessName);
-        }
-        else
-        {
-            throw new ArgumentException("Either pid or processName must be provided.");
-        }
+            if (request.Pid is int pid)
+            {
+                _application = Application.Attach(pid);
+            }
+            else if (!string.IsNullOrWhiteSpace(request.ProcessName))
+            {
+                _application = Application.Attach(request.ProcessName);
+            }
+            else
+            {
+                throw new ArgumentException("Either pid or processName must be provided.");
+            }
 
-        _application.WaitWhileMainHandleIsMissing(TimeSpan.FromSeconds(10));
-        _application.WaitWhileBusy(TimeSpan.FromSeconds(10));
-        _automation = new UIA3Automation();
-        _ = FindMainWindow(_application, _automation);
+            _application.WaitWhileMainHandleIsMissing(TimeSpan.FromSeconds(10));
+            _application.WaitWhileBusy(TimeSpan.FromSeconds(10));
+            _automation = new UIA3Automation();
+            _ = FindMainWindow(_application, _automation);
 
-        var response = new AttachToAppResponse(_application.ProcessId, _application.Name);
-        return Task.FromResult(response);
+            var response = new AttachToAppResponse(_application.ProcessId, _application.Name);
+            return Task.FromResult(response);
+        }
+        catch
+        {
+            Cleanup();
+            throw;
+        }
     }
 
     public Task<CloseAppResponse> CloseAsync(CloseAppRequest request, CancellationToken cancellationToken = default)
     {
-        var timeout = request.TimeoutMs <= 0 ? 5000 : request.TimeoutMs;
-        var application = EnsureAttached();
+        if (_application is null)
+        {
+            throw new InvalidOperationException("No application is attached. Call launch_app or attach_to_app first.");
+        }
 
-        application.CloseTimeout = TimeSpan.FromMilliseconds(timeout);
-        var closedGracefully = application.Close(killIfCloseFails: request.Force);
+        var timeout = request.TimeoutMs <= 0 ? 5000 : request.TimeoutMs;
+        var application = _application;
+
+        if (!IsApplicationRunning(application))
+        {
+            Cleanup();
+            return Task.FromResult(new CloseAppResponse(Closed: true));
+        }
+
+        var closedGracefully = false;
+        try
+        {
+            application.CloseTimeout = TimeSpan.FromMilliseconds(timeout);
+            closedGracefully = application.Close(killIfCloseFails: request.Force);
+        }
+        catch (InvalidOperationException)
+        {
+            Cleanup();
+            return Task.FromResult(new CloseAppResponse(Closed: true));
+        }
 
         if (!closedGracefully && request.Force)
         {
@@ -178,9 +214,15 @@ public sealed partial class AutomationController : IDisposable
             }
         }
 
-        var closed = application.HasExited;
+        var closed = !IsApplicationRunning(application);
         Cleanup();
         return Task.FromResult(new CloseAppResponse(closed));
+    }
+
+    public Task<ResetStateResponse> ResetStateAsync(CancellationToken cancellationToken = default)
+    {
+        Cleanup();
+        return Task.FromResult(new ResetStateResponse(Reset: true));
     }
 
     public Task<ListWindowsResponse> ListWindowsAsync(CancellationToken cancellationToken = default)
@@ -2302,16 +2344,46 @@ public sealed partial class AutomationController : IDisposable
 
     private void EnsureNotAttached()
     {
-        if (IsAttached)
+        if (IsApplicationRunning(_application))
         {
             throw new InvalidOperationException("An application is already attached. Call close_app first.");
         }
+
+        Cleanup();
     }
 
-    private Application EnsureAttached() =>
-        _application is not null && !_application.HasExited
-            ? _application
-            : throw new InvalidOperationException("No application is attached. Call launch_app or attach_to_app first.");
+    private Application EnsureAttached()
+    {
+        var application = _application;
+        if (IsApplicationRunning(application))
+        {
+            return application!;
+        }
+
+        Cleanup();
+        throw new InvalidOperationException("No application is attached. Call launch_app or attach_to_app first.");
+    }
+
+    private static bool IsApplicationRunning(Application? application)
+    {
+        if (application is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return !application.HasExited;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
 
     private UIA3Automation EnsureAutomation() =>
         _automation ?? throw new InvalidOperationException("Automation has not been initialized.");

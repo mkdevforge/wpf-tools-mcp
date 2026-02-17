@@ -1,0 +1,18 @@
+{
+  AttachFailure: Tool 'attach_to_app' failed: An error occurred invoking 'attach_to_app': WaitForInputIdle failed.  This could be because the process does not have a graphical interface.,
+  Launch: {
+    Pid: -1,
+    ProcessName: WpfPilot.TestApp
+  },
+  Windows: [
+    {
+      Title: WpfPilot TestApp,
+      Bounds: {
+        Width: 900,
+        Height: 650
+      },
+      IsVisible: true,
+      IsEnabled: true
+    }
+  ]
+}

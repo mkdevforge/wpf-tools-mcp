@@ -49,6 +49,15 @@ public static class AppTools
                 () => automation.CloseAsync(new CloseAppRequest(force, timeoutMs), cancellationToken),
                 cancellationToken));
 
+    [McpServerTool(Name = "reset_state"), Description("Reset controller state and clear any stale attachment.")]
+    public static Task<ResetStateResponse> ResetState(
+        AutomationController automation,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+            automation.RunExclusiveAsync(
+                () => automation.ResetStateAsync(cancellationToken),
+                cancellationToken));
+
     [McpServerTool(Name = "list_windows"), Description("Enumerate all top-level windows of the attached process.")]
     public static Task<ListWindowsResponse> ListWindows(
         AutomationController automation,
