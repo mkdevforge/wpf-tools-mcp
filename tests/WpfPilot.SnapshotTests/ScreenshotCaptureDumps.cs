@@ -31,24 +31,26 @@ public sealed class ScreenshotCaptureDumps
 
         try
         {
-            var screen = await mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
-            {
-                ["captureMode"] = "screen",
-            });
-
-            var printWindow = await mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
-            {
-                ["captureMode"] = "printWindow",
-            });
-
             var artifactsDir = Path.Combine(RepoRoot.Find(), "tests", "WpfPilot.SnapshotTests", "_Artifacts");
             Directory.CreateDirectory(artifactsDir);
 
             var screenPath = Path.Combine(artifactsDir, "MainWindow.screen.png");
             var printWindowPath = Path.Combine(artifactsDir, "MainWindow.printWindow.png");
 
-            await File.WriteAllBytesAsync(screenPath, Convert.FromBase64String(screen.PngBase64));
-            await File.WriteAllBytesAsync(printWindowPath, Convert.FromBase64String(printWindow.PngBase64));
+            var screen = await mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
+            {
+                ["captureMode"] = "screen",
+                ["outputPath"] = screenPath,
+            });
+
+            var printWindow = await mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
+            {
+                ["captureMode"] = "printWindow",
+                ["outputPath"] = printWindowPath,
+            });
+
+            Assert.That(File.Exists(screen.Path), Is.True, $"Screen capture was not created: {screen.Path}");
+            Assert.That(File.Exists(printWindow.Path), Is.True, $"PrintWindow capture was not created: {printWindow.Path}");
 
             TestContext.WriteLine($"Wrote: {screenPath} ({screen.Width}x{screen.Height})");
             TestContext.WriteLine($"Wrote: {printWindowPath} ({printWindow.Width}x{printWindow.Height})");
@@ -69,4 +71,3 @@ public sealed class ScreenshotCaptureDumps
         }
     }
 }
-

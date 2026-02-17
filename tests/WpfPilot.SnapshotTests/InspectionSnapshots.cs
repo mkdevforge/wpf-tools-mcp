@@ -107,10 +107,8 @@ public sealed class InspectionSnapshots
 
         Assert.That(screenshot.Width, Is.GreaterThan(0));
         Assert.That(screenshot.Height, Is.GreaterThan(0));
-
-        var bytes = Convert.FromBase64String(screenshot.PngBase64);
-        var path = Path.Combine(Path.GetTempPath(), $"WpfPilot.TestApp.Element.{Guid.NewGuid():N}.png");
-        await File.WriteAllBytesAsync(path, bytes);
+        Assert.That(File.Exists(screenshot.Path), Is.True, $"Screenshot file was not created: {screenshot.Path}");
+        var path = screenshot.Path;
 
         try
         {

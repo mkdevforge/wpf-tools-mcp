@@ -6,7 +6,9 @@ using System.Text.Json.Serialization;
 public sealed record LaunchAppRequest(
     string ExePath,
     IReadOnlyList<string>? Args = null,
-    string? WorkingDirectory = null);
+    string? WorkingDirectory = null,
+    int WaitForMainWindowMs = 15000,
+    bool ReuseExistingInstance = true);
 
 public sealed record LaunchAppResponse(int Pid, string ProcessName);
 
@@ -74,12 +76,28 @@ public enum ScreenshotCaptureMode
     Auto
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ScreenshotImageFormat
+{
+    Png,
+    Jpeg
+}
+
 public sealed record TakeScreenshotRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
-    ScreenshotCaptureMode CaptureMode = ScreenshotCaptureMode.Screen);
+    ScreenshotCaptureMode CaptureMode = ScreenshotCaptureMode.Screen,
+    ScreenshotImageFormat Format = ScreenshotImageFormat.Png,
+    int JpegQuality = 90,
+    string? OutputPath = null,
+    bool ReturnBase64 = false);
 
-public sealed record TakeScreenshotResponse(string PngBase64, int Width, int Height);
+public sealed record TakeScreenshotResponse(
+    string Path,
+    int Width,
+    int Height,
+    string Format,
+    string? Base64 = null);
 
 public sealed record FocusWindowRequest(long? WindowHandle = null, string? Title = null);
 

@@ -107,7 +107,7 @@ The MCP server manages both channels in Phase 2. Inspection tools route through 
 | Tool | Description | Returns |
 |---|---|---|
 | `list_windows` | Enumerate all windows of the target process | Window titles, handles, dimensions, process info |
-| `take_screenshot` | Capture the target window or a specific element | Base64-encoded PNG |
+| `take_screenshot` | Capture the target window or a specific element | File path + image metadata (`width`, `height`, `format`), optional Base64 payload |
 | `get_visual_tree` | Return the UIA automation tree of a window or subtree | Structured JSON: element type, AutomationId, Name, ClassName, BoundingRectangle, IsEnabled, IsOffscreen. Configurable depth. |
 | `get_element_properties` | Inspect a single element via UIA | All UIA automation properties, supported patterns, current values |
 

@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Windows.Media.Imaging;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Capturing;
@@ -27,6 +28,9 @@ public sealed partial class AutomationController : IDisposable
     private static readonly int UiDelayMs = GetEnvInt("WPFPILOT_UI_DELAY_MS", defaultValue: 30, minValue: 0, maxValue: 1000);
     private static readonly int UiDelayScrollMs = GetEnvInt("WPFPILOT_UI_SCROLL_DELAY_MS", defaultValue: 35, minValue: 0, maxValue: 1000);
     private static readonly int UiDelayWindowSettleMs = GetEnvInt("WPFPILOT_UI_WINDOW_SETTLE_MS", defaultValue: 60, minValue: 0, maxValue: 5000);
+    private static readonly bool ScreenshotDebugEnabled =
+        GetEnvFlag("WPFPILOT_DEBUG_SCREENSHOT") ||
+        GetEnvFlag("WPF_PILOT_DEBUG_SCREENSHOT");
 
     public bool IsAttached => IsApplicationRunning(_application);
 
@@ -89,6 +93,35 @@ public sealed partial class AutomationController : IDisposable
         }
     }
 
+    private static bool GetEnvFlag(string name)
+    {
+        try
+        {
+            var raw = Environment.GetEnvironmentVariable(name);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return false;
+            }
+
+            if (bool.TryParse(raw, out var parsed))
+            {
+                return parsed;
+            }
+
+            return raw.Trim() switch
+            {
+                "1" => true,
+                "yes" => true,
+                "on" => true,
+                _ => false
+            };
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public Task<LaunchAppResponse> LaunchAsync(LaunchAppRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ExePath);
@@ -118,22 +151,122 @@ public sealed partial class AutomationController : IDisposable
             }
         }
 
+        var waitMs = Math.Clamp(request.WaitForMainWindowMs, 1000, 120000);
+        var waitTimeout = TimeSpan.FromMilliseconds(waitMs);
+
         try
         {
             _application = Application.Launch(startInfo);
-            _application.WaitWhileMainHandleIsMissing(TimeSpan.FromSeconds(10));
-            _application.WaitWhileBusy(TimeSpan.FromSeconds(10));
-            _automation = new UIA3Automation();
-            _ = FindMainWindow(_application, _automation);
+            if (TryInitializeApplication(_application, waitTimeout, out var launchInitError))
+            {
+                var launchResponse = new LaunchAppResponse(_application.ProcessId, _application.Name);
+                return Task.FromResult(launchResponse);
+            }
 
-            var response = new LaunchAppResponse(_application.ProcessId, _application.Name);
-            return Task.FromResult(response);
+            if (!request.ReuseExistingInstance)
+            {
+                throw launchInitError ?? new InvalidOperationException("Failed to initialize launched application.");
+            }
+
+            _application.Dispose();
+            _application = null;
+
+            if (TryAttachToExistingInstance(request.ExePath, waitTimeout, out var attachError))
+            {
+                var attachResponse = new LaunchAppResponse(_application!.ProcessId, _application.Name);
+                return Task.FromResult(attachResponse);
+            }
+
+            throw new InvalidOperationException(
+                "Launch failed to resolve a main window and fallback attach to an existing instance was unsuccessful.",
+                attachError ?? launchInitError);
         }
         catch
         {
             Cleanup();
             throw;
         }
+    }
+
+    private bool TryInitializeApplication(Application application, TimeSpan waitTimeout, out Exception? error)
+    {
+        error = null;
+        try
+        {
+            application.WaitWhileMainHandleIsMissing(waitTimeout);
+            application.WaitWhileBusy(waitTimeout);
+            _automation?.Dispose();
+            _automation = new UIA3Automation();
+            _ = FindMainWindow(application, _automation, waitTimeout);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _automation?.Dispose();
+            _automation = null;
+            error = ex;
+            return false;
+        }
+    }
+
+    private bool TryAttachToExistingInstance(string exePath, TimeSpan waitTimeout, out Exception? error)
+    {
+        error = null;
+        var processName = Path.GetFileNameWithoutExtension(exePath);
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            return false;
+        }
+
+        var perAttemptTimeoutMs = Math.Clamp((int)waitTimeout.TotalMilliseconds / 4, 500, 3000);
+        var perAttemptTimeout = TimeSpan.FromMilliseconds(perAttemptTimeoutMs);
+        var deadline = DateTime.UtcNow + waitTimeout;
+
+        while (DateTime.UtcNow <= deadline)
+        {
+            var candidates = Process.GetProcessesByName(processName)
+                .OrderByDescending(p => p.Id)
+                .ToArray();
+
+            foreach (var process in candidates)
+            {
+                try
+                {
+                    if (process.HasExited)
+                    {
+                        continue;
+                    }
+
+                    Application? attached = null;
+                    try
+                    {
+                        attached = Application.Attach(process.Id);
+                        if (!TryInitializeApplication(attached, perAttemptTimeout, out var initError))
+                        {
+                            error = initError;
+                            attached.Dispose();
+                            continue;
+                        }
+
+                        _application = attached;
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        error = ex;
+                        attached?.Dispose();
+                    }
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+
+            Thread.Sleep(200);
+        }
+
+        return false;
     }
 
     public Task<AttachToAppResponse> AttachAsync(AttachToAppRequest request, CancellationToken cancellationToken = default)
@@ -275,10 +408,141 @@ public sealed partial class AutomationController : IDisposable
                 _ => throw new ArgumentOutOfRangeException(nameof(request), $"Unknown capture mode '{mode}'.")
             };
 
-        using var stream = new MemoryStream();
-        bitmapToSave.Save(stream, ImageFormat.Png);
-        var bytes = stream.ToArray();
-        return new TakeScreenshotResponse(Convert.ToBase64String(bytes), bitmapToSave.Width, bitmapToSave.Height);
+        var outputPath = ResolveScreenshotOutputPath(request.OutputPath, request.Format);
+        SaveBitmapWithWic(bitmapToSave, outputPath, request.Format, request.JpegQuality);
+
+        string? base64 = null;
+        if (request.ReturnBase64)
+        {
+            var bytes = await File.ReadAllBytesAsync(outputPath, cancellationToken);
+            base64 = Convert.ToBase64String(bytes);
+        }
+
+        return new TakeScreenshotResponse(
+            Path: outputPath,
+            Width: bitmapToSave.Width,
+            Height: bitmapToSave.Height,
+            Format: GetImageFormatName(request.Format),
+            Base64: base64);
+    }
+
+    private static string ResolveScreenshotOutputPath(string? outputPath, ScreenshotImageFormat format)
+    {
+        if (!string.IsNullOrWhiteSpace(outputPath))
+        {
+            var fullPath = Path.GetFullPath(outputPath);
+            if (string.IsNullOrWhiteSpace(Path.GetExtension(fullPath)))
+            {
+                fullPath = $"{fullPath}.{GetImageFileExtension(format)}";
+            }
+
+            var directory = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            return fullPath;
+        }
+
+        var screenshotDirectory = Environment.GetEnvironmentVariable("WPFPILOT_SCREENSHOT_DIR");
+        if (string.IsNullOrWhiteSpace(screenshotDirectory))
+        {
+            screenshotDirectory = Environment.GetEnvironmentVariable("WPF_PILOT_SCREENSHOT_DIR");
+        }
+
+        if (string.IsNullOrWhiteSpace(screenshotDirectory))
+        {
+            screenshotDirectory = Path.Combine(Path.GetTempPath(), "wpfpilot", "screenshots");
+        }
+
+        Directory.CreateDirectory(screenshotDirectory);
+        var filename = $"screenshot-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}.{GetImageFileExtension(format)}";
+        return Path.Combine(screenshotDirectory, filename);
+    }
+
+    private static string GetImageFileExtension(ScreenshotImageFormat format) =>
+        format switch
+        {
+            ScreenshotImageFormat.Png => "png",
+            ScreenshotImageFormat.Jpeg => "jpg",
+            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported image format.")
+        };
+
+    private static string GetImageFormatName(ScreenshotImageFormat format) =>
+        format switch
+        {
+            ScreenshotImageFormat.Png => "png",
+            ScreenshotImageFormat.Jpeg => "jpeg",
+            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported image format.")
+        };
+
+    private static void SaveBitmapWithWic(Bitmap bitmap, string outputPath, ScreenshotImageFormat format, int jpegQuality)
+    {
+        using var normalized = EnsureArgbBitmap(bitmap);
+        var pixelBytes = CopyBitmapBytes(normalized, out var stride);
+        var bitmapSource = BitmapSource.Create(
+            normalized.Width,
+            normalized.Height,
+            96,
+            96,
+            System.Windows.Media.PixelFormats.Bgra32,
+            palette: null,
+            pixelBytes,
+            stride);
+
+        BitmapEncoder encoder = format switch
+        {
+            ScreenshotImageFormat.Png => new PngBitmapEncoder(),
+            ScreenshotImageFormat.Jpeg => new JpegBitmapEncoder { QualityLevel = Math.Clamp(jpegQuality, 1, 100) },
+            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unsupported image format.")
+        };
+
+        encoder.Frames.Add(BitmapFrame.Create(bitmapSource));
+        using var stream = File.Open(outputPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+        encoder.Save(stream);
+    }
+
+    private static Bitmap EnsureArgbBitmap(Bitmap source)
+    {
+        if (source.PixelFormat == PixelFormat.Format32bppArgb)
+        {
+            return source.Clone(new Rectangle(0, 0, source.Width, source.Height), PixelFormat.Format32bppArgb);
+        }
+
+        var converted = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+        using var graphics = Graphics.FromImage(converted);
+        graphics.DrawImage(source, 0, 0, source.Width, source.Height);
+        return converted;
+    }
+
+    private static byte[] CopyBitmapBytes(Bitmap bitmap, out int stride)
+    {
+        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var bitmapData = bitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var sourceStride = bitmapData.Stride;
+            stride = Math.Abs(sourceStride);
+            var raw = new byte[stride * bitmap.Height];
+            Marshal.Copy(bitmapData.Scan0, raw, 0, raw.Length);
+            if (sourceStride >= 0)
+            {
+                return raw;
+            }
+
+            var flipped = new byte[raw.Length];
+            for (var row = 0; row < bitmap.Height; row++)
+            {
+                Buffer.BlockCopy(raw, (bitmap.Height - row - 1) * stride, flipped, row * stride, stride);
+            }
+
+            return flipped;
+        }
+        finally
+        {
+            bitmap.UnlockBits(bitmapData);
+        }
     }
 
     public async Task<FocusWindowResponse> FocusWindowAsync(
@@ -2091,23 +2355,56 @@ public sealed partial class AutomationController : IDisposable
 
     private static Bitmap? TryCropElementFromClientBitmap(Window window, AutomationElement element, Bitmap clientBitmap)
     {
-        if (!TryGetClientTopLeftScreen(window, out var clientTopLeft))
+        var hwnd = window.Properties.NativeWindowHandle.Value;
+        if (hwnd == IntPtr.Zero)
         {
+            LogScreenshotDebug("TryCropElementFromClientBitmap: window handle is zero.");
+            return null;
+        }
+
+        if (!TryGetClientTopLeftScreen(hwnd, out var clientTopLeft))
+        {
+            LogScreenshotDebug("TryCropElementFromClientBitmap: failed to resolve client top-left.");
+            return null;
+        }
+
+        if (!GetClientRect(hwnd, out var clientRect) || clientRect.Width <= 0 || clientRect.Height <= 0)
+        {
+            LogScreenshotDebug("TryCropElementFromClientBitmap: failed to get client rect.");
             return null;
         }
 
         var bounds = element.BoundingRectangle;
-        var x = bounds.Left - clientTopLeft.X;
-        var y = bounds.Top - clientTopLeft.Y;
-        var width = bounds.Width;
-        var height = bounds.Height;
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            LogScreenshotDebug($"TryCropElementFromClientBitmap: invalid element bounds {FormatRect(bounds)}.");
+            return null;
+        }
+
+        var relLeft = bounds.Left - clientTopLeft.X;
+        var relTop = bounds.Top - clientTopLeft.Y;
+        var relRight = relLeft + bounds.Width;
+        var relBottom = relTop + bounds.Height;
+
+        var scaleX = clientBitmap.Width / (double)clientRect.Width;
+        var scaleY = clientBitmap.Height / (double)clientRect.Height;
+
+        var left = (int)Math.Floor(relLeft * scaleX);
+        var top = (int)Math.Floor(relTop * scaleY);
+        var right = (int)Math.Ceiling(relRight * scaleX);
+        var bottom = (int)Math.Ceiling(relBottom * scaleY);
 
         var crop = Rectangle.Intersect(
             new Rectangle(0, 0, clientBitmap.Width, clientBitmap.Height),
-            new Rectangle(x, y, width, height));
+            new Rectangle(left, top, Math.Max(1, right - left), Math.Max(1, bottom - top)));
+
+        LogScreenshotDebug(
+            $"TryCropElementFromClientBitmap: client={clientRect.Width}x{clientRect.Height}, bitmap={clientBitmap.Width}x{clientBitmap.Height}, " +
+            $"scale=({scaleX:F3},{scaleY:F3}), bounds={FormatRect(bounds)}, crop={FormatRect(crop)}.");
 
         if (crop.Width <= 0 || crop.Height <= 0)
         {
+            LogScreenshotDebug("TryCropElementFromClientBitmap: crop rectangle is empty after intersection.");
             return null;
         }
 
@@ -2117,6 +2414,7 @@ public sealed partial class AutomationController : IDisposable
         }
         catch
         {
+            LogScreenshotDebug("TryCropElementFromClientBitmap: bitmap crop clone failed.");
             return null;
         }
     }
@@ -2136,6 +2434,7 @@ public sealed partial class AutomationController : IDisposable
 
         if (!GetClientRect(hwnd, out var rect))
         {
+            LogScreenshotDebug("TryCaptureClientAreaWithPrintWindow: GetClientRect failed.");
             return null;
         }
 
@@ -2143,6 +2442,7 @@ public sealed partial class AutomationController : IDisposable
         var height = rect.Height;
         if (width <= 0 || height <= 0)
         {
+            LogScreenshotDebug($"TryCaptureClientAreaWithPrintWindow: invalid client size {width}x{height}.");
             return null;
         }
 
@@ -2154,6 +2454,7 @@ public sealed partial class AutomationController : IDisposable
             const uint PW_CLIENTONLY = 0x00000001;
             if (!PrintWindow(hwnd, hdc, PW_CLIENTONLY))
             {
+                LogScreenshotDebug("TryCaptureClientAreaWithPrintWindow: PrintWindow(PW_CLIENTONLY) returned false.");
                 bitmap.Dispose();
                 return null;
             }
@@ -2164,6 +2465,22 @@ public sealed partial class AutomationController : IDisposable
         }
 
         return bitmap;
+    }
+
+    private static void LogScreenshotDebug(string message)
+    {
+        if (!ScreenshotDebugEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            Console.Error.WriteLine($"[WpfPilot:screenshot] {message}");
+        }
+        catch
+        {
+        }
     }
 
     private static bool TryGetWindowClientCrop(Window window, out Rectangle crop)
@@ -2388,9 +2705,9 @@ public sealed partial class AutomationController : IDisposable
     private UIA3Automation EnsureAutomation() =>
         _automation ?? throw new InvalidOperationException("Automation has not been initialized.");
 
-    private static Window FindMainWindow(Application application, UIA3Automation automation)
+    private static Window FindMainWindow(Application application, UIA3Automation automation, TimeSpan? timeout = null)
     {
-        var window = application.GetMainWindow(automation, TimeSpan.FromSeconds(10));
+        var window = application.GetMainWindow(automation, timeout ?? TimeSpan.FromSeconds(10));
         if (window is null)
         {
             throw new InvalidOperationException("Failed to find the main window within the timeout.");

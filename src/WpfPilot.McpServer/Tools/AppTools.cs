@@ -14,10 +14,19 @@ public static class AppTools
         [Description("Executable path")] string exePath,
         [Description("Optional arguments")] string[]? args = null,
         [Description("Optional working directory")] string? workingDirectory = null,
+        [Description("How long to wait for the app main window before considering fallback logic (ms)")] int waitForMainWindowMs = 15000,
+        [Description("If launch cannot resolve a main window, try attaching to an existing instance")] bool reuseExistingInstance = true,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
             automation.RunExclusiveAsync(
-                () => automation.LaunchAsync(new LaunchAppRequest(exePath, args, workingDirectory), cancellationToken),
+                () => automation.LaunchAsync(
+                    new LaunchAppRequest(
+                        exePath,
+                        args,
+                        workingDirectory,
+                        waitForMainWindowMs,
+                        reuseExistingInstance),
+                    cancellationToken),
                 cancellationToken));
 
     [McpServerTool(Name = "attach_to_app"), Description("Attach to an already running process.")]
@@ -71,11 +80,22 @@ public static class AppTools
         [Description("Native window handle")] long? windowHandle = null,
         [Description("Optional element locator for element-only screenshot")] ElementLocator? locator = null,
         [Description("Capture mode: screen | printWindow | auto")] string? captureMode = null,
+        [Description("Image format: png | jpeg")] string? format = null,
+        [Description("JPEG quality 1-100 (only used when format=jpeg)")] int? jpegQuality = null,
+        [Description("Optional output file path (auto-generated when omitted)")] string? outputPath = null,
+        [Description("Include base64 payload in response (defaults to false)")] bool returnBase64 = false,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
             automation.RunExclusiveAsync(
                 () => automation.TakeScreenshotAsync(
-                    new TakeScreenshotRequest(windowHandle, locator, ParseCaptureMode(captureMode)),
+                    new TakeScreenshotRequest(
+                        windowHandle,
+                        locator,
+                        ParseCaptureMode(captureMode),
+                        ParseImageFormat(format),
+                        jpegQuality ?? 90,
+                        outputPath,
+                        returnBase64),
                     cancellationToken),
                 cancellationToken));
 
@@ -108,5 +128,27 @@ public static class AppTools
         }
 
         throw new ArgumentException($"Unknown captureMode '{captureMode}'. Valid values: screen, printWindow, auto.");
+    }
+
+    private static ScreenshotImageFormat ParseImageFormat(string? format)
+    {
+        if (string.IsNullOrWhiteSpace(format))
+        {
+            return ScreenshotImageFormat.Png;
+        }
+
+        var value = format.Trim();
+        if (value.Equals("png", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScreenshotImageFormat.Png;
+        }
+
+        if (value.Equals("jpeg", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("jpg", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScreenshotImageFormat.Jpeg;
+        }
+
+        throw new ArgumentException($"Unknown format '{format}'. Valid values: png, jpeg.");
     }
 }

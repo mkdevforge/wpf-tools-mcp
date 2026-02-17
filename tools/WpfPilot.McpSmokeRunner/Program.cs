@@ -469,6 +469,9 @@ static async Task<bool> CaptureAsync(
     string captureMode,
     CancellationToken cancellationToken)
 {
+    var requestedPath = Path.Combine(opts.OutDir, relativePath);
+    Directory.CreateDirectory(Path.GetDirectoryName(requestedPath)!);
+
     JsonObject screenshot;
     try
     {
@@ -480,7 +483,8 @@ static async Task<bool> CaptureAsync(
             new JsonObject
             {
                 ["windowHandle"] = windowHandle,
-                ["captureMode"] = captureMode
+                ["captureMode"] = captureMode,
+                ["outputPath"] = requestedPath
             },
             opts,
             cancellationToken);
@@ -490,26 +494,8 @@ static async Task<bool> CaptureAsync(
         return false;
     }
 
-    var base64 = (screenshot["PngBase64"] ?? screenshot["pngBase64"])?.GetValue<string>();
-    if (string.IsNullOrWhiteSpace(base64))
-    {
-        return false;
-    }
-
-    byte[] bytes;
-    try
-    {
-        bytes = Convert.FromBase64String(base64);
-    }
-    catch
-    {
-        return false;
-    }
-
-    var path = Path.Combine(opts.OutDir, relativePath);
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    await File.WriteAllBytesAsync(path, bytes, cancellationToken);
-    return true;
+    var savedPath = (screenshot["Path"] ?? screenshot["path"])?.GetValue<string>() ?? requestedPath;
+    return File.Exists(savedPath);
 }
 
 static async Task<bool> TrySelectAsync(
