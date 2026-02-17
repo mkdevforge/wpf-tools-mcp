@@ -48,4 +48,13 @@ jobs:
           user: ${{ secrets.NUGET_USER }}
 
       - name: Publish packages
-        run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+        shell: pwsh
+        run: |
+          $packages = Get-ChildItem -Path "artifacts" -Filter "*.nupkg" -File -ErrorAction SilentlyContinue
+          if (-not $packages) {
+            throw "No .nupkg files found under 'artifacts'."
+          }
+
+          foreach ($package in $packages) {
+            dotnet nuget push $package.FullName --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+          }
