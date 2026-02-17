@@ -40,6 +40,12 @@ Example (generic MCP config):
 - **ARM64 target processes are not supported** for injection (x86/x64 only).
 - Custom controls that do not expose meaningful UIA peers/patterns may not be interactable via UI Automation.
 
+## Licensing
+
+- WpfPilot source code is licensed under MIT (`LICENSE`).
+- The packaged Phase 2 payload redistributes Snoop components under Ms-PL.
+- See `THIRD_PARTY_NOTICES.md` and `references/snoopwpf/License.txt`.
+
 ## Development
 
 This repo uses a git submodule for Snoop:
@@ -52,4 +58,3 @@ Build the injector payloads (required for Phase 2 injection tools):
 pwsh scripts/build-snoop.ps1 -Configuration Debug
 pwsh scripts/build-snoop.ps1 -Configuration Release
 ```
-

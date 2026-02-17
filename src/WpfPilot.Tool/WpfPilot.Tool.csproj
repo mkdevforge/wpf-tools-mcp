@@ -33,6 +33,8 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+    <None Include="..\..\THIRD_PARTY_NOTICES.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\references\snoopwpf\License.txt" Pack="true" PackagePath="THIRD_PARTY_LICENSES\Snoop-Ms-PL.txt" />
   </ItemGroup>
 
   <Target Name="PublishServerForTool">

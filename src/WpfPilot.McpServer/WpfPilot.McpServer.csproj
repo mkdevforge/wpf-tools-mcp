@@ -22,6 +22,7 @@
   <PropertyGroup>
     <Phase2AgentOutputDir>$(MSBuildProjectDirectory)\..\WpfPilot.Agent\bin\$(Configuration)\net8.0-windows\</Phase2AgentOutputDir>
     <Phase2SnoopBinDir>$(MSBuildProjectDirectory)\..\..\references\snoopwpf\bin\$(Configuration)\</Phase2SnoopBinDir>
+    <Phase2SnoopLicensePath>$(MSBuildProjectDirectory)\..\..\references\snoopwpf\License.txt</Phase2SnoopLicensePath>
   </PropertyGroup>
 
   <Target Name="CopyPhase2Assets" AfterTargets="Build">
@@ -37,8 +38,10 @@
       <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)CommandLine.dll" Condition="Exists('$(Phase2SnoopBinDir)CommandLine.dll')" />
       <Phase2SnoopGenericInjectorPayload Include="$(Phase2SnoopBinDir)Snoop.GenericInjector.*.dll" />
       <Phase2SnoopGenericInjectorPayload Include="$(Phase2SnoopBinDir)Snoop.GenericInjector.*.pdb" />
+      <Phase2SnoopLicensePayload Include="$(Phase2SnoopLicensePath)" Condition="Exists('$(Phase2SnoopLicensePath)')" />
       <Phase2SnoopPayload Include="@(Phase2SnoopLauncherPayload)" />
       <Phase2SnoopPayload Include="@(Phase2SnoopGenericInjectorPayload)" />
+      <Phase2SnoopPayload Include="@(Phase2SnoopLicensePayload)" />
     </ItemGroup>
 
     <MakeDir Directories="$(OutDir)agent\" />
@@ -61,6 +64,10 @@
     <Warning
       Text="Phase 2 Snoop GenericInjector assets not found under '$(Phase2SnoopBinDir)'. Run 'scripts/build-snoop.ps1' to build them (needed for inject_agent / WPF inspection)."
       Condition="@(Phase2SnoopGenericInjectorPayload) == ''" />
+
+    <Warning
+      Text="Phase 2 Snoop license file not found at '$(Phase2SnoopLicensePath)'."
+      Condition="@(Phase2SnoopLicensePayload) == ''" />
   </Target>
 
   <Target Name="CopyPhase2AssetsToPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
@@ -76,8 +83,10 @@
       <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)CommandLine.dll" Condition="Exists('$(Phase2SnoopBinDir)CommandLine.dll')" />
       <Phase2SnoopGenericInjectorPayload Include="$(Phase2SnoopBinDir)Snoop.GenericInjector.*.dll" />
       <Phase2SnoopGenericInjectorPayload Include="$(Phase2SnoopBinDir)Snoop.GenericInjector.*.pdb" />
+      <Phase2SnoopLicensePayload Include="$(Phase2SnoopLicensePath)" Condition="Exists('$(Phase2SnoopLicensePath)')" />
       <Phase2SnoopPayload Include="@(Phase2SnoopLauncherPayload)" />
       <Phase2SnoopPayload Include="@(Phase2SnoopGenericInjectorPayload)" />
+      <Phase2SnoopPayload Include="@(Phase2SnoopLicensePayload)" />
     </ItemGroup>
 
     <MakeDir Directories="$(PublishDir)agent\" />
@@ -100,6 +109,10 @@
     <Warning
       Text="Phase 2 Snoop GenericInjector assets not found under '$(Phase2SnoopBinDir)'. Run 'scripts/build-snoop.ps1' to build them (needed for inject_agent / WPF inspection)."
       Condition="@(Phase2SnoopGenericInjectorPayload) == ''" />
+
+    <Warning
+      Text="Phase 2 Snoop license file not found at '$(Phase2SnoopLicensePath)'."
+      Condition="@(Phase2SnoopLicensePayload) == ''" />
   </Target>
 
 </Project>

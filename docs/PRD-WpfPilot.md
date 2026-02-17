@@ -8,7 +8,7 @@ When using AI coding assistants to build WPF applications, the developer is the 
 
 An MCP server that gives AI models the ability to see and interact with running WPF applications using a hybrid approach: **Snoop sees, FlaUI acts.**
 
-- **Snoop** (MIT-licensed) is injected into the target process to provide deep WPF-native inspection — the real visual and logical trees, live binding status with source/path/error details, DataContext objects, dependency property values, styles, and templates. Snoop.Core already handles the hard edge cases (frozen Freezables, virtualized panels, template parts, adorner layers) that would take months to reimplement.
+- **Snoop** (Ms-PL-licensed) is injected into the target process to provide deep WPF-native inspection — the real visual and logical trees, live binding status with source/path/error details, DataContext objects, dependency property values, styles, and templates. Snoop.Core already handles the hard edge cases (frozen Freezables, virtualized panels, template parts, adorner layers) that would take months to reimplement.
 - **FlaUI** (UIA3) operates out-of-process to handle all interaction — clicks, typing, selection, invocation, scrolling — through Microsoft UI Automation patterns. This is what FlaUI was designed for and it does it well.
 
 This hybrid gives the AI model the inspection depth of a developer running Snoop alongside the interaction capability of an automation framework, without requiring any modification to the target application.
@@ -39,7 +39,7 @@ The injected agent (`WpfPilot.Agent`) is a thin assembly that:
 **Target framework:** .NET 8+  
 **MCP SDK:** `ModelContextProtocol` (official C# SDK)  
 **Interaction:** FlaUI (UIA3) — out-of-process automation  
-**Inspection:** Snoop.Core + Snoop.InjectorLauncher (MIT) — in-process WPF introspection  
+**Inspection:** Snoop.Core + Snoop.InjectorLauncher (Ms-PL) — in-process WPF introspection  
 **Communication:** Named pipe between MCP server and injected Snoop agent
 
 ---
