@@ -143,4 +143,95 @@ public sealed class ScrollSnapshots
             await CloseAppAsync();
         }
     }
+
+    [Test]
+    public async Task ScrollToElement_handles_offscreen_element_with_empty_bounds_snapshot()
+    {
+        await LaunchScrollAppAsync();
+        try
+        {
+            var container = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Scroll_Viewer"
+                }
+            });
+
+            var before = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Scroll_BadBoundsTargetButton"
+                }
+            });
+
+            Assert.That(before.Element.IsOffscreen, Is.True, "Expected Scroll_BadBoundsTargetButton to start offscreen.");
+            Assert.That(before.Element.Bounds.Width, Is.EqualTo(0));
+            Assert.That(before.Element.Bounds.Height, Is.EqualTo(0));
+
+            var scroll = await _mcp.CallToolAsync<ScrollToElementResponse>("scroll_to_element", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Scroll_BadBoundsTargetButton"
+                },
+                ["containerLocator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Scroll_Viewer"
+                }
+            });
+
+            var after = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Scroll_BadBoundsTargetButton"
+                }
+            });
+
+            Assert.That(scroll.Scrolled, Is.True);
+            Assert.That(after.Element.IsOffscreen, Is.False);
+            Assert.That(after.Element.Bounds.Width, Is.GreaterThan(0));
+            Assert.That(after.Element.Bounds.Height, Is.GreaterThan(0));
+
+            var containerBottom = container.Element.Bounds.Y + container.Element.Bounds.Height;
+            var afterBottom = after.Element.Bounds.Y + after.Element.Bounds.Height;
+            Assert.That(after.Element.Bounds.Y, Is.LessThan(containerBottom));
+            Assert.That(afterBottom, Is.GreaterThan(container.Element.Bounds.Y));
+
+            var click = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Scroll_BadBoundsTargetButton"
+                },
+                ["clickMode"] = "mouseAlways"
+            });
+
+            var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Scroll_Status"
+                }
+            });
+
+            await Verifier.Verify(new
+            {
+                ContainerBounds = container.Element.Bounds with { X = 0, Y = 0 },
+                BeforeIsOffscreen = before.Element.IsOffscreen,
+                BeforeBounds = before.Element.Bounds with { X = 0, Y = 0 },
+                Scroll = scroll,
+                AfterIsOffscreen = after.Element.IsOffscreen,
+                AfterBounds = after.Element.Bounds with { X = 0, Y = 0 },
+                Click = click,
+                Status = status.Element.Name
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
 }

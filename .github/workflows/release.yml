@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish-nuget:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@baa11fbfe1d6520db94683bd5c7a3818018e4309
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore src/WpfPilot.Tool/WpfPilot.Tool.csproj
+
+      - name: Build Snoop payloads (Release)
+        run: pwsh scripts/build-snoop.ps1 -Configuration Release
+
+      - name: Build
+        run: dotnet build src/WpfPilot.Tool/WpfPilot.Tool.csproj -c Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/WpfPilot.SnapshotTests/WpfPilot.SnapshotTests.csproj -c Release --no-restore
+
+      - name: Pack
+        run: dotnet pack src/WpfPilot.Tool/WpfPilot.Tool.csproj -c Release --no-build -o artifacts
+
+      - name: NuGet login (Trusted Publishing / OIDC)
+        id: nuget-login
+        uses: NuGet/login@d22cc5f58ff5b88bf9bd452535b4335137e24544
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Publish packages
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+

@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\WpfPilot.Contracts\WpfPilot.Contracts.csproj" />
     <ProjectReference Include="..\WpfPilot.Automation\WpfPilot.Automation.csproj" />
+    <ProjectReference Include="..\WpfPilot.Agent\WpfPilot.Agent.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -17,5 +18,88 @@
     <Nullable>enable</Nullable>
 
   </PropertyGroup>
+
+  <PropertyGroup>
+    <Phase2AgentOutputDir>$(MSBuildProjectDirectory)\..\WpfPilot.Agent\bin\$(Configuration)\net8.0-windows\</Phase2AgentOutputDir>
+    <Phase2SnoopBinDir>$(MSBuildProjectDirectory)\..\..\references\snoopwpf\bin\$(Configuration)\</Phase2SnoopBinDir>
+  </PropertyGroup>
+
+  <Target Name="CopyPhase2Assets" AfterTargets="Build">
+    <ItemGroup>
+      <Phase2AgentPayload Include="$(Phase2AgentOutputDir)**\*.*" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.exe" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.exe.config" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.pdb" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.dll" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.dll.config" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.deps.json" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.runtimeconfig.json" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)CommandLine.dll" Condition="Exists('$(Phase2SnoopBinDir)CommandLine.dll')" />
+      <Phase2SnoopGenericInjectorPayload Include="$(Phase2SnoopBinDir)Snoop.GenericInjector.*.dll" />
+      <Phase2SnoopGenericInjectorPayload Include="$(Phase2SnoopBinDir)Snoop.GenericInjector.*.pdb" />
+      <Phase2SnoopPayload Include="@(Phase2SnoopLauncherPayload)" />
+      <Phase2SnoopPayload Include="@(Phase2SnoopGenericInjectorPayload)" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(OutDir)agent\" />
+    <Copy
+      SourceFiles="@(Phase2AgentPayload)"
+      DestinationFolder="$(OutDir)agent\%(Phase2AgentPayload.RecursiveDir)"
+      SkipUnchangedFiles="true" />
+
+    <MakeDir Directories="$(OutDir)snoop\" />
+    <Copy
+      SourceFiles="@(Phase2SnoopPayload)"
+      DestinationFolder="$(OutDir)snoop\"
+      SkipUnchangedFiles="true"
+      Condition="@(Phase2SnoopPayload) != ''" />
+
+    <Warning
+      Text="Phase 2 Snoop InjectorLauncher assets not found under '$(Phase2SnoopBinDir)'. Run 'scripts/build-snoop.ps1' to build them (needed for inject_agent / WPF inspection)."
+      Condition="@(Phase2SnoopLauncherPayload) == ''" />
+
+    <Warning
+      Text="Phase 2 Snoop GenericInjector assets not found under '$(Phase2SnoopBinDir)'. Run 'scripts/build-snoop.ps1' to build them (needed for inject_agent / WPF inspection)."
+      Condition="@(Phase2SnoopGenericInjectorPayload) == ''" />
+  </Target>
+
+  <Target Name="CopyPhase2AssetsToPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <ItemGroup>
+      <Phase2AgentPayload Include="$(Phase2AgentOutputDir)**\*.*" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.exe" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.exe.config" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.pdb" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.dll" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.dll.config" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.deps.json" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.runtimeconfig.json" />
+      <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)CommandLine.dll" Condition="Exists('$(Phase2SnoopBinDir)CommandLine.dll')" />
+      <Phase2SnoopGenericInjectorPayload Include="$(Phase2SnoopBinDir)Snoop.GenericInjector.*.dll" />
+      <Phase2SnoopGenericInjectorPayload Include="$(Phase2SnoopBinDir)Snoop.GenericInjector.*.pdb" />
+      <Phase2SnoopPayload Include="@(Phase2SnoopLauncherPayload)" />
+      <Phase2SnoopPayload Include="@(Phase2SnoopGenericInjectorPayload)" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(PublishDir)agent\" />
+    <Copy
+      SourceFiles="@(Phase2AgentPayload)"
+      DestinationFolder="$(PublishDir)agent\%(Phase2AgentPayload.RecursiveDir)"
+      SkipUnchangedFiles="true" />
+
+    <MakeDir Directories="$(PublishDir)snoop\" />
+    <Copy
+      SourceFiles="@(Phase2SnoopPayload)"
+      DestinationFolder="$(PublishDir)snoop\"
+      SkipUnchangedFiles="true"
+      Condition="@(Phase2SnoopPayload) != ''" />
+
+    <Warning
+      Text="Phase 2 Snoop InjectorLauncher assets not found under '$(Phase2SnoopBinDir)'. Run 'scripts/build-snoop.ps1' to build them (needed for inject_agent / WPF inspection)."
+      Condition="@(Phase2SnoopLauncherPayload) == ''" />
+
+    <Warning
+      Text="Phase 2 Snoop GenericInjector assets not found under '$(Phase2SnoopBinDir)'. Run 'scripts/build-snoop.ps1' to build them (needed for inject_agent / WPF inspection)."
+      Condition="@(Phase2SnoopGenericInjectorPayload) == ''" />
+  </Target>
 
 </Project>

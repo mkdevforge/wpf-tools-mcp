@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WpfPilot.Contracts\WpfPilot.Contracts.csproj" />
+    <ProjectReference Include="..\WpfPilot.AgentProtocol\WpfPilot.AgentProtocol.csproj" />
   </ItemGroup>
 
   <ItemGroup>

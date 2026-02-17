@@ -16,7 +16,9 @@ public static class AppTools
         [Description("Optional working directory")] string? workingDirectory = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-            automation.LaunchAsync(new LaunchAppRequest(exePath, args, workingDirectory), cancellationToken));
+            automation.RunExclusiveAsync(
+                () => automation.LaunchAsync(new LaunchAppRequest(exePath, args, workingDirectory), cancellationToken),
+                cancellationToken));
 
     [McpServerTool(Name = "attach_to_app"), Description("Attach to an already running process.")]
     public static Task<AttachToAppResponse> AttachToApp(
@@ -25,15 +27,15 @@ public static class AppTools
         [Description("Process name")] string? processName = null,
         CancellationToken cancellationToken = default)
     {
-        return McpToolErrors.RunAsync(() =>
+        if (pid is not null && !string.IsNullOrWhiteSpace(processName))
         {
-            if (pid is not null && !string.IsNullOrWhiteSpace(processName))
-            {
-                throw new ArgumentException("Provide either pid or processName, not both.");
-            }
+            throw new ArgumentException("Provide either pid or processName, not both.");
+        }
 
-            return automation.AttachAsync(new AttachToAppRequest(pid, processName), cancellationToken);
-        });
+        return McpToolErrors.RunAsync(() =>
+            automation.RunExclusiveAsync(
+                () => automation.AttachAsync(new AttachToAppRequest(pid, processName), cancellationToken),
+                cancellationToken));
     }
 
     [McpServerTool(Name = "close_app"), Description("Close the attached application.")]
@@ -42,13 +44,17 @@ public static class AppTools
         [Description("Force kill if graceful close fails")] bool force = false,
         [Description("Wait timeout (ms) before forcing")] int timeoutMs = 5000,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() => automation.CloseAsync(new CloseAppRequest(force, timeoutMs), cancellationToken));
+        McpToolErrors.RunAsync(() =>
+            automation.RunExclusiveAsync(
+                () => automation.CloseAsync(new CloseAppRequest(force, timeoutMs), cancellationToken),
+                cancellationToken));
 
     [McpServerTool(Name = "list_windows"), Description("Enumerate all top-level windows of the attached process.")]
     public static Task<ListWindowsResponse> ListWindows(
         AutomationController automation,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() => automation.ListWindowsAsync(cancellationToken));
+        McpToolErrors.RunAsync(() =>
+            automation.RunExclusiveAsync(() => automation.ListWindowsAsync(cancellationToken), cancellationToken));
 
     [McpServerTool(Name = "take_screenshot"), Description("Capture a screenshot of the main window or a specified window handle.")]
     public static Task<TakeScreenshotResponse> TakeScreenshot(
@@ -58,15 +64,17 @@ public static class AppTools
         [Description("Capture mode: screen | printWindow | auto")] string? captureMode = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-            automation.TakeScreenshotAsync(
-                new TakeScreenshotRequest(windowHandle, locator, ParseCaptureMode(captureMode)),
+            automation.RunExclusiveAsync(
+                () => automation.TakeScreenshotAsync(
+                    new TakeScreenshotRequest(windowHandle, locator, ParseCaptureMode(captureMode)),
+                    cancellationToken),
                 cancellationToken));
 
     private static ScreenshotCaptureMode ParseCaptureMode(string? captureMode)
     {
         if (string.IsNullOrWhiteSpace(captureMode))
         {
-            return ScreenshotCaptureMode.Screen;
+            return ScreenshotCaptureMode.Auto;
         }
 
         var value = captureMode.Trim();

@@ -1,0 +1,22 @@
+{
+  ContainerBounds: {
+    Width: 520,
+    Height: 420
+  },
+  BeforeIsOffscreen: true,
+  BeforeBounds: {},
+  Scroll: {
+    Scrolled: true,
+    MethodUsed: scrollPattern
+  },
+  AfterIsOffscreen: false,
+  AfterBounds: {
+    Width: 240,
+    Height: 20
+  },
+  Click: {
+    Clicked: true,
+    MethodUsed: mouse
+  },
+  Status: Clicks: 1
+}

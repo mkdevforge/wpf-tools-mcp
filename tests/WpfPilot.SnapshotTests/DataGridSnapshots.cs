@@ -41,6 +41,11 @@ public sealed class DataGridSnapshots
             ["exePath"] = exePath,
             ["workingDirectory"] = workingDirectory,
         });
+
+        _ = await WaitForElementAsync(new Dictionary<string, object?>
+        {
+            ["automationId"] = "DataGrid_PeopleGrid"
+        }, attempts: 60, delayMs: 100);
     }
 
     private async Task CloseAppAsync()
@@ -78,8 +83,33 @@ public sealed class DataGridSnapshots
             }
         }
 
-        Assert.Fail("Element did not appear within timeout.");
-        throw new AssertionException("Unreachable.");
+        throw new TimeoutException("Element did not appear within timeout.");
+    }
+
+    private async Task<string?> WaitForStatusContainsAsync(
+        string needle,
+        int attempts = 30,
+        int delayMs = 75)
+    {
+        for (var i = 0; i < attempts; i++)
+        {
+            var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "DataGrid_SelectedStatus"
+                }
+            });
+
+            if (status.Element.Name?.Contains(needle, StringComparison.Ordinal) == true)
+            {
+                return status.Element.Name;
+            }
+
+            await Task.Delay(delayMs);
+        }
+
+        return null;
     }
 
     [Test]
@@ -88,37 +118,56 @@ public sealed class DataGridSnapshots
         await LaunchDataGridAppAsync();
         try
         {
+            var nameCellLocator = new Dictionary<string, object?>
+            {
+                ["automationId"] = "DataGrid_Row_0_NameCell"
+            };
+
             var selectCell = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
             {
-                ["locator"] = new Dictionary<string, object?>
-                {
-                    ["automationId"] = "DataGrid_Row_0_NameCell"
-                },
+                ["locator"] = nameCellLocator,
                 ["clickMode"] = "mouseAlways"
             });
 
-            var statusBefore = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            var statusBefore = await WaitForStatusContainsAsync("Alice") ??
+                               (await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "DataGrid_SelectedStatus"
                 }
-            });
+            })).Element.Name;
 
-            var enterEdit = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+            ClickElementResponse enterEdit = null!;
+            for (var i = 0; i < 3; i++)
             {
-                ["locator"] = new Dictionary<string, object?>
+                _ = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
                 {
-                    ["automationId"] = "DataGrid_Row_0_NameCell"
-                },
-                ["clickType"] = "double",
-                ["clickMode"] = "mouseAlways"
-            });
+                    ["locator"] = nameCellLocator,
+                    ["clickMode"] = "mouseAlways"
+                });
 
-            _ = await WaitForElementAsync(new Dictionary<string, object?>
-            {
-                ["automationId"] = "DataGrid_NameEditor"
-            });
+                enterEdit = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+                {
+                    ["locator"] = nameCellLocator,
+                    ["clickType"] = "double",
+                    ["clickMode"] = "mouseAlways"
+                });
+
+                try
+                {
+                    _ = await WaitForElementAsync(new Dictionary<string, object?>
+                    {
+                        ["automationId"] = "DataGrid_NameEditor"
+                    }, attempts: 40, delayMs: 100);
+
+                    break;
+                }
+                catch (TimeoutException) when (i < 2)
+                {
+                    await Task.Delay(100);
+                }
+            }
 
             var typed = await _mcp.CallToolAsync<TypeTextResponse>("type_text", new Dictionary<string, object?>
             {
@@ -151,7 +200,7 @@ public sealed class DataGridSnapshots
             await Verifier.Verify(new
             {
                 SelectCell = selectCell,
-                StatusBefore = statusBefore.Element.Name,
+                StatusBefore = statusBefore,
                 EnterEdit = enterEdit,
                 Typed = typed,
                 StatusAfter = statusAfter.Element.Name
@@ -163,4 +212,3 @@ public sealed class DataGridSnapshots
         }
     }
 }
-

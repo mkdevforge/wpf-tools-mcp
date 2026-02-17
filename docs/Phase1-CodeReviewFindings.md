@@ -4,6 +4,11 @@ This document captures Phase 1 review notes so we can intentionally defer them w
 
 Snapshot tests were green at the time this was written (`dotnet test -c Debug`).
 
+Updates since this review:
+- Tool calls are now serialized via `AutomationController.RunExclusiveAsync` to mitigate concurrency races.
+- `click_element` now differentiates `clickMode=auto` vs `clickMode=invokePreferred` (auto only prefers invoke for common invokables like buttons).
+- `take_screenshot` defaults to `captureMode=auto`.
+
 ## Summary
 
 Phase 1 is in good shape for the intended baseline: it can launch/attach, enumerate windows (including owned modal dialogs), inspect the UIA tree/properties, take screenshots, and interact (click/type/select/scroll) across a growing set of realistic WPF surfaces.
@@ -84,4 +89,3 @@ The main “return later” items are about:
 ## When to revisit
 
 After Phase 2 is functional (injection + pipe + deep inspection), revisit this list and decide what to address next based on real usage feedback on non-demo, custom-control-heavy WPF apps.
-

@@ -18,14 +18,76 @@ using WpfPilot.Contracts;
 
 namespace WpfPilot.Automation;
 
-public sealed class AutomationController : IDisposable
+public sealed partial class AutomationController : IDisposable
 {
     private Application? _application;
     private UIA3Automation? _automation;
+    private readonly SemaphoreSlim _toolMutex = new(1, 1);
+
+    private static readonly int UiDelayMs = GetEnvInt("WPFPILOT_UI_DELAY_MS", defaultValue: 30, minValue: 0, maxValue: 1000);
+    private static readonly int UiDelayScrollMs = GetEnvInt("WPFPILOT_UI_SCROLL_DELAY_MS", defaultValue: 35, minValue: 0, maxValue: 1000);
+    private static readonly int UiDelayWindowSettleMs = GetEnvInt("WPFPILOT_UI_WINDOW_SETTLE_MS", defaultValue: 60, minValue: 0, maxValue: 5000);
 
     public bool IsAttached => _application is not null && !_application.HasExited;
 
-    public void Dispose() => Cleanup();
+    public void Dispose()
+    {
+        Cleanup();
+        _toolMutex.Dispose();
+    }
+
+    public async Task RunExclusiveAsync(Func<Task> action, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        await _toolMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await action().ConfigureAwait(false);
+        }
+        finally
+        {
+            _toolMutex.Release();
+        }
+    }
+
+    public async Task<T> RunExclusiveAsync<T>(Func<Task<T>> action, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        await _toolMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await action().ConfigureAwait(false);
+        }
+        finally
+        {
+            _toolMutex.Release();
+        }
+    }
+
+    private static int GetEnvInt(string name, int defaultValue, int minValue, int maxValue)
+    {
+        try
+        {
+            var raw = Environment.GetEnvironmentVariable(name);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return defaultValue;
+            }
+
+            if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+            {
+                return defaultValue;
+            }
+
+            return Math.Clamp(value, minValue, maxValue);
+        }
+        catch
+        {
+            return defaultValue;
+        }
+    }
 
     public Task<LaunchAppResponse> LaunchAsync(LaunchAppRequest request, CancellationToken cancellationToken = default)
     {
@@ -147,9 +209,7 @@ public sealed class AutomationController : IDisposable
             ? FindWindowByHandle(application, automation, requestedHandle)
             : FindMainWindow(application, automation);
 
-        window.SetForeground();
-        window.Focus();
-        await Task.Delay(150, cancellationToken);
+        await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs + 40, cancellationToken);
 
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
@@ -197,15 +257,7 @@ public sealed class AutomationController : IDisposable
                 ? FindWindowByTitle(application, automation, request.Title!)
                 : FindMainWindow(application, automation);
 
-        var windowPattern = window.Patterns.Window.PatternOrDefault;
-        if (windowPattern is not null && windowPattern.WindowVisualState == WindowVisualState.Minimized)
-        {
-            windowPattern.SetWindowVisualState(WindowVisualState.Normal);
-        }
-
-        window.SetForeground();
-        window.Focus();
-        await Task.Delay(100, cancellationToken);
+        await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
         return new FocusWindowResponse(
             Focused: true,
@@ -227,9 +279,7 @@ public sealed class AutomationController : IDisposable
             ? FindWindowByHandle(application, automation, requestedHandle)
             : FindMainWindow(application, automation);
 
-        window.SetForeground();
-        window.Focus();
-        await Task.Delay(100, cancellationToken);
+        await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
@@ -240,11 +290,13 @@ public sealed class AutomationController : IDisposable
         if (request.ClickType == ClickType.Single &&
             request.ClickMode != ClickMode.MouseAlways)
         {
-            var invoke = element.Patterns.Invoke.PatternOrDefault;
-            if (invoke is not null)
+            var shouldTryInvoke = request.ClickMode == ClickMode.InvokePreferred ||
+                                  (request.ClickMode == ClickMode.Auto && ShouldAutoPreferInvoke(element));
+
+            if (shouldTryInvoke && element.Patterns.Invoke.PatternOrDefault is { } invoke)
             {
                 invoke.Invoke();
-                await Task.Delay(75, cancellationToken);
+                await Task.Delay(UiDelayMs, cancellationToken);
                 return new ClickElementResponse(Clicked: true, MethodUsed: "invoke");
             }
         }
@@ -265,8 +317,54 @@ public sealed class AutomationController : IDisposable
                 throw new ArgumentOutOfRangeException(nameof(request), $"Unknown clickType '{request.ClickType}'.");
         }
 
-        await Task.Delay(75, cancellationToken);
+        await Task.Delay(UiDelayMs, cancellationToken);
         return new ClickElementResponse(Clicked: true, MethodUsed: "mouse");
+    }
+
+    private static bool ShouldAutoPreferInvoke(AutomationElement element)
+    {
+        return element.ControlType == ControlType.Button ||
+               element.ControlType == ControlType.Hyperlink ||
+               element.ControlType == ControlType.MenuItem ||
+               element.ControlType == ControlType.SplitButton;
+    }
+
+    private static async Task PrepareWindowForInteractionAsync(
+        Window window,
+        int settleDelayMs,
+        CancellationToken cancellationToken)
+    {
+        var windowPattern = window.Patterns.Window.PatternOrDefault;
+        if (windowPattern is not null && windowPattern.WindowVisualState == WindowVisualState.Minimized)
+        {
+            try
+            {
+                windowPattern.SetWindowVisualState(WindowVisualState.Normal);
+            }
+            catch
+            {
+            }
+
+            await Task.Delay(UiDelayWindowSettleMs, cancellationToken);
+        }
+
+        try
+        {
+            window.SetForeground();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            window.Focus();
+        }
+        catch
+        {
+        }
+
+        await Task.Delay(settleDelayMs, cancellationToken);
     }
 
     public async Task<InvokeResponse> InvokeAsync(
@@ -283,9 +381,7 @@ public sealed class AutomationController : IDisposable
             ? FindWindowByHandle(application, automation, requestedHandle)
             : FindMainWindow(application, automation);
 
-        window.SetForeground();
-        window.Focus();
-        await Task.Delay(100, cancellationToken);
+        await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
@@ -301,7 +397,7 @@ public sealed class AutomationController : IDisposable
         }
 
         invoke.Invoke();
-        await Task.Delay(75, cancellationToken);
+        await Task.Delay(UiDelayMs, cancellationToken);
         return new InvokeResponse(Invoked: true);
     }
 
@@ -319,9 +415,7 @@ public sealed class AutomationController : IDisposable
             ? FindWindowByHandle(application, automation, requestedHandle)
             : FindMainWindow(application, automation);
 
-        window.SetForeground();
-        window.Focus();
-        await Task.Delay(100, cancellationToken);
+        await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
@@ -333,18 +427,18 @@ public sealed class AutomationController : IDisposable
         if (valuePattern is not null && valuePattern.IsReadOnly == false)
         {
             valuePattern.SetValue(request.Text);
-            await Task.Delay(75, cancellationToken);
+            await Task.Delay(UiDelayMs, cancellationToken);
             return new TypeTextResponse(Typed: true, MethodUsed: "valuePattern");
         }
 
         element.Focus();
-        await Task.Delay(50, cancellationToken);
+        await Task.Delay(UiDelayMs, cancellationToken);
 
         Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
         Keyboard.Type(VirtualKeyShort.DELETE);
         Keyboard.Type(request.Text);
 
-        await Task.Delay(75, cancellationToken);
+        await Task.Delay(UiDelayMs, cancellationToken);
         return new TypeTextResponse(Typed: true, MethodUsed: "keyboard");
     }
 
@@ -362,9 +456,7 @@ public sealed class AutomationController : IDisposable
             ? FindWindowByHandle(application, automation, requestedHandle)
             : FindMainWindow(application, automation);
 
-        window.SetForeground();
-        window.Focus();
-        await Task.Delay(100, cancellationToken);
+        await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
@@ -376,7 +468,7 @@ public sealed class AutomationController : IDisposable
         if (rangeValue is not null && rangeValue.IsReadOnly == false)
         {
             rangeValue.SetValue(request.Value);
-            await Task.Delay(75, cancellationToken);
+            await Task.Delay(UiDelayMs, cancellationToken);
             return new SetValueResponse(Set: true, MethodUsed: "rangeValue");
         }
 
@@ -384,7 +476,7 @@ public sealed class AutomationController : IDisposable
         if (valuePattern is not null && valuePattern.IsReadOnly == false)
         {
             valuePattern.SetValue(request.Value.ToString(CultureInfo.InvariantCulture));
-            await Task.Delay(75, cancellationToken);
+            await Task.Delay(UiDelayMs, cancellationToken);
             return new SetValueResponse(Set: true, MethodUsed: "valuePattern");
         }
 
@@ -420,9 +512,7 @@ public sealed class AutomationController : IDisposable
             ? FindWindowByHandle(application, automation, requestedHandle)
             : FindMainWindow(application, automation);
 
-        window.SetForeground();
-        window.Focus();
-        await Task.Delay(100, cancellationToken);
+        await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
@@ -440,7 +530,7 @@ public sealed class AutomationController : IDisposable
             TryScrollIntoView(item);
             SelectItemElement(item);
 
-            await Task.Delay(75, cancellationToken);
+            await Task.Delay(UiDelayMs, cancellationToken);
             return new SelectItemResponse(Selected: true);
         }
 
@@ -456,7 +546,7 @@ public sealed class AutomationController : IDisposable
                 comboBox.Select(request.Text!);
             }
 
-            await Task.Delay(75, cancellationToken);
+            await Task.Delay(UiDelayMs, cancellationToken);
             return new SelectItemResponse(Selected: true);
         }
 
@@ -520,7 +610,7 @@ public sealed class AutomationController : IDisposable
         TryScrollIntoView(selectedItem);
         SelectItemElement(selectedItem);
 
-        await Task.Delay(75, cancellationToken);
+        await Task.Delay(UiDelayMs, cancellationToken);
         return new SelectItemResponse(Selected: true);
     }
 
@@ -538,9 +628,7 @@ public sealed class AutomationController : IDisposable
             ? FindWindowByHandle(application, automation, requestedHandle)
             : FindMainWindow(application, automation);
 
-        window.SetForeground();
-        window.Focus();
-        await Task.Delay(100, cancellationToken);
+        await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
@@ -568,9 +656,38 @@ public sealed class AutomationController : IDisposable
             element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
         }
 
+        var elementToScroll = element;
+        if (!string.IsNullOrWhiteSpace(request.Locator.XPath) && !HasValidBounds(elementToScroll))
+        {
+            var currentXPath = request.Locator.XPath!;
+            for (var step = 0; step < 10; step++)
+            {
+                var parentXPath = TryGetParentXPath(currentXPath);
+                if (parentXPath is null)
+                {
+                    break;
+                }
+
+                currentXPath = parentXPath;
+
+                try
+                {
+                    var parentElement = ResolveElement(window, new ElementLocator(XPath: parentXPath), controlWalker, rawWalker);
+                    if (HasValidBounds(parentElement))
+                    {
+                        elementToScroll = parentElement;
+                        break;
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
         var (bringIntoViewMethod, scrolledBringingIntoView) = await ScrollElementIntoViewAsync(
             container,
-            element,
+            elementToScroll,
             controlWalker,
             rawWalker,
             cancellationToken);
@@ -626,7 +743,7 @@ public sealed class AutomationController : IDisposable
         {
         }
 
-        await Task.Delay(75, cancellationToken);
+        await Task.Delay(UiDelayScrollMs, cancellationToken);
 
         var maxScrollSteps = 50;
         double? lastPercent = null;
@@ -663,7 +780,7 @@ public sealed class AutomationController : IDisposable
                 break;
             }
 
-            await Task.Delay(75, cancellationToken);
+            await Task.Delay(UiDelayScrollMs, cancellationToken);
 
             var afterPercent = TryGetScrollPercent(scroll, vertical: true);
             if (afterPercent is not null && lastPercent is not null && Math.Abs(afterPercent.Value - lastPercent.Value) < 0.0001)
@@ -696,8 +813,12 @@ public sealed class AutomationController : IDisposable
         {
         }
 
+        var scrollTarget = scrollElement is not null
+            ? GetScrollTargetElement(scrollElement, element, rawWalker, controlWalker)
+            : element;
+
         var needsScroll = element.IsOffscreen ||
-            (scrollElement is not null && IsElementOutsideViewport(scrollElement, element));
+            (scrollElement is not null && IsElementOutsideViewport(scrollElement, scrollTarget));
 
         if (!needsScroll)
         {
@@ -710,10 +831,29 @@ public sealed class AutomationController : IDisposable
             if (scrollItem is not null)
             {
                 scrollItem.ScrollIntoView();
-                await Task.Delay(75, cancellationToken);
+                await Task.Delay(UiDelayScrollMs, cancellationToken);
 
-                needsScroll = element.IsOffscreen ||
-                    (scrollElement is not null && IsElementOutsideViewport(scrollElement, element));
+                needsScroll = scrollTarget.IsOffscreen ||
+                    (scrollElement is not null && IsElementOutsideViewport(scrollElement, scrollTarget));
+
+                if (!needsScroll)
+                {
+                    return ("scrollItem", true);
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (TryScrollItemIntoViewFromAncestors(element, rawWalker))
+            {
+                await Task.Delay(UiDelayScrollMs, cancellationToken);
+
+                needsScroll = scrollTarget.IsOffscreen ||
+                    (scrollElement is not null && IsElementOutsideViewport(scrollElement, scrollTarget));
 
                 if (!needsScroll)
                 {
@@ -734,8 +874,117 @@ public sealed class AutomationController : IDisposable
             }
         }
 
-        await ScrollPatternBringIntoViewAsync(scrollElement, scrollPattern, element, cancellationToken);
+        scrollTarget = GetScrollTargetElement(scrollElement, element, rawWalker, controlWalker);
+        await ScrollPatternBringIntoViewAsync(scrollElement, scrollPattern, scrollTarget, cancellationToken);
         return ("scrollPattern", true);
+    }
+
+    private static AutomationElement GetScrollTargetElement(
+        AutomationElement scrollElement,
+        AutomationElement element,
+        ITreeWalker rawWalker,
+        ITreeWalker controlWalker)
+    {
+        if (HasValidBounds(element))
+        {
+            return element;
+        }
+
+        var current = TryGetParent(rawWalker, controlWalker, element);
+        if (current is null)
+        {
+            return element;
+        }
+
+        for (var step = 0; step < 30 && current is not null; step++)
+        {
+            if (AreSameElement(current, scrollElement))
+            {
+                break;
+            }
+
+            if (HasValidBounds(current) && IsElementOutsideViewport(scrollElement, current))
+            {
+                return current;
+            }
+
+            current = TryGetParent(rawWalker, controlWalker, current);
+        }
+
+        return element;
+    }
+
+    private static AutomationElement? TryGetParent(ITreeWalker rawWalker, ITreeWalker controlWalker, AutomationElement element)
+    {
+        try
+        {
+            return rawWalker.GetParent(element);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            return controlWalker.GetParent(element);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool HasValidBounds(AutomationElement element)
+    {
+        try
+        {
+            var bounds = element.BoundingRectangle;
+            return bounds.Width > 0 && bounds.Height > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryScrollItemIntoViewFromAncestors(AutomationElement element, ITreeWalker rawWalker)
+    {
+        AutomationElement? current;
+        try
+        {
+            current = rawWalker.GetParent(element);
+        }
+        catch
+        {
+            return false;
+        }
+
+        for (var step = 0; step < 200 && current is not null; step++)
+        {
+            try
+            {
+                var scrollItem = current.Patterns.ScrollItem.PatternOrDefault;
+                if (scrollItem is not null)
+                {
+                    scrollItem.ScrollIntoView();
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                current = rawWalker.GetParent(current);
+            }
+            catch
+            {
+                current = null;
+            }
+        }
+
+        return false;
     }
 
     private static async Task ScrollPatternBringIntoViewAsync(
@@ -747,6 +996,7 @@ public sealed class AutomationController : IDisposable
         var maxScrollSteps = 60;
         double? lastVertical = null;
         double? lastHorizontal = null;
+        var percentScan = (Attempted: false, Succeeded: false);
 
         for (var step = 0; step < maxScrollSteps; step++)
         {
@@ -759,6 +1009,11 @@ public sealed class AutomationController : IDisposable
 
             var containerBounds = scrollElement.BoundingRectangle;
             var elementBounds = element.BoundingRectangle;
+
+            if (elementBounds.Width <= 0 || elementBounds.Height <= 0)
+            {
+                break;
+            }
 
             var vertical = ScrollAmount.NoAmount;
             var horizontal = ScrollAmount.NoAmount;
@@ -809,7 +1064,7 @@ public sealed class AutomationController : IDisposable
                 break;
             }
 
-            await Task.Delay(75, cancellationToken);
+            await Task.Delay(UiDelayScrollMs, cancellationToken);
 
             if (scrollPattern.VerticallyScrollable)
             {
@@ -834,11 +1089,293 @@ public sealed class AutomationController : IDisposable
             }
         }
 
+        if (!IsElementOutsideViewport(scrollElement, element))
+        {
+            return;
+        }
+
+        percentScan = await TryScrollPatternPercentScanAsync(scrollElement, scrollPattern, element, cancellationToken);
+
         if (IsElementOutsideViewport(scrollElement, element))
         {
-            throw new InvalidOperationException("Failed to scroll element into view.");
+            var containerBounds = SafeGetRect(() => scrollElement.BoundingRectangle);
+            var elementBounds = SafeGetRect(() => element.BoundingRectangle);
+            var elementOffscreen = SafeGetBool(() => element.IsOffscreen);
+            var elementType = SafeGetString(() => element.ControlType.ToString());
+            var elementAutomationId = SafeGetString(() => GetAutomationId(element));
+            var elementName = SafeGetString(() => GetName(element));
+            var elementClass = SafeGetString(() => GetClassName(element));
+            var verticalPercent = TryGetScrollPercent(scrollPattern, vertical: true);
+            var horizontalPercent = TryGetScrollPercent(scrollPattern, vertical: false);
+
+            throw new InvalidOperationException(
+                "Failed to scroll element into view. " +
+                $"percentScanAttempted={percentScan.Attempted}, " +
+                $"percentScanSucceeded={percentScan.Succeeded}, " +
+                $"elementType={elementType}, " +
+                $"elementAutomationId={elementAutomationId}, " +
+                $"elementName={elementName}, " +
+                $"elementClass={elementClass}, " +
+                $"elementIsOffscreen={elementOffscreen}, " +
+                $"elementBounds={FormatRect(elementBounds)}, " +
+                $"containerBounds={FormatRect(containerBounds)}, " +
+                $"verticalPercent={FormatPercent(verticalPercent)}, " +
+                $"horizontalPercent={FormatPercent(horizontalPercent)}.");
         }
     }
+
+    private static async Task<(bool Attempted, bool Succeeded)> TryScrollPatternPercentScanAsync(
+        AutomationElement scrollElement,
+        IScrollPattern scrollPattern,
+        AutomationElement element,
+        CancellationToken cancellationToken)
+    {
+        var attempted = false;
+
+        if (scrollPattern.VerticallyScrollable)
+        {
+            attempted = true;
+            if (await TryScrollPatternPercentScanAxisAsync(scrollElement, scrollPattern, element, vertical: true, toStartPercent: 0, ScrollAmount.LargeIncrement, cancellationToken))
+            {
+                return (Attempted: true, Succeeded: true);
+            }
+
+            if (await TryScrollPatternPercentScanAxisAsync(scrollElement, scrollPattern, element, vertical: true, toStartPercent: 100, ScrollAmount.LargeDecrement, cancellationToken))
+            {
+                return (Attempted: true, Succeeded: true);
+            }
+        }
+
+        if (scrollPattern.HorizontallyScrollable)
+        {
+            attempted = true;
+            if (await TryScrollPatternPercentScanAxisAsync(scrollElement, scrollPattern, element, vertical: false, toStartPercent: 0, ScrollAmount.LargeIncrement, cancellationToken))
+            {
+                return (Attempted: true, Succeeded: true);
+            }
+
+            if (await TryScrollPatternPercentScanAxisAsync(scrollElement, scrollPattern, element, vertical: false, toStartPercent: 100, ScrollAmount.LargeDecrement, cancellationToken))
+            {
+                return (Attempted: true, Succeeded: true);
+            }
+        }
+
+        return (Attempted: attempted, Succeeded: attempted && !IsElementOutsideViewport(scrollElement, element));
+    }
+
+    private static async Task<bool> TryScrollPatternPercentScanAxisAsync(
+        AutomationElement scrollElement,
+        IScrollPattern scrollPattern,
+        AutomationElement element,
+        bool vertical,
+        double toStartPercent,
+        ScrollAmount scrollStep,
+        CancellationToken cancellationToken)
+    {
+        if (!IsElementOutsideViewport(scrollElement, element))
+        {
+            return true;
+        }
+
+        try
+        {
+            if (vertical)
+            {
+                scrollPattern.SetScrollPercent(-1, toStartPercent);
+            }
+            else
+            {
+                scrollPattern.SetScrollPercent(toStartPercent, -1);
+            }
+        }
+        catch
+        {
+        }
+
+        await Task.Delay(UiDelayScrollMs, cancellationToken);
+
+        var maxScanSteps = 80;
+        double? lastPercent = TryGetScrollPercent(scrollPattern, vertical);
+
+        for (var step = 0; step < maxScanSteps; step++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!IsElementOutsideViewport(scrollElement, element))
+            {
+                return true;
+            }
+
+            try
+            {
+                scrollElement.Focus();
+            }
+            catch
+            {
+            }
+
+            var scrolled = TryScrollPatternOnce(scrollPattern, vertical, scrollStep);
+            if (!scrolled && scrollStep == ScrollAmount.LargeIncrement)
+            {
+                scrolled = TryScrollPatternOnce(scrollPattern, vertical, ScrollAmount.SmallIncrement);
+            }
+            else if (!scrolled && scrollStep == ScrollAmount.LargeDecrement)
+            {
+                scrolled = TryScrollPatternOnce(scrollPattern, vertical, ScrollAmount.SmallDecrement);
+            }
+
+            if (!scrolled)
+            {
+                break;
+            }
+
+            await Task.Delay(UiDelayScrollMs, cancellationToken);
+
+            var percent = TryGetScrollPercent(scrollPattern, vertical);
+            if (percent is not null && lastPercent is not null && Math.Abs(percent.Value - lastPercent.Value) < 0.0001)
+            {
+                break;
+            }
+
+            lastPercent = percent;
+        }
+
+        if (!IsElementOutsideViewport(scrollElement, element))
+        {
+            return true;
+        }
+
+        var viewSize = GetScrollViewSize(scrollPattern, vertical);
+        var stepPercent = Math.Clamp(viewSize * 0.8, 2, 20);
+        var increment = scrollStep is ScrollAmount.LargeIncrement or ScrollAmount.SmallIncrement;
+
+        var maxPercentSteps = 60;
+        var current = toStartPercent;
+        for (var step = 0; step < maxPercentSteps; step++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!IsElementOutsideViewport(scrollElement, element))
+            {
+                return true;
+            }
+
+            if (step > 0)
+            {
+                current = increment
+                    ? Math.Min(100, current + stepPercent)
+                    : Math.Max(0, current - stepPercent);
+            }
+
+            try
+            {
+                if (vertical)
+                {
+                    scrollPattern.SetScrollPercent(-1, current);
+                }
+                else
+                {
+                    scrollPattern.SetScrollPercent(current, -1);
+                }
+            }
+            catch
+            {
+                break;
+            }
+
+            await Task.Delay(UiDelayScrollMs, cancellationToken);
+
+            if ((increment && current >= 100) || (!increment && current <= 0))
+            {
+                break;
+            }
+        }
+
+        return !IsElementOutsideViewport(scrollElement, element);
+    }
+
+    private static bool TryScrollPatternOnce(IScrollPattern scrollPattern, bool vertical, ScrollAmount amount)
+    {
+        try
+        {
+            if (vertical)
+            {
+                scrollPattern.Scroll(ScrollAmount.NoAmount, amount);
+            }
+            else
+            {
+                scrollPattern.Scroll(amount, ScrollAmount.NoAmount);
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static double GetScrollViewSize(IScrollPattern scrollPattern, bool vertical)
+    {
+        try
+        {
+            var viewSize = vertical ? scrollPattern.VerticalViewSize : scrollPattern.HorizontalViewSize;
+            if (double.IsNaN(viewSize) || viewSize <= 0 || viewSize > 100)
+            {
+                return 10;
+            }
+
+            return viewSize;
+        }
+        catch
+        {
+            return 10;
+        }
+    }
+
+    private static System.Drawing.Rectangle SafeGetRect(Func<System.Drawing.Rectangle> factory)
+    {
+        try
+        {
+            return factory();
+        }
+        catch
+        {
+            return default;
+        }
+    }
+
+    private static bool? SafeGetBool(Func<bool> factory)
+    {
+        try
+        {
+            return factory();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? SafeGetString(Func<string?> factory)
+    {
+        try
+        {
+            return factory();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string FormatRect(System.Drawing.Rectangle rect) =>
+        rect.Width <= 0 && rect.Height <= 0
+            ? "empty"
+            : $"x={rect.Left},y={rect.Top},w={rect.Width},h={rect.Height}";
+
+    private static string FormatPercent(double? percent) =>
+        percent is null ? "unknown" : percent.Value.ToString("0.##", CultureInfo.InvariantCulture);
 
     private static bool IsElementOutsideViewport(AutomationElement scrollElement, AutomationElement element)
     {
@@ -1094,7 +1631,7 @@ public sealed class AutomationController : IDisposable
         {
         }
 
-        await Task.Delay(75, cancellationToken);
+        await Task.Delay(UiDelayScrollMs, cancellationToken);
 
         var maxScrollSteps = 50;
         double? lastPercent = null;
@@ -1131,7 +1668,7 @@ public sealed class AutomationController : IDisposable
                 break;
             }
 
-            await Task.Delay(75, cancellationToken);
+            await Task.Delay(UiDelayScrollMs, cancellationToken);
 
             var afterPercent = TryGetScrollPercent(scroll, vertical: true);
             if (afterPercent is not null && lastPercent is not null && Math.Abs(afterPercent.Value - lastPercent.Value) < 0.0001)
@@ -1331,7 +1868,7 @@ public sealed class AutomationController : IDisposable
         {
         }
 
-        await Task.Delay(75, cancellationToken);
+        await Task.Delay(UiDelayScrollMs, cancellationToken);
 
         var maxScrollSteps = 50;
         var scanned = 0;
@@ -1398,7 +1935,7 @@ public sealed class AutomationController : IDisposable
                 break;
             }
 
-            await Task.Delay(75, cancellationToken);
+            await Task.Delay(UiDelayScrollMs, cancellationToken);
 
             var afterPercent = TryGetScrollPercent(scroll, vertical: true);
             if (afterPercent is not null && lastPercent is not null && Math.Abs(afterPercent.Value - lastPercent.Value) < 0.0001)
@@ -2133,6 +2670,34 @@ public sealed class AutomationController : IDisposable
         }
     }
 
+    private static string? TryGetParentXPath(string xpath)
+    {
+        if (string.IsNullOrWhiteSpace(xpath))
+        {
+            return null;
+        }
+
+        var trimmed = xpath.Trim();
+        if (trimmed.Length <= 1)
+        {
+            return null;
+        }
+
+        if (trimmed.EndsWith('/'))
+        {
+            trimmed = trimmed.TrimEnd('/');
+        }
+
+        var slash = trimmed.LastIndexOf('/');
+        if (slash <= 0)
+        {
+            return null;
+        }
+
+        var parent = trimmed[..slash];
+        return string.IsNullOrWhiteSpace(parent) ? null : parent;
+    }
+
     private static Point GetClickPoint(AutomationElement element)
     {
         if (element.TryGetClickablePoint(out var point))
@@ -2747,6 +3312,8 @@ public sealed class AutomationController : IDisposable
 
     private void Cleanup()
     {
+        CleanupAgent();
+
         if (_automation is not null)
         {
             _automation.Dispose();

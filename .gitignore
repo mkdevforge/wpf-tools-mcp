@@ -486,4 +486,6 @@ $RECYCLE.BIN/
 tests/WpfPilot.SnapshotTests/_Artifacts/
 
 # local refs
-references/
+references/*
+!references/snoopwpf/
+references/FlaUI/

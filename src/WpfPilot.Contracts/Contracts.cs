@@ -134,3 +134,22 @@ public sealed record ScrollToElementRequest(
     ElementLocator? ContainerLocator = null);
 
 public sealed record ScrollToElementResponse(bool Scrolled, string MethodUsed);
+
+// Phase 2 (Snoop agent)
+
+public sealed record InjectAgentResponse(bool Injected, string PipeName);
+
+public sealed record AgentPingResponse(string Message);
+
+public sealed record GetWpfVisualTreeRequest(long? WindowHandle = null, int Depth = 4);
+
+public sealed record WpfVisualTreeNode(
+    string Type,
+    string? Name,
+    string? AutomationId,
+    string? Visibility,
+    string? DataContextType,
+    string XPath,
+    IReadOnlyList<WpfVisualTreeNode> Children);
+
+public sealed record GetWpfVisualTreeResponse(WpfVisualTreeNode Root);
