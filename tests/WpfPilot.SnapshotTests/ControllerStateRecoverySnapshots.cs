@@ -94,6 +94,20 @@ public sealed class ControllerStateRecoverySnapshots
         }
     }
 
+    [Test]
+    public async Task Attach_by_process_name_accepts_dotted_name_with_or_without_exe_suffix()
+    {
+        var withoutExeSuffix = await AttachByProcessNameAsync(includeExeSuffix: false);
+        var withExeSuffix = await AttachByProcessNameAsync(includeExeSuffix: true);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(withoutExeSuffix.Pid, Is.GreaterThan(0));
+            Assert.That(withExeSuffix.Pid, Is.GreaterThan(0));
+            Assert.That(withoutExeSuffix.ProcessName, Is.EqualTo(withExeSuffix.ProcessName));
+        });
+    }
+
     private async Task<LaunchAppResponse> LaunchTestAppAsync()
     {
         var exePath = TestAppPaths.FindTestAppExecutable();
@@ -140,6 +154,65 @@ public sealed class ControllerStateRecoverySnapshots
         }
     }
 
+    private async Task<AttachToAppResponse> AttachByProcessNameAsync(bool includeExeSuffix)
+    {
+        var exePath = TestAppPaths.FindTestAppExecutable();
+        var workingDirectory = Path.GetDirectoryName(exePath)!;
+        var expectedProcessName = Path.GetFileNameWithoutExtension(exePath);
+
+        KillProcessesByName(expectedProcessName);
+
+        Process? process = null;
+        try
+        {
+            process = Process.Start(new ProcessStartInfo
+            {
+                FileName = exePath,
+                WorkingDirectory = workingDirectory,
+                UseShellExecute = false,
+            });
+
+            if (process is null)
+            {
+                throw new InvalidOperationException("Failed to start test app process.");
+            }
+
+            _ = process.WaitForInputIdle(10_000);
+
+            var requestedName = includeExeSuffix
+                ? $"{process.ProcessName}.exe"
+                : process.ProcessName;
+
+            var attached = await _mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+            {
+                ["processName"] = requestedName
+            });
+
+            var windows = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows");
+            Assert.That(windows.Windows, Is.Not.Empty);
+
+            return attached;
+        }
+        finally
+        {
+            await CloseAppIfAttachedAsync();
+
+            if (process is not null)
+            {
+                KillProcessIfRunning(process.Id);
+                try
+                {
+                    process.Dispose();
+                }
+                catch
+                {
+                }
+            }
+
+            KillProcessesByName(expectedProcessName);
+        }
+    }
+
     private static bool IsProcessAlive(int pid)
     {
         try
@@ -173,6 +246,33 @@ public sealed class ControllerStateRecoverySnapshots
         }
         catch
         {
+        }
+    }
+
+    private static void KillProcessesByName(string processName)
+    {
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            return;
+        }
+
+        foreach (var process in Process.GetProcessesByName(processName))
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    _ = process.WaitForExit(2000);
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                process.Dispose();
+            }
         }
     }
 }

@@ -132,15 +132,88 @@ public sealed partial class AutomationController : IDisposable
             throw new FileNotFoundException($"Executable not found: '{request.ExePath}'.", request.ExePath);
         }
 
+        var waitMs = Math.Clamp(request.WaitForMainWindowMs, 1000, 120000);
+        var waitTimeout = TimeSpan.FromMilliseconds(waitMs);
+        Exception? lastLaunchError = null;
+
+        foreach (var launchStrategy in CreateLaunchStartInfos(request))
+        {
+            try
+            {
+                _application = Application.Launch(launchStrategy.StartInfo);
+                if (TryInitializeApplication(_application, waitTimeout, out var launchInitError))
+                {
+                    var launchResponse = new LaunchAppResponse(_application.ProcessId, _application.Name);
+                    return Task.FromResult(launchResponse);
+                }
+
+                if (!request.ReuseExistingInstance)
+                {
+                    throw launchInitError ?? new InvalidOperationException(
+                        $"Failed to initialize launched application (strategy: {launchStrategy.Name}).");
+                }
+
+                _application.Dispose();
+                _application = null;
+
+                if (TryAttachToExistingInstance(request.ExePath, waitTimeout, out var attachError))
+                {
+                    var attachResponse = new LaunchAppResponse(_application!.ProcessId, _application.Name);
+                    return Task.FromResult(attachResponse);
+                }
+
+                throw new InvalidOperationException(
+                    $"Launch strategy '{launchStrategy.Name}' failed to resolve a main window and fallback attach to an existing instance was unsuccessful.",
+                    attachError ?? launchInitError);
+            }
+            catch (Exception ex)
+            {
+                lastLaunchError = ex;
+                Cleanup();
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Launch failed for all launch strategies (shellExecute and directProcess).",
+            lastLaunchError);
+    }
+
+    private static IReadOnlyList<(ProcessStartInfo StartInfo, string Name)> CreateLaunchStartInfos(LaunchAppRequest request)
+    {
+        var shellStartInfo = CreateLaunchStartInfo(request, useShellExecute: true);
+        var directStartInfo = CreateLaunchStartInfo(request, useShellExecute: false);
+
+        directStartInfo.RedirectStandardOutput = true;
+        directStartInfo.RedirectStandardError = true;
+        directStartInfo.RedirectStandardInput = true;
+        ApplyWindowsGuiEnvironmentDefaults(directStartInfo);
+
+        return
+        [
+            (shellStartInfo, "shellExecute"),
+            (directStartInfo, "directProcess")
+        ];
+    }
+
+    private static ProcessStartInfo CreateLaunchStartInfo(LaunchAppRequest request, bool useShellExecute)
+    {
         var startInfo = new ProcessStartInfo
         {
             FileName = request.ExePath,
-            UseShellExecute = false,
+            UseShellExecute = useShellExecute,
         };
 
         if (!string.IsNullOrWhiteSpace(request.WorkingDirectory))
         {
             startInfo.WorkingDirectory = request.WorkingDirectory;
+        }
+        else if (Path.IsPathRooted(request.ExePath))
+        {
+            var exeDirectory = Path.GetDirectoryName(request.ExePath);
+            if (!string.IsNullOrWhiteSpace(exeDirectory))
+            {
+                startInfo.WorkingDirectory = exeDirectory;
+            }
         }
 
         if (request.Args is not null)
@@ -151,40 +224,69 @@ public sealed partial class AutomationController : IDisposable
             }
         }
 
-        var waitMs = Math.Clamp(request.WaitForMainWindowMs, 1000, 120000);
-        var waitTimeout = TimeSpan.FromMilliseconds(waitMs);
+        return startInfo;
+    }
 
+    private static void ApplyWindowsGuiEnvironmentDefaults(ProcessStartInfo startInfo)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var windowsDirectory = GetEnvironmentVariableFromAnyScope("WINDIR") ??
+                               GetEnvironmentVariableFromAnyScope("SystemRoot");
+
+        if (string.IsNullOrWhiteSpace(windowsDirectory))
+        {
+            try
+            {
+                windowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            }
+            catch
+            {
+                windowsDirectory = null;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(windowsDirectory))
+        {
+            return;
+        }
+
+        if (!startInfo.Environment.TryGetValue("WINDIR", out var windirValue) || string.IsNullOrWhiteSpace(windirValue))
+        {
+            startInfo.Environment["WINDIR"] = windowsDirectory;
+        }
+
+        if (!startInfo.Environment.TryGetValue("SystemRoot", out var systemRootValue) || string.IsNullOrWhiteSpace(systemRootValue))
+        {
+            startInfo.Environment["SystemRoot"] = windowsDirectory;
+        }
+
+        var tempDirectory = Path.GetTempPath();
+        if (!startInfo.Environment.TryGetValue("TEMP", out var tempValue) || string.IsNullOrWhiteSpace(tempValue))
+        {
+            startInfo.Environment["TEMP"] = tempDirectory;
+        }
+
+        if (!startInfo.Environment.TryGetValue("TMP", out var tmpValue) || string.IsNullOrWhiteSpace(tmpValue))
+        {
+            startInfo.Environment["TMP"] = tempDirectory;
+        }
+    }
+
+    private static string? GetEnvironmentVariableFromAnyScope(string name)
+    {
         try
         {
-            _application = Application.Launch(startInfo);
-            if (TryInitializeApplication(_application, waitTimeout, out var launchInitError))
-            {
-                var launchResponse = new LaunchAppResponse(_application.ProcessId, _application.Name);
-                return Task.FromResult(launchResponse);
-            }
-
-            if (!request.ReuseExistingInstance)
-            {
-                throw launchInitError ?? new InvalidOperationException("Failed to initialize launched application.");
-            }
-
-            _application.Dispose();
-            _application = null;
-
-            if (TryAttachToExistingInstance(request.ExePath, waitTimeout, out var attachError))
-            {
-                var attachResponse = new LaunchAppResponse(_application!.ProcessId, _application.Name);
-                return Task.FromResult(attachResponse);
-            }
-
-            throw new InvalidOperationException(
-                "Launch failed to resolve a main window and fallback attach to an existing instance was unsuccessful.",
-                attachError ?? launchInitError);
+            return Environment.GetEnvironmentVariable(name) ??
+                   Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User) ??
+                   Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
         }
         catch
         {
-            Cleanup();
-            throw;
+            return null;
         }
     }
 
@@ -286,7 +388,8 @@ public sealed partial class AutomationController : IDisposable
             }
             else if (!string.IsNullOrWhiteSpace(request.ProcessName))
             {
-                _application = Application.Attach(request.ProcessName);
+                var resolvedPid = ResolveProcessIdByName(request.ProcessName);
+                _application = Application.Attach(resolvedPid);
             }
             else
             {
@@ -305,6 +408,102 @@ public sealed partial class AutomationController : IDisposable
         {
             Cleanup();
             throw;
+        }
+    }
+
+    private static int ResolveProcessIdByName(string processName)
+    {
+        var candidateNames = BuildProcessNameCandidates(processName);
+        var candidates = new List<(int Pid, DateTime StartTimeUtc)>();
+        var seenPids = new HashSet<int>();
+
+        foreach (var candidateName in candidateNames)
+        {
+            Process[] processes;
+            try
+            {
+                processes = Process.GetProcessesByName(candidateName);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var process in processes)
+            {
+                try
+                {
+                    if (process.HasExited || !seenPids.Add(process.Id))
+                    {
+                        continue;
+                    }
+
+                    candidates.Add((process.Id, SafeGetStartTimeUtc(process)));
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Unable to find process with name: {processName}. Tried: {string.Join(", ", candidateNames)}");
+        }
+
+        return candidates
+            .OrderByDescending(c => c.StartTimeUtc)
+            .ThenByDescending(c => c.Pid)
+            .First()
+            .Pid;
+    }
+
+    private static IReadOnlyList<string> BuildProcessNameCandidates(string processName)
+    {
+        var trimmed = processName.Trim();
+        if (trimmed.Length == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var fileName = Path.GetFileName(trimmed);
+        var withoutExtension = Path.GetFileNameWithoutExtension(fileName);
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        AddCandidateName(fileName);
+        AddCandidateName(withoutExtension);
+
+        if (!fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            AddCandidateName(Path.GetFileNameWithoutExtension($"{fileName}.exe"));
+        }
+
+        return names.ToArray();
+
+        void AddCandidateName(string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                names.Add(value.Trim());
+            }
+        }
+    }
+
+    private static DateTime SafeGetStartTimeUtc(Process process)
+    {
+        try
+        {
+            return process.StartTime.ToUniversalTime();
+        }
+        catch
+        {
+            return DateTime.MinValue;
         }
     }
 

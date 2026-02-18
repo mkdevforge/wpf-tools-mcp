@@ -33,7 +33,7 @@ public static class AppTools
     public static Task<AttachToAppResponse> AttachToApp(
         AutomationController automation,
         [Description("Process ID")] int? pid = null,
-        [Description("Process name")] string? processName = null,
+        [Description("Process name (supports dotted names and optional .exe suffix)")] string? processName = null,
         CancellationToken cancellationToken = default)
     {
         if (pid is not null && !string.IsNullOrWhiteSpace(processName))
