@@ -76,10 +76,82 @@ internal static class AgentServer
                 case "wpf/get_visual_tree":
                     return await RunOnUiAsync(() =>
                     {
-                        var typedRequest = request.Params?.Deserialize<GetWpfVisualTreeRequest>(JsonOptions)
-                            ?? new GetWpfVisualTreeRequest();
+                        var typedRequest = request.Params?.Deserialize<GetWpfVisualTreeRequestV2>(JsonOptions)
+                            ?? new GetWpfVisualTreeRequestV2();
 
                         var response = WpfVisualTreeInspector.GetVisualTree(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case "wpf/find_elements":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<FindElementsWpfRequest>(JsonOptions)
+                            ?? new FindElementsWpfRequest();
+
+                        var response = WpfVisualTreeInspector.FindElements(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case "wpf/get_path":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetWpfPathRequest>(JsonOptions)
+                            ?? new GetWpfPathRequest();
+
+                        var response = WpfVisualTreeInspector.GetPath(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case "wpf/resolve_element":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<ResolveWpfElementRequest>(JsonOptions)
+                            ?? new ResolveWpfElementRequest();
+
+                        var response = WpfVisualTreeInspector.ResolveElement(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case "wpf/get_binding_info":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetBindingInfoRequest>(JsonOptions)
+                            ?? new GetBindingInfoRequest();
+
+                        var response = WpfVisualTreeInspector.GetBindingInfo(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case "wpf/get_binding_errors":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetBindingErrorsRequest>(JsonOptions)
+                            ?? new GetBindingErrorsRequest();
+
+                        var response = WpfVisualTreeInspector.GetBindingErrors(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case "wpf/get_data_context":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetDataContextRequest>(JsonOptions)
+                            ?? new GetDataContextRequest();
+
+                        var response = WpfVisualTreeInspector.GetDataContext(typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,

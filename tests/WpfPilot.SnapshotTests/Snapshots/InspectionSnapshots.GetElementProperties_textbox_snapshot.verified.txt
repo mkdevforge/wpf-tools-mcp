@@ -1,8 +1,7 @@
-﻿{
+{
   Element: {
     ElementType: Edit,
     AutomationId: Basic_TextBox,
-    Name: ,
     ClassName: TextBox,
     Bounds: {
       Width: 240,

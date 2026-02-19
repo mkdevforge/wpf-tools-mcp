@@ -21,6 +21,8 @@ public sealed class InjectionSnapshots
         Process? app = null;
         McpTestContext? mcp1 = null;
         McpTestContext? mcp2 = null;
+        string sessionId1 = "";
+        string sessionId2 = "";
 
         try
         {
@@ -40,15 +42,19 @@ public sealed class InjectionSnapshots
 
             mcp1 = await McpTestContext.StartAsync(serverExe);
 
-            _ = await mcp1.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+            var attached1 = await mcp1.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
             {
                 ["pid"] = app.Id
             });
+            sessionId1 = attached1.SessionId;
 
             InjectAgentResponse inject1;
             try
             {
-                inject1 = await mcp1.CallToolAsync<InjectAgentResponse>("inject_agent");
+                inject1 = await mcp1.CallToolAsync<InjectAgentResponse>("inject_agent", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = sessionId1
+                });
             }
             catch (InvalidOperationException ex) when (ShouldSkipForMissingAssets(ex))
             {
@@ -56,17 +62,26 @@ public sealed class InjectionSnapshots
                 return;
             }
 
-            var pong1 = await mcp1.CallToolAsync<AgentPingResponse>("agent_ping");
+            var pong1 = await mcp1.CallToolAsync<AgentPingResponse>("agent_ping", new Dictionary<string, object?>
+            {
+                ["sessionId"] = sessionId1
+            });
             Assert.That(pong1.Message, Is.EqualTo("pong").IgnoreCase);
 
             var uiaTree1 = await mcp1.CallToolAsync<GetVisualTreeResponse>("get_visual_tree", new Dictionary<string, object?>
             {
-                ["depth"] = 10
+                ["sessionId"] = sessionId1,
+                ["backend"] = "uia",
+                ["depth"] = 10,
+                ["maxNodes"] = 2000
             });
 
-            var wpfTree1 = await mcp1.CallToolAsync<GetWpfVisualTreeResponse>("get_wpf_visual_tree", new Dictionary<string, object?>
+            var wpfTree1 = await mcp1.CallToolAsync<GetVisualTreeResponse>("get_visual_tree", new Dictionary<string, object?>
             {
-                ["depth"] = 12
+                ["sessionId"] = sessionId1,
+                ["backend"] = "wpf",
+                ["depth"] = 12,
+                ["maxNodes"] = 2000
             });
 
             // Simulate MCP server restart (new process, new AutomationController instance).
@@ -74,21 +89,31 @@ public sealed class InjectionSnapshots
             mcp1 = null;
 
             mcp2 = await McpTestContext.StartAsync(serverExe);
-            _ = await mcp2.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+            var attached2 = await mcp2.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
             {
                 ["pid"] = app.Id
             });
+            sessionId2 = attached2.SessionId;
 
-            var inject2 = await mcp2.CallToolAsync<InjectAgentResponse>("inject_agent");
+            var inject2 = await mcp2.CallToolAsync<InjectAgentResponse>("inject_agent", new Dictionary<string, object?>
+            {
+                ["sessionId"] = sessionId2
+            });
             Assert.That(inject2.Injected, Is.False, "Expected reconnect without reinjection after MCP restart.");
             Assert.That(inject2.PipeName, Is.EqualTo(inject1.PipeName));
 
-            var pong2 = await mcp2.CallToolAsync<AgentPingResponse>("agent_ping");
+            var pong2 = await mcp2.CallToolAsync<AgentPingResponse>("agent_ping", new Dictionary<string, object?>
+            {
+                ["sessionId"] = sessionId2
+            });
             Assert.That(pong2.Message, Is.EqualTo("pong").IgnoreCase);
 
-            var wpfTree2 = await mcp2.CallToolAsync<GetWpfVisualTreeResponse>("get_wpf_visual_tree", new Dictionary<string, object?>
+            var wpfTree2 = await mcp2.CallToolAsync<GetVisualTreeResponse>("get_visual_tree", new Dictionary<string, object?>
             {
-                ["depth"] = 12
+                ["sessionId"] = sessionId2,
+                ["backend"] = "wpf",
+                ["depth"] = 12,
+                ["maxNodes"] = 2000
             });
 
             var stable = new
@@ -100,9 +125,9 @@ public sealed class InjectionSnapshots
                 Pong1 = pong1.Message,
                 Pong2 = pong2.Message,
                 WpfRootType = wpfTree1.Root.Type,
-                UiaAutomationIds = CollectUiaAutomationIds(uiaTree1.Root).OrderBy(x => x, StringComparer.Ordinal).ToArray(),
-                WpfAutomationIds1 = CollectWpfAutomationIds(wpfTree1.Root).OrderBy(x => x, StringComparer.Ordinal).ToArray(),
-                WpfAutomationIds2 = CollectWpfAutomationIds(wpfTree2.Root).OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+                UiaAutomationIds = CollectAutomationIds(uiaTree1.Root).OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+                WpfAutomationIds1 = CollectAutomationIds(wpfTree1.Root).OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+                WpfAutomationIds2 = CollectAutomationIds(wpfTree2.Root).OrderBy(x => x, StringComparer.Ordinal).ToArray(),
             };
 
             await Verifier.Verify(stable);
@@ -114,11 +139,16 @@ public sealed class InjectionSnapshots
             {
                 try
                 {
-                    _ = await mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+                    var sid = mcp2 is not null ? sessionId2 : sessionId1;
+                    if (!string.IsNullOrWhiteSpace(sid))
                     {
-                        ["force"] = true,
-                        ["timeoutMs"] = 2000
-                    });
+                        _ = await mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
+                        {
+                            ["sessionId"] = sid,
+                            ["force"] = true,
+                            ["timeoutMs"] = 2000
+                        });
+                    }
                 }
                 catch
                 {
@@ -169,7 +199,7 @@ public sealed class InjectionSnapshots
                || message.Contains("Snoop generic injector not found", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static IEnumerable<string> CollectUiaAutomationIds(VisualTreeNode node)
+    private static IEnumerable<string> CollectAutomationIds(TreeNode node)
     {
         if (!string.IsNullOrWhiteSpace(node.AutomationId))
         {
@@ -178,23 +208,7 @@ public sealed class InjectionSnapshots
 
         foreach (var child in node.Children)
         {
-            foreach (var id in CollectUiaAutomationIds(child))
-            {
-                yield return id;
-            }
-        }
-    }
-
-    private static IEnumerable<string> CollectWpfAutomationIds(WpfVisualTreeNode node)
-    {
-        if (!string.IsNullOrWhiteSpace(node.AutomationId))
-        {
-            yield return node.AutomationId!;
-        }
-
-        foreach (var child in node.Children)
-        {
-            foreach (var id in CollectWpfAutomationIds(child))
+            foreach (var id in CollectAutomationIds(child))
             {
                 yield return id;
             }

@@ -40,7 +40,7 @@
                        Text="Dialog: (none)"
                        Margin="0,0,0,12" />
 
-            <TextBlock Text="The confirm dialog is a separate window. Use list_windows + focus_window + windowHandle to interact."
+            <TextBlock Text="The confirm dialog is a separate window. Use list_windows + set_active_window + windowHandle to interact."
                        Foreground="Gray" />
         </StackPanel>
     </Grid>

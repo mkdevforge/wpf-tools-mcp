@@ -12,6 +12,7 @@ namespace WpfPilot.SnapshotTests;
 public sealed class TreeViewInteractionSnapshots
 {
     private McpTestContext _mcp = null!;
+    private string _sessionId = "";
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -36,25 +37,32 @@ public sealed class TreeViewInteractionSnapshots
         var exePath = TestAppPaths.FindTreeViewTestAppExecutable();
         var workingDirectory = Path.GetDirectoryName(exePath)!;
 
-        _ = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        var launch = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
         {
             ["exePath"] = exePath,
             ["workingDirectory"] = workingDirectory,
         });
+
+        _sessionId = launch.SessionId;
     }
 
     private async Task CloseAppAsync()
     {
         try
         {
-            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["force"] = true,
                 ["timeoutMs"] = 2000
             });
         }
         catch
         {
+        }
+        finally
+        {
+            _sessionId = "";
         }
     }
 
@@ -66,6 +74,7 @@ public sealed class TreeViewInteractionSnapshots
         {
             var selected = await _mcp.CallToolAsync<SelectItemResponse>("select_item", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Tree_TreeView"
@@ -75,6 +84,7 @@ public sealed class TreeViewInteractionSnapshots
 
             var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Tree_SelectedStatus"
@@ -101,6 +111,7 @@ public sealed class TreeViewInteractionSnapshots
         {
             var selected = await _mcp.CallToolAsync<SelectItemResponse>("select_item", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Tree_TreeView"
@@ -113,6 +124,7 @@ public sealed class TreeViewInteractionSnapshots
 
             var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Tree_SelectedStatus"
@@ -131,4 +143,3 @@ public sealed class TreeViewInteractionSnapshots
         }
     }
 }
-

@@ -1,0 +1,23 @@
+{
+  Resolve: {
+    BackendUsed: Wpf,
+    Element: {
+      Type: DataGrid,
+      AutomationId: DataGrid_PeopleGrid,
+      Name: PeopleGrid,
+      XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/DataGrid,
+      ClassName: System.Windows.Controls.DataGrid,
+      Bounds: {
+        X: 180,
+        Y: 219,
+        Width: 740,
+        Height: 420
+      },
+      ElementId: <element>
+    }
+  },
+  DataContextTypeByElementId: WpfPilot.TestApp.DataGrid.DataGridViewModel,
+  DataContextTypeByLocator: WpfPilot.TestApp.DataGrid.DataGridViewModel,
+  SelectedStatusByElementId: Selected: (none),
+  SelectedStatusByLocator: Selected: (none)
+}

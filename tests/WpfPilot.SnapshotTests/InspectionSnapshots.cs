@@ -13,6 +13,7 @@ namespace WpfPilot.SnapshotTests;
 public sealed class InspectionSnapshots
 {
     private McpTestContext _mcp = null!;
+    private string _sessionId = "";
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -23,11 +24,13 @@ public sealed class InspectionSnapshots
         var exePath = TestAppPaths.FindTestAppExecutable();
         var workingDirectory = Path.GetDirectoryName(exePath)!;
 
-        _ = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        var launch = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
         {
             ["exePath"] = exePath,
             ["workingDirectory"] = workingDirectory,
         });
+
+        _sessionId = launch.SessionId;
     }
 
     [OneTimeTearDown]
@@ -40,8 +43,9 @@ public sealed class InspectionSnapshots
 
         try
         {
-            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["force"] = true,
                 ["timeoutMs"] = 2000
             });
@@ -58,17 +62,13 @@ public sealed class InspectionSnapshots
     {
         var result = await _mcp.CallToolAsync<GetVisualTreeResponse>("get_visual_tree", new Dictionary<string, object?>
         {
-            ["depth"] = 4
+            ["sessionId"] = _sessionId,
+            ["backend"] = "uia",
+            ["depth"] = 4,
+            ["maxNodes"] = 200
         });
 
-        static VisualTreeNode Scrub(VisualTreeNode node) =>
-            node with
-            {
-                Bounds = node.Bounds with { X = 0, Y = 0 },
-                Children = node.Children.Select(Scrub).ToArray()
-            };
-
-        await Verifier.Verify(result with { Root = Scrub(result.Root) });
+        await Verifier.Verify(result);
     }
 
     [Test]
@@ -76,6 +76,7 @@ public sealed class InspectionSnapshots
     {
         var result = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
         {
+            ["sessionId"] = _sessionId,
             ["locator"] = new Dictionary<string, object?>
             {
                 ["automationId"] = "Basic_TextBox"
@@ -98,6 +99,7 @@ public sealed class InspectionSnapshots
     {
         var screenshot = await _mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
         {
+            ["sessionId"] = _sessionId,
             ["locator"] = new Dictionary<string, object?>
             {
                 ["automationId"] = "Basic_Button"
@@ -134,6 +136,7 @@ public sealed class InspectionSnapshots
         async Task<ElementSummary> ResolveAsync(Dictionary<string, object?> locator) =>
             (await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = locator
             })).Element;
 

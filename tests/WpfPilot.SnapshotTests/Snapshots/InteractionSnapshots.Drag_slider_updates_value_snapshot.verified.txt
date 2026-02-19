@@ -1,0 +1,7 @@
+{
+  Drag: {
+    Dragged: true,
+    MethodUsed: mouse
+  },
+  Value: 100.0
+}

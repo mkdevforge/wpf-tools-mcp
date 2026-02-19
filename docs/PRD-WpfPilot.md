@@ -121,7 +121,7 @@ The MCP server manages both channels in Phase 2. Inspection tools route through 
 | `select_item` | Select item in combo box, list box, tab control | Locator + item identifier (`text`, `index`, or `itemLocator`) |
 | `invoke` | Invoke a button or menu item via InvokePattern | Locator |
 | `scroll_to_element` | Scroll a container to bring an element into view | Locator of the target element |
-| `focus_window` | Bring a window to the foreground | Window handle or title |
+| `set_active_window` | Bring a window to the foreground and set it as the session’s active window | `sessionId` + window handle or title |
 
 ### Phase 1 — App Lifecycle
 
@@ -129,7 +129,7 @@ The MCP server manages both channels in Phase 2. Inspection tools route through 
 |---|---|---|
 | `launch_app` | Start a WPF application | Executable path, optional arguments, working directory |
 | `attach_to_app` | Attach to an already-running process | Process name or PID |
-| `close_app` | Close the attached application | Graceful close with optional force kill timeout |
+| `close_session` | Close a session (and close the attached application) | `sessionId` + graceful close with optional force kill timeout |
 
 ### Phase 2 — Upgraded inspection (Snoop, in-process)
 
@@ -316,7 +316,7 @@ Phase 1 delivers a fully functional MCP server that can see and interact with WP
 
 #### P1-M0 — Walking skeleton
 - MCP server starts, registers tools, communicates via stdio
-- `launch_app`, `attach_to_app`, `close_app` working
+- `launch_app`, `attach_to_app`, `close_session` working
 - `list_windows` returns window info
 - `take_screenshot` for the target window
 - Test app with BasicControls page
@@ -331,7 +331,8 @@ Phase 1 delivers a fully functional MCP server that can see and interact with WP
 
 #### P1-M2 — Interact
 - `click_element`, `type_text`, `set_value`, `select_item`, `invoke`
-- `scroll_to_element`, `focus_window`
+- `scroll_to_element`, `set_active_window`
+- Element handles: `resolve_element` returns an `elementId` handle for re-use across subsequent tool calls (and `find_elements` can include `elementId` values). `uia_...` handles are validated best-effort (XPath + RuntimeId) while `wpf_...` handles are soft (XPath-based) and may go stale if the visual tree changes.
 - Test app expanded with all pages (DataGrid, Navigation, DeeplyNested, DynamicContent, Dialogs, CustomControls)
 - Integration flow tests: launch → inspect → interact → re-inspect → verify state changed
 - Error handling: element not found, ambiguous locator, process not running, stale references

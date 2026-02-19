@@ -35,6 +35,13 @@
                     HorizontalAlignment="Left"
                     Click="AddDynamicButton_Click" />
 
+            <Button AutomationProperties.AutomationId="Dynamic_RemoveButton"
+                    Content="Remove dynamic button"
+                    Width="200"
+                    Margin="0,0,0,12"
+                    HorizontalAlignment="Left"
+                    Click="RemoveDynamicButton_Click" />
+
             <StackPanel x:Name="DynamicHost"
                         Margin="0,0,0,12" />
 
@@ -45,4 +52,3 @@
         </StackPanel>
     </Grid>
 </Window>
-

@@ -13,6 +13,7 @@ namespace WpfPilot.SnapshotTests;
 public sealed class InteractionSnapshots
 {
     private McpTestContext _mcp = null!;
+    private string _sessionId = "";
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -37,25 +38,32 @@ public sealed class InteractionSnapshots
         var exePath = TestAppPaths.FindTestAppExecutable();
         var workingDirectory = Path.GetDirectoryName(exePath)!;
 
-        _ = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        var launch = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
         {
             ["exePath"] = exePath,
             ["workingDirectory"] = workingDirectory,
         });
+
+        _sessionId = launch.SessionId;
     }
 
     private async Task CloseTestAppAsync()
     {
         try
         {
-            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["force"] = true,
                 ["timeoutMs"] = 2000
             });
         }
         catch
         {
+        }
+        finally
+        {
+            _sessionId = "";
         }
     }
 
@@ -65,7 +73,10 @@ public sealed class InteractionSnapshots
         await LaunchTestAppAsync();
         try
         {
-            var result = await _mcp.CallToolAsync<FocusWindowResponse>("focus_window");
+            var result = await _mcp.CallToolAsync<FocusWindowResponse>("set_active_window", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId
+            });
             await Verifier.Verify(result with { Handle = 0 });
         }
         finally
@@ -82,6 +93,7 @@ public sealed class InteractionSnapshots
         {
             var click = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_Button"
@@ -91,6 +103,7 @@ public sealed class InteractionSnapshots
 
             var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_ClickStatus"
@@ -117,6 +130,7 @@ public sealed class InteractionSnapshots
         {
             var invoke = await _mcp.CallToolAsync<InvokeResponse>("invoke", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_Button"
@@ -125,6 +139,7 @@ public sealed class InteractionSnapshots
 
             var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_ClickStatus"
@@ -154,6 +169,7 @@ public sealed class InteractionSnapshots
             {
                 _ = await _mcp.CallToolAsync<InvokeResponse>("invoke", new Dictionary<string, object?>
                 {
+                    ["sessionId"] = _sessionId,
                     ["locator"] = new Dictionary<string, object?>
                     {
                         ["automationId"] = "Basic_Slider"
@@ -183,6 +199,7 @@ public sealed class InteractionSnapshots
         {
             var typed = await _mcp.CallToolAsync<TypeTextResponse>("type_text", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_TextBox"
@@ -192,6 +209,7 @@ public sealed class InteractionSnapshots
 
             var textbox = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_TextBox"
@@ -220,6 +238,7 @@ public sealed class InteractionSnapshots
         {
             var set = await _mcp.CallToolAsync<SetValueResponse>("set_value", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_Slider"
@@ -229,6 +248,7 @@ public sealed class InteractionSnapshots
 
             var slider = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_Slider"
@@ -250,6 +270,76 @@ public sealed class InteractionSnapshots
     }
 
     [Test]
+    public async Task Drag_slider_updates_value_snapshot()
+    {
+        await LaunchTestAppAsync();
+        try
+        {
+            var sliderBefore = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_Slider"
+                }
+            });
+
+            var sliderTree = await _mcp.CallToolAsync<GetVisualTreeResponse>("get_visual_tree", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["backend"] = "uia",
+                ["root"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_Slider"
+                },
+                ["depth"] = 6,
+                ["maxNodes"] = 80,
+                ["visibleOnly"] = true,
+                ["preset"] = "minimal"
+            });
+
+            var thumbXPath = FindFirstXPathByType(sliderTree.Root, "Thumb") ?? sliderTree.Root.XPath;
+
+            var bounds = sliderBefore.Element.Bounds;
+            var toX = bounds.X + bounds.Width - 4;
+            var toY = bounds.Y + bounds.Height / 2;
+
+            var drag = await _mcp.CallToolAsync<DragResponse>("drag", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["xpath"] = thumbXPath
+                },
+                ["toX"] = toX,
+                ["toY"] = toY,
+                ["steps"] = 18
+            });
+
+            var sliderAfter = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_Slider"
+                }
+            });
+
+            var rangeValue = GetPatternValue(sliderAfter, "RangeValue", "Value")?.GetValue<double>();
+
+            await Verifier.Verify(new
+            {
+                Drag = drag,
+                Value = rangeValue
+            });
+        }
+        finally
+        {
+            await CloseTestAppAsync();
+        }
+    }
+
+    [Test]
     public async Task SelectItem_combobox_by_text_updates_value_snapshot()
     {
         await LaunchTestAppAsync();
@@ -257,6 +347,7 @@ public sealed class InteractionSnapshots
         {
             var selected = await _mcp.CallToolAsync<SelectItemResponse>("select_item", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_ComboBox"
@@ -266,6 +357,7 @@ public sealed class InteractionSnapshots
 
             var comboBox = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_ComboBox"
@@ -294,6 +386,7 @@ public sealed class InteractionSnapshots
         {
             var selected = await _mcp.CallToolAsync<SelectItemResponse>("select_item", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_ListBox"
@@ -303,6 +396,7 @@ public sealed class InteractionSnapshots
 
             var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_ListBoxStatus"
@@ -329,6 +423,7 @@ public sealed class InteractionSnapshots
         {
             var selected = await _mcp.CallToolAsync<SelectItemResponse>("select_item", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_ListBox"
@@ -341,6 +436,7 @@ public sealed class InteractionSnapshots
 
             var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Basic_ListBoxStatus"
@@ -377,5 +473,24 @@ public sealed class InteractionSnapshots
         }
 
         return values[valueName];
+    }
+
+    private static string? FindFirstXPathByType(TreeNode root, string typeName)
+    {
+        if (string.Equals(root.Type, typeName, StringComparison.OrdinalIgnoreCase))
+        {
+            return root.XPath;
+        }
+
+        foreach (var child in root.Children)
+        {
+            var found = FindFirstXPathByType(child, typeName);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
     }
 }

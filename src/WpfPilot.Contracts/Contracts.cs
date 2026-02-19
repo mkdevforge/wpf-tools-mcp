@@ -10,17 +10,28 @@ public sealed record LaunchAppRequest(
     int WaitForMainWindowMs = 15000,
     bool ReuseExistingInstance = true);
 
-public sealed record LaunchAppResponse(int Pid, string ProcessName);
+public sealed record LaunchAppResponse(string SessionId, int Pid, string ProcessName);
 
 public sealed record AttachToAppRequest(int? Pid = null, string? ProcessName = null);
 
-public sealed record AttachToAppResponse(int Pid, string ProcessName);
+public sealed record AttachToAppResponse(string SessionId, int Pid, string ProcessName);
 
 public sealed record CloseAppRequest(bool Force = false, int TimeoutMs = 5000);
 
 public sealed record CloseAppResponse(bool Closed);
 
-public sealed record ResetStateResponse(bool Reset);
+public sealed record SessionInfo(
+    string SessionId,
+    int Pid,
+    string ProcessName,
+    long ActiveWindowHandle,
+    string ActiveWindowTitle,
+    string CreatedAtUtc,
+    IReadOnlyList<string> BackendCapabilities);
+
+public sealed record ListSessionsResponse(IReadOnlyList<SessionInfo> Sessions);
+
+public sealed record GetActiveWindowResponse(long Handle, string Title);
 
 public sealed record ListWindowsResponse(int ProcessId, string ProcessName, IReadOnlyList<WindowInfo> Windows);
 
@@ -40,18 +51,52 @@ public sealed record ElementLocator(
     [property: JsonPropertyName("xpath")] string? XPath = null,
     [property: JsonPropertyName("index")] int? Index = null);
 
-public sealed record VisualTreeNode(
-    string ElementType,
-    string? AutomationId,
-    string? Name,
-    string? ClassName,
-    Rect Bounds,
-    bool IsEnabled,
-    bool IsOffscreen,
-    string XPath,
-    IReadOnlyList<VisualTreeNode> Children);
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum InspectionBackend
+{
+    Auto,
+    Uia,
+    Wpf
+}
 
-public sealed record GetVisualTreeResponse(VisualTreeNode Root);
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TreePreset
+{
+    Minimal,
+    Standard,
+    Debug
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum InteractiveMode
+{
+    Heuristic,
+    Patterns
+}
+
+public sealed record TreeNode(
+    string Type,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AutomationId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Name,
+    string XPath,
+    int ChildrenCount,
+    IReadOnlyList<TreeNode> Children,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClassName = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? Bounds = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsEnabled = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsOffscreen = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Visibility = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsVisible = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DataContextType = null);
+
+public sealed record GetVisualTreeResponse(
+    InspectionBackend BackendUsed,
+    TreeNode Root,
+    int ReturnedNodes,
+    int ScannedNodes,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
 
 public sealed record ElementSummary(
     string ElementType,
@@ -86,6 +131,7 @@ public enum ScreenshotImageFormat
 public sealed record TakeScreenshotRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     ScreenshotCaptureMode CaptureMode = ScreenshotCaptureMode.Screen,
     ScreenshotImageFormat Format = ScreenshotImageFormat.Png,
     int JpegQuality = 90,
@@ -120,40 +166,112 @@ public enum ClickMode
 }
 
 public sealed record ClickElementRequest(
-    ElementLocator Locator,
+    ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     long? WindowHandle = null,
     ClickType ClickType = ClickType.Single,
     ClickMode ClickMode = ClickMode.Auto);
 
 public sealed record ClickElementResponse(bool Clicked, string MethodUsed);
 
-public sealed record InvokeRequest(ElementLocator Locator, long? WindowHandle = null);
+public sealed record InvokeRequest(
+    ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    long? WindowHandle = null);
 
 public sealed record InvokeResponse(bool Invoked);
 
-public sealed record TypeTextRequest(ElementLocator Locator, string Text, long? WindowHandle = null);
+public sealed record TypeTextRequest(
+    ElementLocator? Locator = null,
+    string Text = "",
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    long? WindowHandle = null);
 
 public sealed record TypeTextResponse(bool Typed, string MethodUsed);
 
-public sealed record SetValueRequest(ElementLocator Locator, double Value, long? WindowHandle = null);
+public sealed record SetValueRequest(
+    ElementLocator? Locator = null,
+    double Value = 0,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    long? WindowHandle = null);
 
 public sealed record SetValueResponse(bool Set, string MethodUsed);
 
 public sealed record SelectItemRequest(
-    ElementLocator Locator,
+    ElementLocator? Locator = null,
     string? Text = null,
     int? Index = null,
     long? WindowHandle = null,
-    ElementLocator? ItemLocator = null);
+    ElementLocator? ItemLocator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    [property: JsonPropertyName("itemElementId")] string? ItemElementId = null);
 
 public sealed record SelectItemResponse(bool Selected);
 
 public sealed record ScrollToElementRequest(
-    ElementLocator Locator,
+    ElementLocator? Locator = null,
     long? WindowHandle = null,
-    ElementLocator? ContainerLocator = null);
+    ElementLocator? ContainerLocator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    [property: JsonPropertyName("containerElementId")] string? ContainerElementId = null);
 
 public sealed record ScrollToElementResponse(bool Scrolled, string MethodUsed);
+
+public sealed record DragRequest(
+    ElementLocator? Locator = null,
+    long? WindowHandle = null,
+    ElementLocator? TargetLocator = null,
+    int? ToX = null,
+    int? ToY = null,
+    int Steps = 20,
+    string? Button = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    [property: JsonPropertyName("targetElementId")] string? TargetElementId = null);
+
+public sealed record DragResponse(bool Dragged, string MethodUsed);
+
+public sealed record FindElementsQuery(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AutomationIdEquals = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AutomationIdContains = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? NameEquals = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? NameContains = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TypeEquals = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum FindReturnFields
+{
+    Minimal,
+    Standard
+}
+
+public sealed record ElementRef(
+    string Type,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AutomationId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Name,
+    string XPath,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClassName = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? Bounds = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonPropertyName("elementId")] string? ElementId = null);
+
+public sealed record ResolveElementResponse(
+    InspectionBackend BackendUsed,
+    ElementRef Element,
+    long WindowHandleUsed);
+
+public sealed record ReleaseElementResponse(bool Released);
+
+public sealed record FindElementsResponse(
+    InspectionBackend BackendUsed,
+    IReadOnlyList<ElementRef> Matches,
+    int ReturnedMatches,
+    int ScannedNodes,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+
+public sealed record GetPathToElementResponse(
+    InspectionBackend BackendUsed,
+    string XPath);
 
 // Phase 2 (Snoop agent)
 
@@ -161,15 +279,100 @@ public sealed record InjectAgentResponse(bool Injected, string PipeName);
 
 public sealed record AgentPingResponse(string Message);
 
-public sealed record GetWpfVisualTreeRequest(long? WindowHandle = null, int Depth = 4);
+public sealed record GetWpfVisualTreeRequestV2(
+    long? WindowHandle = null,
+    string? RootXPath = null,
+    int Depth = 4,
+    int MaxNodes = 500,
+    bool VisibleOnly = true,
+    bool InteractiveOnly = false,
+    InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
+    TreePreset Preset = TreePreset.Minimal,
+    IReadOnlyList<string>? Fields = null);
 
-public sealed record WpfVisualTreeNode(
-    string Type,
-    string? Name,
-    string? AutomationId,
-    string? Visibility,
-    string? DataContextType,
-    string XPath,
-    IReadOnlyList<WpfVisualTreeNode> Children);
+public sealed record FindElementsWpfRequest(
+    long? WindowHandle = null,
+    string? RootXPath = null,
+    FindElementsQuery? Query = null,
+    bool VisibleOnly = true,
+    bool InteractiveOnly = false,
+    InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
+    int MaxResults = 25,
+    int MaxNodes = 1000,
+    FindReturnFields ReturnFields = FindReturnFields.Minimal);
 
-public sealed record GetWpfVisualTreeResponse(WpfVisualTreeNode Root);
+public sealed record GetWpfPathRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    string? RootXPath = null,
+    bool VisibleOnly = true,
+    int MaxNodes = 2000);
+
+public sealed record ResolveWpfElementRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    string? RootXPath = null,
+    bool VisibleOnly = true,
+    int MaxNodes = 2000,
+    FindReturnFields ReturnFields = FindReturnFields.Minimal);
+
+public sealed record GetBindingInfoRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    bool IncludeUnbound = false,
+    int MaxProperties = 2000,
+    string ValueFormat = "string");
+
+public sealed record BindingInfo(
+    string TargetProperty,
+    string BindingKind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Path = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Source = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Mode = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UpdateSourceTrigger = null,
+    string Status = "Unknown",
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ErrorMessage = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CurrentValue = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ValueSource = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Converter = null);
+
+public sealed record GetBindingInfoResponse(
+    ElementRef Element,
+    IReadOnlyList<BindingInfo> Bindings,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
+
+public sealed record GetBindingErrorsRequest(
+    long? WindowHandle = null,
+    string? RootXPath = null,
+    int Depth = 6,
+    int MaxErrors = 200,
+    int MaxNodes = 2000);
+
+public sealed record BindingErrorInfo(
+    string ElementXPath,
+    string ElementType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ElementName = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AutomationId = null,
+    string TargetProperty = "",
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Path = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ErrorMessage = null,
+    string Status = "Unknown");
+
+public sealed record GetBindingErrorsResponse(
+    IReadOnlyList<BindingErrorInfo> Errors,
+    int ScannedNodes,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
+
+public sealed record GetDataContextRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    int MaxDepth = 2,
+    int MaxPropertiesPerObject = 50,
+    int MaxStringLength = 2000,
+    bool IncludeNulls = false);
+
+public sealed record GetDataContextResponse(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DataContextType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonNode? Data);

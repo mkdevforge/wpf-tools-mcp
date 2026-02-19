@@ -14,6 +14,7 @@ public sealed class DialogsSnapshots
     private const string DialogTitle = "WpfPilot Confirm Dialog";
 
     private McpTestContext _mcp = null!;
+    private string _sessionId = "";
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -38,19 +39,22 @@ public sealed class DialogsSnapshots
         var exePath = TestAppPaths.FindDialogsTestAppExecutable();
         var workingDirectory = Path.GetDirectoryName(exePath)!;
 
-        _ = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        var launch = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
         {
             ["exePath"] = exePath,
             ["workingDirectory"] = workingDirectory,
         });
+
+        _sessionId = launch.SessionId;
     }
 
     private async Task CloseAppAsync()
     {
         try
         {
-            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["force"] = true,
                 ["timeoutMs"] = 2000
             });
@@ -58,9 +62,17 @@ public sealed class DialogsSnapshots
         catch
         {
         }
+        finally
+        {
+            _sessionId = "";
+        }
     }
 
-    private async Task<ListWindowsResponse> ListWindowsAsync() => await _mcp.CallToolAsync<ListWindowsResponse>("list_windows");
+    private async Task<ListWindowsResponse> ListWindowsAsync() =>
+        await _mcp.CallToolAsync<ListWindowsResponse>("list_windows", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId
+        });
 
     private static object ToStableWindows(ListWindowsResponse response) => new
     {
@@ -121,6 +133,7 @@ public sealed class DialogsSnapshots
         {
             var openDialog = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Dialogs_OpenDialog"
@@ -131,13 +144,15 @@ public sealed class DialogsSnapshots
             var dialogHandle = await WaitForDialogHandleAsync();
             var windowsWhileDialogOpen = await ListWindowsAsync();
 
-            var focus = await _mcp.CallToolAsync<FocusWindowResponse>("focus_window", new Dictionary<string, object?>
+            var focus = await _mcp.CallToolAsync<FocusWindowResponse>("set_active_window", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["title"] = DialogTitle
             });
 
             var clickOk = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["windowHandle"] = dialogHandle,
                 ["locator"] = new Dictionary<string, object?>
                 {
@@ -149,6 +164,7 @@ public sealed class DialogsSnapshots
 
             var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = "Dialogs_Status"
@@ -173,4 +189,3 @@ public sealed class DialogsSnapshots
         }
     }
 }
-

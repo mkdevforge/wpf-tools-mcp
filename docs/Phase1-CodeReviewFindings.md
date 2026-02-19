@@ -25,7 +25,7 @@ The main “return later” items are about:
 ### Window enumeration / dialogs
 
 - **Current:** Window enumeration was upgraded to include owned modal dialogs by unioning FlaUI’s `GetAllTopLevelWindows()` with Win32 `EnumWindows` filtered by PID + visibility, then converting handles via `automation.FromHandle(hwnd).AsWindow()` and filtering to reasonable windows.
-- **Why this matters:** Real apps frequently use owned modal dialogs; excluding them breaks `focus_window`, element targeting by `windowHandle`, and screenshot flows.
+- **Why this matters:** Real apps frequently use owned modal dialogs; excluding them breaks `set_active_window`, element targeting by `windowHandle`, and screenshot flows.
 - **Follow-ups:**
   - Consider exposing an opt-in `includeUntitledWindows` / `includeAllWindows` mode for cases where a legitimate window has an empty title (current filter skips empty titles).
   - Consider additional noise filtering (tool windows, hidden WPF helper windows) if it becomes an issue in real apps.
@@ -68,7 +68,7 @@ The main “return later” items are about:
 ### Concurrency/thread-safety
 
 - **Current:** `AutomationController` is a DI singleton holding mutable attachment state (`_application`, `_automation`).
-- **Risk:** Concurrent tool calls can interleave (e.g., `close_app` during `click_element`) and corrupt state or fail unpredictably.
+- **Risk:** Concurrent tool calls can interleave (e.g., `close_session` during `click_element`) and corrupt state or fail unpredictably.
 - **Follow-ups:**
   - Gate tool execution with a `SemaphoreSlim` (serialize calls) **or**
   - Move to per-session/per-connection controller lifetime if/when MCP transport supports it cleanly.

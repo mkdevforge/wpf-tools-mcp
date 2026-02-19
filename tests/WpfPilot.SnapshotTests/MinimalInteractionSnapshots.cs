@@ -12,6 +12,7 @@ namespace WpfPilot.SnapshotTests;
 public sealed class MinimalInteractionSnapshots
 {
     private McpTestContext _mcp = null!;
+    private string _sessionId = "";
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -36,25 +37,32 @@ public sealed class MinimalInteractionSnapshots
         var exePath = TestAppPaths.FindMinimalTestAppExecutable();
         var workingDirectory = Path.GetDirectoryName(exePath)!;
 
-        _ = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        var launch = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
         {
             ["exePath"] = exePath,
             ["workingDirectory"] = workingDirectory,
         });
+
+        _sessionId = launch.SessionId;
     }
 
     private async Task CloseAppAsync()
     {
         try
         {
-            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["force"] = true,
                 ["timeoutMs"] = 2000
             });
         }
         catch
         {
+        }
+        finally
+        {
+            _sessionId = "";
         }
     }
 
@@ -69,6 +77,7 @@ public sealed class MinimalInteractionSnapshots
             {
                 _ = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
                 {
+                    ["sessionId"] = _sessionId,
                     ["locator"] = new Dictionary<string, object?>
                     {
                         ["name"] = "OK"
@@ -98,6 +107,7 @@ public sealed class MinimalInteractionSnapshots
         {
             var click = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["name"] = "OK",
@@ -107,6 +117,7 @@ public sealed class MinimalInteractionSnapshots
 
             var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["name"] = "Clicks: 1"
@@ -133,6 +144,7 @@ public sealed class MinimalInteractionSnapshots
         {
             var selected = await _mcp.CallToolAsync<SelectItemResponse>("select_item", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["className"] = "ListBox"
@@ -142,6 +154,7 @@ public sealed class MinimalInteractionSnapshots
 
             var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["name"] = "Selected: Item 10"
@@ -160,4 +173,3 @@ public sealed class MinimalInteractionSnapshots
         }
     }
 }
-

@@ -13,7 +13,7 @@ builder.Logging.AddConsole(consoleLogOptions =>
     consoleLogOptions.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-builder.Services.AddSingleton<AutomationController>();
+builder.Services.AddSingleton<SessionManager>();
 
 builder.Services
     .AddMcpServer()

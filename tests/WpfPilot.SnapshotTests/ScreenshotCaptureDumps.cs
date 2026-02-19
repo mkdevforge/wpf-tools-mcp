@@ -23,11 +23,13 @@ public sealed class ScreenshotCaptureDumps
         var exePath = TestAppPaths.FindTestAppExecutable();
         var workingDirectory = Path.GetDirectoryName(exePath)!;
 
-        _ = await mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        var launch = await mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
         {
             ["exePath"] = exePath,
             ["workingDirectory"] = workingDirectory,
         });
+
+        var sessionId = launch.SessionId;
 
         try
         {
@@ -39,12 +41,14 @@ public sealed class ScreenshotCaptureDumps
 
             var screen = await mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
             {
+                ["sessionId"] = sessionId,
                 ["captureMode"] = "screen",
                 ["outputPath"] = screenPath,
             });
 
             var printWindow = await mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
             {
+                ["sessionId"] = sessionId,
                 ["captureMode"] = "printWindow",
                 ["outputPath"] = printWindowPath,
             });
@@ -59,8 +63,9 @@ public sealed class ScreenshotCaptureDumps
         {
             try
             {
-                _ = await mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+                _ = await mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
                 {
+                    ["sessionId"] = sessionId,
                     ["force"] = true,
                     ["timeoutMs"] = 2000
                 });

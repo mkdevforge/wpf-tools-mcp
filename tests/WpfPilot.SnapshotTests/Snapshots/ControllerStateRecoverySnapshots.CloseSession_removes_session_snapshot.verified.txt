@@ -1,0 +1,24 @@
+{
+  FirstLaunch: {
+    SessionId: <session>,
+    Pid: -1,
+    ProcessName: WpfPilot.TestApp
+  },
+  SessionsBeforeClose: [
+    {
+      SessionId: <session>,
+      Pid: -1,
+      ProcessName: WpfPilot.TestApp,
+      ActiveWindowTitle: WpfPilot TestApp,
+      CreatedAtUtc: <time>,
+      BackendCapabilities: [
+        uia
+      ]
+    }
+  ],
+  FirstProcessAliveBeforeClose: true,
+  Close: {
+    Closed: true
+  },
+  FirstProcessAliveAfterClose: false
+}

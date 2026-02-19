@@ -1,0 +1,16 @@
+{
+  ResolveThumb: {
+    BackendUsed: Uia,
+    Element: {
+      Type: Thumb,
+      AutomationId: Thumb,
+      XPath: /Window/Slider/Thumb,
+      ElementId: <element>
+    }
+  },
+  Drag: {
+    Dragged: true,
+    MethodUsed: mouse
+  },
+  Value: 100.0
+}

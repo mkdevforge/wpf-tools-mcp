@@ -1,10 +1,9 @@
-﻿[
+[
   {
     Strategy: automationId,
     Element: {
       ElementType: Edit,
       AutomationId: Basic_TextBox,
-      Name: ,
       ClassName: TextBox,
       Bounds: {
         Width: 240,
@@ -19,7 +18,6 @@
     Strategy: name,
     Element: {
       ElementType: Text,
-      AutomationId: ,
       Name: Right Panel,
       ClassName: TextBlock,
       Bounds: {
@@ -36,7 +34,6 @@
     Element: {
       ElementType: Slider,
       AutomationId: Basic_Slider,
-      Name: ,
       ClassName: Slider,
       Bounds: {
         Width: 240,

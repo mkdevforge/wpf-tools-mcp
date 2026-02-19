@@ -11,6 +11,17 @@ public sealed partial class AutomationController
     private string? _agentPipeName;
     private int? _agentPid;
 
+    public bool IsAgentConnected
+    {
+        get
+        {
+            lock (_agentSync)
+            {
+                return _agentClient is not null && _agentClient.IsConnected;
+            }
+        }
+    }
+
     public async Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default)
     {
         var application = EnsureAttached();
@@ -142,20 +153,288 @@ public sealed partial class AutomationController
         return new AgentPingResponse(pong);
     }
 
-    public async Task<GetWpfVisualTreeResponse> GetWpfVisualTreeAsync(
+    public async Task<GetBindingInfoResponse> GetBindingInfoAsync(
+        ElementLocator? locator = null,
+        string? elementId = null,
         long? windowHandle = null,
-        int depth = 4,
+        bool includeUnbound = false,
+        int maxProperties = 2000,
+        string valueFormat = "string",
         CancellationToken cancellationToken = default)
     {
-        if (depth <= 0)
+        var hasLocator = locator is not null;
+        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+        if (hasLocator == hasElementId)
         {
-            depth = 1;
+            throw new ArgumentException("get_binding_info requires exactly one of: locator OR elementId.");
+        }
+
+        string? resolvedElementId = null;
+        long? effectiveWindowHandle = windowHandle;
+        ElementLocator effectiveLocator = locator ?? new ElementLocator();
+
+        if (hasElementId)
+        {
+            var id = elementId!.Trim();
+            resolvedElementId = id;
+            var handle = RequireHandle(id);
+            if (handle.Backend != InspectionBackend.Wpf)
+            {
+                throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
+            }
+
+            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            {
+                throw new ArgumentException("windowHandle does not match the elementId window.");
+            }
+
+            effectiveWindowHandle = handle.WindowHandle;
+            effectiveLocator = new ElementLocator(XPath: handle.XPath);
         }
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var request = new GetBindingInfoRequest(
+            WindowHandle: effectiveWindowHandle,
+            Locator: effectiveLocator,
+            IncludeUnbound: includeUnbound,
+            MaxProperties: maxProperties,
+            ValueFormat: valueFormat);
 
-        var request = new GetWpfVisualTreeRequest(WindowHandle: windowHandle, Depth: depth);
-        return await client.CallAsync<GetWpfVisualTreeResponse>("wpf/get_visual_tree", request, cancellationToken);
+        try
+        {
+            return await client.CallAsync<GetBindingInfoResponse>("wpf/get_binding_info", request, cancellationToken);
+        }
+        catch (InvalidOperationException ex) when (hasElementId &&
+                                                  resolvedElementId is not null &&
+                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+    }
+
+    public async Task<GetBindingErrorsResponse> GetBindingErrorsAsync(
+        long? windowHandle = null,
+        string? rootXPath = null,
+        int depth = 6,
+        int maxErrors = 200,
+        int maxNodes = 2000,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var request = new GetBindingErrorsRequest(
+            WindowHandle: windowHandle,
+            RootXPath: rootXPath,
+            Depth: depth,
+            MaxErrors: maxErrors,
+            MaxNodes: maxNodes);
+
+        return await client.CallAsync<GetBindingErrorsResponse>("wpf/get_binding_errors", request, cancellationToken);
+    }
+
+    public async Task<GetDataContextResponse> GetDataContextAsync(
+        ElementLocator? locator = null,
+        string? elementId = null,
+        long? windowHandle = null,
+        int maxDepth = 2,
+        int maxPropertiesPerObject = 50,
+        int maxStringLength = 2000,
+        bool includeNulls = false,
+        CancellationToken cancellationToken = default)
+    {
+        var hasLocator = locator is not null;
+        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+        if (hasLocator == hasElementId)
+        {
+            throw new ArgumentException("get_data_context requires exactly one of: locator OR elementId.");
+        }
+
+        string? resolvedElementId = null;
+        long? effectiveWindowHandle = windowHandle;
+        ElementLocator effectiveLocator = locator ?? new ElementLocator();
+
+        if (hasElementId)
+        {
+            var id = elementId!.Trim();
+            resolvedElementId = id;
+            var handle = RequireHandle(id);
+            if (handle.Backend != InspectionBackend.Wpf)
+            {
+                throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
+            }
+
+            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            {
+                throw new ArgumentException("windowHandle does not match the elementId window.");
+            }
+
+            effectiveWindowHandle = handle.WindowHandle;
+            effectiveLocator = new ElementLocator(XPath: handle.XPath);
+        }
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var request = new GetDataContextRequest(
+            WindowHandle: effectiveWindowHandle,
+            Locator: effectiveLocator,
+            MaxDepth: maxDepth,
+            MaxPropertiesPerObject: maxPropertiesPerObject,
+            MaxStringLength: maxStringLength,
+            IncludeNulls: includeNulls);
+
+        try
+        {
+            return await client.CallAsync<GetDataContextResponse>("wpf/get_data_context", request, cancellationToken);
+        }
+        catch (InvalidOperationException ex) when (hasElementId &&
+                                                  resolvedElementId is not null &&
+                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+    }
+
+    internal async Task<GetVisualTreeResponse> GetVisualTreeWpfAsync(
+        GetWpfVisualTreeRequestV2 request,
+        bool injectIfMissing,
+        CancellationToken cancellationToken)
+    {
+        var client = injectIfMissing
+            ? await EnsureAgentConnectedAsync(cancellationToken)
+            : await EnsureAgentConnectedOrNullAsync(cancellationToken);
+
+        if (client is null)
+        {
+            throw new InvalidOperationException("WPF agent is not connected.");
+        }
+
+        return await client.CallAsync<GetVisualTreeResponse>("wpf/get_visual_tree", request, cancellationToken);
+    }
+
+    internal async Task<GetVisualTreeResponse?> TryGetVisualTreeWpfAsync(GetWpfVisualTreeRequestV2 request, CancellationToken cancellationToken)
+    {
+        var client = await EnsureAgentConnectedOrNullAsync(cancellationToken);
+        if (client is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await client.CallAsync<GetVisualTreeResponse>("wpf/get_visual_tree", request, cancellationToken);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal async Task<FindElementsResponse> FindElementsWpfAsync(
+        FindElementsWpfRequest request,
+        bool injectIfMissing,
+        CancellationToken cancellationToken)
+    {
+        var client = injectIfMissing
+            ? await EnsureAgentConnectedAsync(cancellationToken)
+            : await EnsureAgentConnectedOrNullAsync(cancellationToken);
+
+        if (client is null)
+        {
+            throw new InvalidOperationException("WPF agent is not connected.");
+        }
+
+        return await client.CallAsync<FindElementsResponse>("wpf/find_elements", request, cancellationToken);
+    }
+
+    internal async Task<FindElementsResponse?> TryFindElementsWpfAsync(FindElementsWpfRequest request, CancellationToken cancellationToken)
+    {
+        var client = await EnsureAgentConnectedOrNullAsync(cancellationToken);
+        if (client is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await client.CallAsync<FindElementsResponse>("wpf/find_elements", request, cancellationToken);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal async Task<GetPathToElementResponse> GetWpfPathAsync(
+        GetWpfPathRequest request,
+        bool injectIfMissing,
+        CancellationToken cancellationToken)
+    {
+        var client = injectIfMissing
+            ? await EnsureAgentConnectedAsync(cancellationToken)
+            : await EnsureAgentConnectedOrNullAsync(cancellationToken);
+
+        if (client is null)
+        {
+            throw new InvalidOperationException("WPF agent is not connected.");
+        }
+
+        return await client.CallAsync<GetPathToElementResponse>("wpf/get_path", request, cancellationToken);
+    }
+
+    private async Task<AgentClient?> EnsureAgentConnectedOrNullAsync(CancellationToken cancellationToken)
+    {
+        var application = EnsureAttached();
+        var pid = application.ProcessId;
+
+        AgentClient? client;
+        int? existingPid;
+        lock (_agentSync)
+        {
+            client = _agentClient;
+            existingPid = _agentPid;
+            if (client is not null && client.IsConnected && existingPid == pid)
+            {
+                return client;
+            }
+        }
+
+        using var process = Process.GetProcessById(pid);
+        var pipeName = AgentPipeName.Compute(process);
+
+        // Try quick reconnect to an already-injected agent (do not inject here).
+        try
+        {
+            var connectClient = await AgentClient.ConnectAsync(
+                pipeName,
+                timeout: TimeSpan.FromMilliseconds(250),
+                cancellationToken);
+
+            try
+            {
+                var pong = await connectClient.CallAsync<string>("ping", @params: null, cancellationToken);
+                if (!string.Equals(pong, "pong", StringComparison.OrdinalIgnoreCase))
+                {
+                    await connectClient.DisposeAsync();
+                    return null;
+                }
+            }
+            catch
+            {
+                await connectClient.DisposeAsync();
+                return null;
+            }
+
+            lock (_agentSync)
+            {
+                _agentClient = connectClient;
+                _agentPipeName = pipeName;
+                _agentPid = pid;
+            }
+
+            return connectClient;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private async Task<AgentClient> EnsureAgentConnectedAsync(CancellationToken cancellationToken)

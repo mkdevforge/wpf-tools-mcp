@@ -8,9 +8,10 @@ namespace WpfPilot.McpServer.Tools;
 [McpServerToolType]
 public static class InteractionTools
 {
-    [McpServerTool(Name = "focus_window"), Description("Bring a window to the foreground.")]
-    public static Task<FocusWindowResponse> FocusWindow(
-        AutomationController automation,
+    [McpServerTool(Name = "set_active_window"), Description("Bring a window to the foreground and set it as the active window for this session.")]
+    public static Task<FocusWindowResponse> SetActiveWindow(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
         [Description("Native window handle")] long? windowHandle = null,
         [Description("Window title (exact match first, then contains)")] string? title = null,
         CancellationToken cancellationToken = default)
@@ -21,86 +22,201 @@ public static class InteractionTools
         }
 
         return McpToolErrors.RunAsync(() =>
-            automation.RunExclusiveAsync(
-                () => automation.FocusWindowAsync(new FocusWindowRequest(windowHandle, title), cancellationToken),
-                cancellationToken));
+            sessions.SetActiveWindowAsync(sessionId, new FocusWindowRequest(windowHandle, title), cancellationToken));
     }
 
-    [McpServerTool(Name = "click_element"), Description("Click an element by locator.")]
+    [McpServerTool(Name = "get_active_window"), Description("Get the active window for this session.")]
+    public static Task<GetActiveWindowResponse> GetActiveWindow(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() => sessions.GetActiveWindowAsync(sessionId, cancellationToken));
+
+    [McpServerTool(Name = "click_element"), Description("Click an element by locator or elementId.")]
     public static Task<ClickElementResponse> ClickElement(
-        AutomationController automation,
-        [Description("Element locator")] ElementLocator locator,
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Click type: single | double | right")] string? clickType = null,
         [Description("Click mode: auto | mouseAlways | invokePreferred")] string? clickMode = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-            automation.RunExclusiveAsync(
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
                 () => automation.ClickElementAsync(
-                    new ClickElementRequest(locator, windowHandle, ParseClickType(clickType), ParseClickMode(clickMode)),
+                    new ClickElementRequest(
+                        Locator: locator,
+                        ElementId: elementId,
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        ClickType: ParseClickType(clickType),
+                        ClickMode: ParseClickMode(clickMode)),
                     cancellationToken),
-                cancellationToken));
+                cancellationToken);
+        });
 
-    [McpServerTool(Name = "invoke"), Description("Invoke an element via InvokePattern.")]
+    [McpServerTool(Name = "invoke"), Description("Invoke an element via InvokePattern (locator or elementId).")]
     public static Task<InvokeResponse> Invoke(
-        AutomationController automation,
-        [Description("Element locator")] ElementLocator locator,
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-            automation.RunExclusiveAsync(
-                () => automation.InvokeAsync(new InvokeRequest(locator, windowHandle), cancellationToken),
-                cancellationToken));
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.InvokeAsync(
+                    new InvokeRequest(
+                        Locator: locator,
+                        ElementId: elementId,
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle),
+                    cancellationToken),
+                cancellationToken);
+        });
 
-    [McpServerTool(Name = "type_text"), Description("Type text into a focused or specified element.")]
+    [McpServerTool(Name = "type_text"), Description("Type text into a focused or specified element (locator or elementId).")]
     public static Task<TypeTextResponse> TypeText(
-        AutomationController automation,
-        [Description("Element locator")] ElementLocator locator,
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
         [Description("Text to enter")] string text,
+        [Description("Element locator")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-            automation.RunExclusiveAsync(
-                () => automation.TypeTextAsync(new TypeTextRequest(locator, text, windowHandle), cancellationToken),
-                cancellationToken));
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.TypeTextAsync(
+                    new TypeTextRequest(
+                        Locator: locator,
+                        Text: text,
+                        ElementId: elementId,
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle),
+                    cancellationToken),
+                cancellationToken);
+        });
 
-    [McpServerTool(Name = "set_value"), Description("Set a numeric value (RangeValue/ValuePattern).")]
+    [McpServerTool(Name = "set_value"), Description("Set a numeric value (RangeValue/ValuePattern) by locator or elementId.")]
     public static Task<SetValueResponse> SetValue(
-        AutomationController automation,
-        [Description("Element locator")] ElementLocator locator,
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
         [Description("Numeric value to set")] double value,
+        [Description("Element locator")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-            automation.RunExclusiveAsync(
-                () => automation.SetValueAsync(new SetValueRequest(locator, value, windowHandle), cancellationToken),
-                cancellationToken));
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.SetValueAsync(
+                    new SetValueRequest(
+                        Locator: locator,
+                        Value: value,
+                        ElementId: elementId,
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle),
+                    cancellationToken),
+                cancellationToken);
+        });
 
-    [McpServerTool(Name = "select_item"), Description("Select an item in a combo box, list box, or tab control.")]
+    [McpServerTool(Name = "select_item"), Description("Select an item in a combo box, list box, or tab control (locator or elementId).")]
     public static Task<SelectItemResponse> SelectItem(
-        AutomationController automation,
-        [Description("Element locator")] ElementLocator locator,
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Item text to select")] string? text = null,
         [Description("Item index to select (0-based)")] int? index = null,
         [Description("Optional item locator (select a specific item element)")] ElementLocator? itemLocator = null,
+        [Description("Optional item elementId (select a specific item element)")] string? itemElementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-            automation.RunExclusiveAsync(
-                () => automation.SelectItemAsync(new SelectItemRequest(locator, text, index, windowHandle, itemLocator), cancellationToken),
-                cancellationToken));
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.SelectItemAsync(
+                    new SelectItemRequest(
+                        Locator: locator,
+                        Text: text,
+                        Index: index,
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        ItemLocator: itemLocator,
+                        ElementId: elementId,
+                        ItemElementId: itemElementId),
+                    cancellationToken),
+                cancellationToken);
+        });
 
-    [McpServerTool(Name = "scroll_to_element"), Description("Scroll a container to bring an element into view.")]
+    [McpServerTool(Name = "scroll_to_element"), Description("Scroll a container to bring an element into view (locator or elementId).")]
     public static Task<ScrollToElementResponse> ScrollToElement(
-        AutomationController automation,
-        [Description("Target element locator")] ElementLocator locator,
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Target element locator")] ElementLocator? locator = null,
+        [Description("Target elementId (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Optional container locator (preferred scroll root)")] ElementLocator? containerLocator = null,
+        [Description("Optional container elementId (preferred scroll root)")] string? containerElementId = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-            automation.RunExclusiveAsync(
-                () => automation.ScrollToElementAsync(new ScrollToElementRequest(locator, windowHandle, containerLocator), cancellationToken),
-                cancellationToken));
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasAnyElementId = !string.IsNullOrWhiteSpace(elementId) || !string.IsNullOrWhiteSpace(containerElementId);
+            return automation.RunExclusiveAsync(
+                () => automation.ScrollToElementAsync(
+                    new ScrollToElementRequest(
+                        Locator: locator,
+                        WindowHandle: hasAnyElementId ? windowHandle : effectiveWindowHandle,
+                        ContainerLocator: containerLocator,
+                        ElementId: elementId,
+                        ContainerElementId: containerElementId),
+                    cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "drag"), Description("Drag from an element to another element or to screen coordinates (locator or elementId).")]
+    public static Task<DragResponse> Drag(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Source element locator")] ElementLocator? locator = null,
+        [Description("Source elementId (from resolve_element / find_elements)")] string? elementId = null,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Optional target element locator")] ElementLocator? targetLocator = null,
+        [Description("Optional target elementId (from resolve_element / find_elements)")] string? targetElementId = null,
+        [Description("Target X screen coordinate (required if targetLocator is not set)")] int? toX = null,
+        [Description("Target Y screen coordinate (required if targetLocator is not set)")] int? toY = null,
+        [Description("Number of mouse move steps")] int steps = 20,
+        [Description("Mouse button: left | right | middle")] string? button = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasAnyElementId = !string.IsNullOrWhiteSpace(elementId) || !string.IsNullOrWhiteSpace(targetElementId);
+            return automation.RunExclusiveAsync(
+                () => automation.DragAsync(
+                    new DragRequest(
+                        Locator: locator,
+                        WindowHandle: hasAnyElementId ? windowHandle : effectiveWindowHandle,
+                        TargetLocator: targetLocator,
+                        ToX: toX,
+                        ToY: toY,
+                        Steps: steps,
+                        Button: button,
+                        ElementId: elementId,
+                        TargetElementId: targetElementId),
+                    cancellationToken),
+                cancellationToken);
+        });
 
     private static ClickType ParseClickType(string? clickType)
     {

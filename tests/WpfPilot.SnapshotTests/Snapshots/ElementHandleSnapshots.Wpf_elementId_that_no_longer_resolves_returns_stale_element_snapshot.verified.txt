@@ -1,0 +1,23 @@
+{
+  Resolve: {
+    BackendUsed: Wpf,
+    Element: {
+      Type: Button,
+      AutomationId: Dynamic_NewButton,
+      XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/StackPanel/Button,
+      ClassName: System.Windows.Controls.Button,
+      Bounds: {
+        X: 290,
+        Y: 259,
+        Width: 200,
+        Height: 20
+      },
+      ElementId: <element>
+    }
+  },
+  Remove: {
+    Clicked: true,
+    MethodUsed: mouse
+  },
+  Error: Tool 'get_data_context' failed: An error occurred invoking 'get_data_context': stale_element: not_found for '<element>'. Call resolve_element again.
+}

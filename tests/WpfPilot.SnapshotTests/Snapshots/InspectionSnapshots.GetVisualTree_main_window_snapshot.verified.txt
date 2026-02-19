@@ -1,693 +1,305 @@
-﻿{
+{
+  BackendUsed: Uia,
   Root: {
-    ElementType: Window,
-    AutomationId: ,
+    Type: Window,
     Name: WpfPilot TestApp,
-    ClassName: Window,
-    Bounds: {
-      Width: 900,
-      Height: 650
-    },
-    IsEnabled: true,
-    IsOffscreen: false,
     XPath: /Window,
+    ChildrenCount: 20,
     Children: [
       {
-        ElementType: TitleBar,
+        Type: TitleBar,
         AutomationId: TitleBar,
-        Bounds: {
-          Width: 868,
-          Height: 28
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TitleBar,
+        ChildrenCount: 2,
         Children: [
           {
-            ElementType: MenuBar,
+            Type: MenuBar,
             AutomationId: SystemMenuBar,
             Name: System,
-            Bounds: {
-              Width: 22,
-              Height: 22
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/TitleBar/MenuBar,
+            ChildrenCount: 1,
             Children: [
               {
-                ElementType: MenuItem,
+                Type: MenuItem,
                 Name: System,
-                Bounds: {
-                  Width: 22,
-                  Height: 22
-                },
-                IsEnabled: true,
-                IsOffscreen: false,
                 XPath: /Window/TitleBar/MenuBar/MenuItem
               }
             ]
           },
           {
-            ElementType: Button,
+            Type: Button,
             AutomationId: Close,
             Name: Close,
-            Bounds: {
-              Width: 34,
-              Height: 30
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/TitleBar/Button
           }
         ]
       },
       {
-        ElementType: Text,
+        Type: Text,
         AutomationId: Basic_Header,
         Name: WpfPilot.TestApp — Basic Controls,
-        ClassName: TextBlock,
-        Bounds: {
-          Width: 852,
-          Height: 32
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBlock[1]
       },
       {
-        ElementType: Button,
+        Type: Button,
         AutomationId: Basic_Button,
         Name: Click me,
-        ClassName: Button,
-        Bounds: {
-          Width: 160,
-          Height: 20
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/Button[1],
+        ChildrenCount: 1,
         Children: [
           {
-            ElementType: Text,
-            AutomationId: ,
+            Type: Text,
             Name: Click me,
-            ClassName: TextBlock,
-            Bounds: {
-              Width: 45,
-              Height: 16
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/Button[1]/TextBlock
           }
         ]
       },
       {
-        ElementType: Text,
+        Type: Text,
         AutomationId: Basic_ClickStatus,
         Name: Clicks: 0,
-        ClassName: TextBlock,
-        Bounds: {
-          Width: 420,
-          Height: 16
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBlock[2]
       },
       {
-        ElementType: Text,
-        AutomationId: ,
+        Type: Text,
         Name: TextBox:,
-        ClassName: TextBlock,
-        Bounds: {
-          Width: 420,
-          Height: 16
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBlock[3]
       },
       {
-        ElementType: Edit,
+        Type: Edit,
         AutomationId: Basic_TextBox,
-        Name: ,
-        ClassName: TextBox,
-        Bounds: {
-          Width: 240,
-          Height: 18
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBox,
+        ChildrenCount: 1,
         Children: [
           {
-            ElementType: Pane,
+            Type: Pane,
             AutomationId: PART_ContentHost,
-            Name: ,
-            ClassName: ScrollViewer,
-            Bounds: {
-              Width: 238,
-              Height: 16
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
-            XPath: /Window/TextBox/ScrollViewer,
-            Children: [
-              {
-                ElementType: ScrollBar,
-                AutomationId: VerticalScrollBar,
-                Name: ,
-                ClassName: ScrollBar,
-                Bounds: {},
-                IsEnabled: false,
-                IsOffscreen: true,
-                XPath: /Window/TextBox/ScrollViewer/ScrollBar[1]
-              },
-              {
-                ElementType: ScrollBar,
-                AutomationId: HorizontalScrollBar,
-                Name: ,
-                ClassName: ScrollBar,
-                Bounds: {},
-                IsEnabled: false,
-                IsOffscreen: true,
-                XPath: /Window/TextBox/ScrollViewer/ScrollBar[2]
-              }
-            ]
+            XPath: /Window/TextBox/ScrollViewer
           }
         ]
       },
       {
-        ElementType: CheckBox,
+        Type: CheckBox,
         AutomationId: Basic_CheckBox,
         Name: I agree,
-        ClassName: CheckBox,
-        Bounds: {
-          Width: 420,
-          Height: 15
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/CheckBox,
+        ChildrenCount: 1,
         Children: [
           {
-            ElementType: Text,
-            AutomationId: ,
+            Type: Text,
             Name: I agree,
-            ClassName: TextBlock,
-            Bounds: {
-              Width: 36,
-              Height: 16
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/CheckBox/TextBlock
           }
         ]
       },
       {
-        ElementType: Text,
-        AutomationId: ,
+        Type: Text,
         Name: ComboBox:,
-        ClassName: TextBlock,
-        Bounds: {
-          Width: 420,
-          Height: 16
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBlock[4]
       },
       {
-        ElementType: ComboBox,
+        Type: ComboBox,
         AutomationId: Basic_ComboBox,
-        Name: ,
-        ClassName: ComboBox,
-        Bounds: {
-          Width: 240,
-          Height: 22
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/ComboBox
       },
       {
-        ElementType: Text,
-        AutomationId: ,
+        Type: Text,
         Name: ListBox:,
-        ClassName: TextBlock,
-        Bounds: {
-          Width: 420,
-          Height: 16
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBlock[5]
       },
       {
-        ElementType: List,
+        Type: List,
         AutomationId: Basic_ListBox,
-        Name: ,
-        ClassName: ListBox,
-        Bounds: {
-          Width: 240,
-          Height: 140
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/ListBox,
+        ChildrenCount: 7,
         Children: [
           {
-            ElementType: ListItem,
-            AutomationId: ,
+            Type: ListItem,
             Name: Item 0,
-            ClassName: ListBoxItem,
-            Bounds: {
-              Width: 219,
-              Height: 20
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/ListBox/ListBoxItem[1],
+            ChildrenCount: 1,
             Children: [
               {
-                ElementType: Text,
-                AutomationId: ,
+                Type: Text,
                 Name: Item 0,
-                ClassName: TextBlock,
-                Bounds: {
-                  Width: 34,
-                  Height: 16
-                },
-                IsEnabled: true,
-                IsOffscreen: false,
                 XPath: /Window/ListBox/ListBoxItem[1]/TextBlock
               }
             ]
           },
           {
-            ElementType: ListItem,
-            AutomationId: ,
+            Type: ListItem,
             Name: Item 1,
-            ClassName: ListBoxItem,
-            Bounds: {
-              Width: 219,
-              Height: 20
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/ListBox/ListBoxItem[2],
+            ChildrenCount: 1,
             Children: [
               {
-                ElementType: Text,
-                AutomationId: ,
+                Type: Text,
                 Name: Item 1,
-                ClassName: TextBlock,
-                Bounds: {
-                  Width: 34,
-                  Height: 16
-                },
-                IsEnabled: true,
-                IsOffscreen: false,
                 XPath: /Window/ListBox/ListBoxItem[2]/TextBlock
               }
             ]
           },
           {
-            ElementType: ListItem,
-            AutomationId: ,
+            Type: ListItem,
             Name: Item 2,
-            ClassName: ListBoxItem,
-            Bounds: {
-              Width: 219,
-              Height: 20
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/ListBox/ListBoxItem[3],
+            ChildrenCount: 1,
             Children: [
               {
-                ElementType: Text,
-                AutomationId: ,
+                Type: Text,
                 Name: Item 2,
-                ClassName: TextBlock,
-                Bounds: {
-                  Width: 34,
-                  Height: 16
-                },
-                IsEnabled: true,
-                IsOffscreen: false,
                 XPath: /Window/ListBox/ListBoxItem[3]/TextBlock
               }
             ]
           },
           {
-            ElementType: ListItem,
-            AutomationId: ,
+            Type: ListItem,
             Name: Item 3,
-            ClassName: ListBoxItem,
-            Bounds: {
-              Width: 219,
-              Height: 20
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/ListBox/ListBoxItem[4],
+            ChildrenCount: 1,
             Children: [
               {
-                ElementType: Text,
-                AutomationId: ,
+                Type: Text,
                 Name: Item 3,
-                ClassName: TextBlock,
-                Bounds: {
-                  Width: 34,
-                  Height: 16
-                },
-                IsEnabled: true,
-                IsOffscreen: false,
                 XPath: /Window/ListBox/ListBoxItem[4]/TextBlock
               }
             ]
           },
           {
-            ElementType: ListItem,
-            AutomationId: ,
+            Type: ListItem,
             Name: Item 4,
-            ClassName: ListBoxItem,
-            Bounds: {
-              Width: 219,
-              Height: 20
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/ListBox/ListBoxItem[5],
+            ChildrenCount: 1,
             Children: [
               {
-                ElementType: Text,
-                AutomationId: ,
+                Type: Text,
                 Name: Item 4,
-                ClassName: TextBlock,
-                Bounds: {
-                  Width: 34,
-                  Height: 16
-                },
-                IsEnabled: true,
-                IsOffscreen: false,
                 XPath: /Window/ListBox/ListBoxItem[5]/TextBlock
               }
             ]
           },
           {
-            ElementType: ListItem,
-            AutomationId: ,
+            Type: ListItem,
             Name: Item 5,
-            ClassName: ListBoxItem,
-            Bounds: {
-              Width: 219,
-              Height: 20
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/ListBox/ListBoxItem[6],
+            ChildrenCount: 1,
             Children: [
               {
-                ElementType: Text,
-                AutomationId: ,
+                Type: Text,
                 Name: Item 5,
-                ClassName: TextBlock,
-                Bounds: {
-                  Width: 34,
-                  Height: 16
-                },
-                IsEnabled: true,
-                IsOffscreen: false,
                 XPath: /Window/ListBox/ListBoxItem[6]/TextBlock
               }
             ]
           },
           {
-            ElementType: ListItem,
-            AutomationId: ,
+            Type: ListItem,
             Name: Item 6,
-            ClassName: ListBoxItem,
-            Bounds: {
-              Width: 219,
-              Height: 20
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/ListBox/ListBoxItem[7],
+            ChildrenCount: 1,
             Children: [
               {
-                ElementType: Text,
-                AutomationId: ,
+                Type: Text,
                 Name: Item 6,
-                ClassName: TextBlock,
-                Bounds: {
-                  Width: 34,
-                  Height: 16
-                },
-                IsEnabled: true,
-                IsOffscreen: false,
                 XPath: /Window/ListBox/ListBoxItem[7]/TextBlock
-              }
-            ]
-          },
-          {
-            ElementType: ListItem,
-            AutomationId: ,
-            Name: Item 7,
-            ClassName: ListBoxItem,
-            Bounds: {
-              Width: 219,
-              Height: 20
-            },
-            IsEnabled: true,
-            IsOffscreen: true,
-            XPath: /Window/ListBox/ListBoxItem[8],
-            Children: [
-              {
-                ElementType: Text,
-                AutomationId: ,
-                Name: Item 7,
-                ClassName: TextBlock,
-                Bounds: {
-                  Width: 34,
-                  Height: 16
-                },
-                IsEnabled: true,
-                IsOffscreen: false,
-                XPath: /Window/ListBox/ListBoxItem[8]/TextBlock
               }
             ]
           }
         ]
       },
       {
-        ElementType: Text,
+        Type: Text,
         AutomationId: Basic_ListBoxStatus,
         Name: Selected: (none),
-        ClassName: TextBlock,
-        Bounds: {
-          Width: 420,
-          Height: 16
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBlock[6]
       },
       {
-        ElementType: Text,
-        AutomationId: ,
+        Type: Text,
         Name: Slider:,
-        ClassName: TextBlock,
-        Bounds: {
-          Width: 420,
-          Height: 16
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBlock[7]
       },
       {
-        ElementType: Slider,
+        Type: Slider,
         AutomationId: Basic_Slider,
-        Name: ,
-        ClassName: Slider,
-        Bounds: {
-          Width: 240,
-          Height: 18
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/Slider,
+        ChildrenCount: 3,
         Children: [
           {
-            ElementType: Button,
+            Type: Button,
             AutomationId: DecreaseLarge,
-            Name: ,
-            ClassName: RepeatButton,
-            Bounds: {
-              Width: 57,
-              Height: 18
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/Slider/RepeatButton[1]
           },
           {
-            ElementType: Button,
+            Type: Button,
             AutomationId: IncreaseLarge,
-            Name: ,
-            ClassName: RepeatButton,
-            Bounds: {
-              Width: 172,
-              Height: 18
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/Slider/RepeatButton[2]
           },
           {
-            ElementType: Thumb,
+            Type: Thumb,
             AutomationId: Thumb,
-            Name: ,
-            ClassName: Thumb,
-            Bounds: {
-              Width: 11,
-              Height: 18
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/Slider/Thumb
           }
         ]
       },
       {
-        ElementType: Text,
-        AutomationId: ,
+        Type: Text,
         Name: XPath Demo:,
-        ClassName: TextBlock,
-        Bounds: {
-          Width: 420,
-          Height: 16
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBlock[8]
       },
       {
-        ElementType: Text,
-        AutomationId: ,
+        Type: Text,
         Name: Left Panel,
-        ClassName: TextBlock,
-        Bounds: {
-          Width: 198,
-          Height: 16
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBlock[9]
       },
       {
-        ElementType: Button,
+        Type: Button,
         AutomationId: XPathDemo_Left_Button1,
         Name: Alpha,
-        ClassName: Button,
-        Bounds: {
-          Width: 120,
-          Height: 20
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/Button[2],
+        ChildrenCount: 1,
         Children: [
           {
-            ElementType: Text,
-            AutomationId: ,
+            Type: Text,
             Name: Alpha,
-            ClassName: TextBlock,
-            Bounds: {
-              Width: 31,
-              Height: 16
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/Button[2]/TextBlock
           }
         ]
       },
       {
-        ElementType: Button,
+        Type: Button,
         AutomationId: XPathDemo_Left_Button2,
         Name: Alpha,
-        ClassName: Button,
-        Bounds: {
-          Width: 120,
-          Height: 20
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/Button[3],
+        ChildrenCount: 1,
         Children: [
           {
-            ElementType: Text,
-            AutomationId: ,
+            Type: Text,
             Name: Alpha,
-            ClassName: TextBlock,
-            Bounds: {
-              Width: 31,
-              Height: 16
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/Button[3]/TextBlock
           }
         ]
       },
       {
-        ElementType: Text,
-        AutomationId: ,
+        Type: Text,
         Name: Right Panel,
-        ClassName: TextBlock,
-        Bounds: {
-          Width: 210,
-          Height: 16
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/TextBlock[10]
       },
       {
-        ElementType: Button,
+        Type: Button,
         AutomationId: XPathDemo_Right_Button1,
         Name: Beta,
-        ClassName: Button,
-        Bounds: {
-          Width: 120,
-          Height: 20
-        },
-        IsEnabled: true,
-        IsOffscreen: false,
         XPath: /Window/Button[4],
+        ChildrenCount: 1,
         Children: [
           {
-            ElementType: Text,
-            AutomationId: ,
+            Type: Text,
             Name: Beta,
-            ClassName: TextBlock,
-            Bounds: {
-              Width: 23,
-              Height: 16
-            },
-            IsEnabled: true,
-            IsOffscreen: false,
             XPath: /Window/Button[4]/TextBlock
           }
         ]
       }
     ]
-  }
+  },
+  ReturnedNodes: 47,
+  ScannedNodes: 47,
+  Truncated: false
 }

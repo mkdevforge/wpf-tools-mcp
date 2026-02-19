@@ -68,30 +68,33 @@ try
         opts,
         runCts.Token);
 
+    var sessionId = (launch["SessionId"] ?? launch["sessionId"])?.GetValue<string>() ?? "";
+    report["sessionId"] = sessionId;
+
     report["pid"] = (launch["Pid"] ?? launch["pid"])?.GetValue<int>();
     report["processName"] = (launch["ProcessName"] ?? launch["processName"])?.GetValue<string>();
 
-    var windows = await WaitForWindowsAsync(report, mcp, opts, runCts.Token);
+    var windows = await WaitForWindowsAsync(report, mcp, opts, sessionId, runCts.Token);
     var main = PickMainWindow(windows);
     report["mainWindowHandle"] = main.Handle;
     report["mainWindowTitle"] = main.Title;
 
     await CallStepAsync(
         report,
-        "focus_window",
+        "set_active_window",
         mcp,
-        "focus_window",
-        new JsonObject { ["windowHandle"] = main.Handle },
+        "set_active_window",
+        new JsonObject { ["sessionId"] = sessionId, ["windowHandle"] = main.Handle },
         opts,
         runCts.Token);
 
-    await CaptureAsync(report, mcp, opts, main.Handle, "00-baseline-auto.png", "auto", runCts.Token);
-    await CaptureAsync(report, mcp, opts, main.Handle, "00-baseline-printWindow.png", "printWindow", runCts.Token);
-    await CaptureAsync(report, mcp, opts, main.Handle, "00-baseline-screen.png", "screen", runCts.Token);
+    await CaptureAsync(report, mcp, opts, sessionId, main.Handle, "00-baseline-auto.png", "auto", runCts.Token);
+    await CaptureAsync(report, mcp, opts, sessionId, main.Handle, "00-baseline-printWindow.png", "printWindow", runCts.Token);
+    await CaptureAsync(report, mcp, opts, sessionId, main.Handle, "00-baseline-screen.png", "screen", runCts.Token);
 
     if (opts.IncludePhase2)
     {
-        await TryPhase2Async(report, mcp, opts, main.Handle, runCts.Token);
+        await TryPhase2Async(report, mcp, opts, sessionId, main.Handle, runCts.Token);
     }
 
     var uiaTree = await CallStepAsync(
@@ -101,8 +104,12 @@ try
         "get_visual_tree",
         new JsonObject
         {
+            ["sessionId"] = sessionId,
+            ["backend"] = "uia",
             ["windowHandle"] = main.Handle,
-            ["depth"] = opts.Depth
+            ["depth"] = opts.Depth,
+            ["maxNodes"] = opts.MaxNodes,
+            ["fields"] = new JsonArray { "isEnabled", "isOffscreen" }
         },
         opts,
         runCts.Token);
@@ -178,6 +185,7 @@ try
                 "scroll_to_element",
                 new JsonObject
                 {
+                    ["sessionId"] = sessionId,
                     ["locator"] = new JsonObject { ["xpath"] = node.XPath },
                     ["windowHandle"] = main.Handle
                 },
@@ -187,7 +195,7 @@ try
             if (scrolled)
             {
                 Count("scroll_to_element");
-                if (await CaptureAsync(report, mcp, opts, main.Handle, $"actions/{screenshotsIndex:D3}-after-scroll.png", "auto", runCts.Token))
+                if (await CaptureAsync(report, mcp, opts, sessionId, main.Handle, $"actions/{screenshotsIndex:D3}-after-scroll.png", "auto", runCts.Token))
                 {
                     screenshotsIndex++;
                 }
@@ -209,6 +217,7 @@ try
                 "get_element_properties",
                 new JsonObject
                 {
+                    ["sessionId"] = sessionId,
                     ["locator"] = new JsonObject { ["xpath"] = node.XPath },
                     ["windowHandle"] = main.Handle
                 },
@@ -236,6 +245,7 @@ try
                 "invoke",
                 new JsonObject
                 {
+                    ["sessionId"] = sessionId,
                     ["locator"] = new JsonObject { ["xpath"] = node.XPath },
                     ["windowHandle"] = main.Handle
                 },
@@ -245,7 +255,7 @@ try
             if (ok)
             {
                 Count("invoke");
-                if (await CaptureAsync(report, mcp, opts, main.Handle, $"actions/{screenshotsIndex:D3}-after-invoke.png", "auto", runCts.Token))
+                if (await CaptureAsync(report, mcp, opts, sessionId, main.Handle, $"actions/{screenshotsIndex:D3}-after-invoke.png", "auto", runCts.Token))
                 {
                     screenshotsIndex++;
                 }
@@ -264,6 +274,7 @@ try
                 "type_text",
                 new JsonObject
                 {
+                    ["sessionId"] = sessionId,
                     ["locator"] = new JsonObject { ["xpath"] = node.XPath },
                     ["text"] = $"WpfPilotSmoke {DateTimeOffset.Now:HHmmss}",
                     ["windowHandle"] = main.Handle
@@ -274,7 +285,7 @@ try
             if (ok)
             {
                 Count("type_text");
-                if (await CaptureAsync(report, mcp, opts, main.Handle, $"actions/{screenshotsIndex:D3}-after-type.png", "auto", runCts.Token))
+                if (await CaptureAsync(report, mcp, opts, sessionId, main.Handle, $"actions/{screenshotsIndex:D3}-after-type.png", "auto", runCts.Token))
                 {
                     screenshotsIndex++;
                 }
@@ -292,6 +303,7 @@ try
                 "set_value",
                 new JsonObject
                 {
+                    ["sessionId"] = sessionId,
                     ["locator"] = new JsonObject { ["xpath"] = node.XPath },
                     ["value"] = mid,
                     ["windowHandle"] = main.Handle
@@ -302,7 +314,7 @@ try
             if (ok)
             {
                 Count("set_value");
-                if (await CaptureAsync(report, mcp, opts, main.Handle, $"actions/{screenshotsIndex:D3}-after-set-value.png", "auto", runCts.Token))
+                if (await CaptureAsync(report, mcp, opts, sessionId, main.Handle, $"actions/{screenshotsIndex:D3}-after-set-value.png", "auto", runCts.Token))
                 {
                     screenshotsIndex++;
                 }
@@ -315,13 +327,13 @@ try
              string.Equals(node.ElementType, "Tab", StringComparison.OrdinalIgnoreCase) ||
              patterns.ContainsKey("Selection")))
         {
-            var ok = await TrySelectAsync(report, mcp, opts, main.Handle, node.XPath, index: 1, runCts.Token) ||
-                     await TrySelectAsync(report, mcp, opts, main.Handle, node.XPath, index: 0, runCts.Token);
+            var ok = await TrySelectAsync(report, mcp, opts, sessionId, main.Handle, node.XPath, index: 1, runCts.Token) ||
+                     await TrySelectAsync(report, mcp, opts, sessionId, main.Handle, node.XPath, index: 0, runCts.Token);
 
             if (ok)
             {
                 Count("select_item");
-                if (await CaptureAsync(report, mcp, opts, main.Handle, $"actions/{screenshotsIndex:D3}-after-select.png", "auto", runCts.Token))
+                if (await CaptureAsync(report, mcp, opts, sessionId, main.Handle, $"actions/{screenshotsIndex:D3}-after-select.png", "auto", runCts.Token))
                 {
                     screenshotsIndex++;
                 }
@@ -341,6 +353,7 @@ try
                 "click_element",
                 new JsonObject
                 {
+                    ["sessionId"] = sessionId,
                     ["locator"] = new JsonObject { ["xpath"] = node.XPath },
                     ["windowHandle"] = main.Handle,
                     ["clickMode"] = "auto"
@@ -351,7 +364,7 @@ try
             if (ok)
             {
                 Count("click_element");
-                if (await CaptureAsync(report, mcp, opts, main.Handle, $"actions/{screenshotsIndex:D3}-after-click.png", "auto", runCts.Token))
+                if (await CaptureAsync(report, mcp, opts, sessionId, main.Handle, $"actions/{screenshotsIndex:D3}-after-click.png", "auto", runCts.Token))
                 {
                     screenshotsIndex++;
                 }
@@ -364,11 +377,12 @@ try
 
     await SafeToolAsync(
         report,
-        "close_app",
+        "close_session",
         mcp,
-        "close_app",
+        "close_session",
         new JsonObject
         {
+            ["sessionId"] = sessionId,
             ["force"] = true,
             ["timeoutMs"] = 5000
         },
@@ -464,6 +478,7 @@ static async Task<bool> CaptureAsync(
     JsonObject report,
     McpWrapper mcp,
     OptionsModel opts,
+    string sessionId,
     long windowHandle,
     string relativePath,
     string captureMode,
@@ -482,6 +497,7 @@ static async Task<bool> CaptureAsync(
             "take_screenshot",
             new JsonObject
             {
+                ["sessionId"] = sessionId,
                 ["windowHandle"] = windowHandle,
                 ["captureMode"] = captureMode,
                 ["outputPath"] = requestedPath
@@ -502,6 +518,7 @@ static async Task<bool> TrySelectAsync(
     JsonObject report,
     McpWrapper mcp,
     OptionsModel opts,
+    string sessionId,
     long windowHandle,
     string containerXPath,
     int index,
@@ -516,6 +533,7 @@ static async Task<bool> TrySelectAsync(
             "select_item",
             new JsonObject
             {
+                ["sessionId"] = sessionId,
                 ["locator"] = new JsonObject { ["xpath"] = containerXPath },
                 ["index"] = index,
                 ["windowHandle"] = windowHandle
@@ -604,6 +622,7 @@ static async Task TryPhase2Async(
     JsonObject report,
     McpWrapper mcp,
     OptionsModel opts,
+    string sessionId,
     long windowHandle,
     CancellationToken cancellationToken)
 {
@@ -615,7 +634,7 @@ static async Task TryPhase2Async(
             "inject_agent",
             mcp,
             "inject_agent",
-            new JsonObject(),
+            new JsonObject { ["sessionId"] = sessionId },
             opts,
             cancellationToken);
     }
@@ -632,17 +651,19 @@ static async Task TryPhase2Async(
     };
     report["phase2"] = phase2;
 
-    await SafeToolAsync(report, "agent_ping", mcp, "agent_ping", new JsonObject(), opts, cancellationToken);
+    await SafeToolAsync(report, "agent_ping", mcp, "agent_ping", new JsonObject { ["sessionId"] = sessionId }, opts, cancellationToken);
 
     try
     {
         var wpfTree = await CallStepAsync(
             report,
-            "get_wpf_visual_tree",
+            "get_visual_tree_wpf",
             mcp,
-            "get_wpf_visual_tree",
+            "get_visual_tree",
             new JsonObject
             {
+                ["sessionId"] = sessionId,
+                ["backend"] = "wpf",
                 ["windowHandle"] = windowHandle,
                 ["depth"] = Math.Min(opts.Depth, 6)
             },
@@ -664,6 +685,7 @@ static async Task<List<WindowInfo>> WaitForWindowsAsync(
     JsonObject report,
     McpWrapper mcp,
     OptionsModel opts,
+    string sessionId,
     CancellationToken cancellationToken)
 {
     var stopAt = DateTimeOffset.UtcNow.AddSeconds(20);
@@ -679,7 +701,7 @@ static async Task<List<WindowInfo>> WaitForWindowsAsync(
                 "list_windows",
                 mcp,
                 "list_windows",
-                new JsonObject(),
+                new JsonObject { ["sessionId"] = sessionId },
                 opts,
                 cancellationToken);
 
@@ -751,7 +773,7 @@ static bool TryReadWindow(JsonObject node, out WindowInfo window)
 
 static void CollectNodes(JsonObject node, List<UiaNode> destination)
 {
-    var elementType = (node["ElementType"] ?? node["elementType"])?.GetValue<string>() ?? string.Empty;
+    var elementType = (node["Type"] ?? node["type"] ?? node["ElementType"] ?? node["elementType"])?.GetValue<string>() ?? string.Empty;
     var name = (node["Name"] ?? node["name"])?.GetValue<string>();
     var xpath = (node["XPath"] ?? node["xPath"] ?? node["xpath"])?.GetValue<string>() ?? string.Empty;
     var isEnabled = (node["IsEnabled"] ?? node["isEnabled"])?.GetValue<bool>() ?? true;
@@ -889,7 +911,7 @@ Options:
   --max-actions <n>       Max interactions attempted (default: 200)
   --max-nodes <n>         Max UIA nodes to inspect (default: 800)
   --timeout-ms <n>        Per-tool timeout in ms (default: 15000)
-  --include-phase2 <bool> Attempt inject_agent + get_wpf_visual_tree (default: true)
+  --include-phase2 <bool> Attempt inject_agent + get_visual_tree (backend=wpf) (default: true)
   --help                  Show help
 """);
     }

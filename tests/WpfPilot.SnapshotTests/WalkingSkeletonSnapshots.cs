@@ -13,6 +13,7 @@ namespace WpfPilot.SnapshotTests;
 public sealed class WalkingSkeletonSnapshots
 {
     private McpTestContext _mcp = null!;
+    private string _sessionId = "";
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -23,11 +24,13 @@ public sealed class WalkingSkeletonSnapshots
         var exePath = TestAppPaths.FindTestAppExecutable();
         var workingDirectory = Path.GetDirectoryName(exePath)!;
 
-        _ = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        var launch = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
         {
             ["exePath"] = exePath,
             ["workingDirectory"] = workingDirectory,
         });
+
+        _sessionId = launch.SessionId;
     }
 
     [OneTimeTearDown]
@@ -40,8 +43,9 @@ public sealed class WalkingSkeletonSnapshots
 
         try
         {
-            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
             {
+                ["sessionId"] = _sessionId,
                 ["force"] = true,
                 ["timeoutMs"] = 2000
             });
@@ -56,7 +60,10 @@ public sealed class WalkingSkeletonSnapshots
     [Test]
     public async Task ListWindows_snapshot()
     {
-        var result = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows");
+        var result = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId
+        });
 
         var stable = result with
         {
@@ -74,6 +81,7 @@ public sealed class WalkingSkeletonSnapshots
     {
         var screenshot = await _mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
         {
+            ["sessionId"] = _sessionId,
             ["captureMode"] = "auto"
         });
         Assert.That(screenshot.Width, Is.GreaterThan(0));

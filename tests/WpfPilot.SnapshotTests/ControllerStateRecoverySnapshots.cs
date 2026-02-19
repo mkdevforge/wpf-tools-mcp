@@ -39,7 +39,10 @@ public sealed class ControllerStateRecoverySnapshots
         var launch = await LaunchTestAppAsync();
         try
         {
-            var windows = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows");
+            var windows = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId
+            });
             var stableWindows = windows.Windows
                 .Select(w => w with { Handle = 0, Bounds = w.Bounds with { X = 0, Y = 0 } })
                 .ToArray();
@@ -47,46 +50,38 @@ public sealed class ControllerStateRecoverySnapshots
             await Verifier.Verify(new
             {
                 AttachFailure = attachFailure,
-                Launch = launch with { Pid = -1 },
+                Launch = launch with { SessionId = "<session>", Pid = -1 },
                 Windows = stableWindows
             });
         }
         finally
         {
-            await CloseAppIfAttachedAsync();
+            await CloseSessionAsync(launch.SessionId);
         }
     }
 
     [Test]
-    public async Task ResetState_allows_relaunch_without_close_snapshot()
+    public async Task CloseSession_removes_session_snapshot()
     {
         var firstLaunch = await LaunchTestAppAsync();
         try
         {
-            var reset = await _mcp.CallToolAsync<ResetStateResponse>("reset_state");
-            var firstProcessAliveAfterReset = IsProcessAlive(firstLaunch.Pid);
+            var sessionsBeforeClose = await _mcp.CallToolAsync<ListSessionsResponse>("list_sessions");
+            var firstProcessAliveBeforeClose = IsProcessAlive(firstLaunch.Pid);
 
-            var secondLaunch = await LaunchTestAppAsync();
-            try
-            {
-                var windows = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows");
-                var stableWindows = windows.Windows
-                    .Select(w => w with { Handle = 0, Bounds = w.Bounds with { X = 0, Y = 0 } })
-                    .ToArray();
+            var close = await CloseSessionAsync(firstLaunch.SessionId);
+            var firstProcessAliveAfterClose = IsProcessAlive(firstLaunch.Pid);
+            var sessionsAfterClose = await _mcp.CallToolAsync<ListSessionsResponse>("list_sessions");
 
-                await Verifier.Verify(new
-                {
-                    FirstLaunch = firstLaunch with { Pid = -1 },
-                    Reset = reset,
-                    FirstProcessAliveAfterReset = firstProcessAliveAfterReset,
-                    SecondLaunch = secondLaunch with { Pid = -1 },
-                    Windows = stableWindows
-                });
-            }
-            finally
+            await Verifier.Verify(new
             {
-                await CloseAppIfAttachedAsync();
-            }
+                FirstLaunch = firstLaunch with { SessionId = "<session>", Pid = -1 },
+                SessionsBeforeClose = sessionsBeforeClose.Sessions.Select(s => s with { SessionId = "<session>", Pid = -1, ActiveWindowHandle = 0, CreatedAtUtc = "<time>" }).ToArray(),
+                FirstProcessAliveBeforeClose = firstProcessAliveBeforeClose,
+                Close = close,
+                FirstProcessAliveAfterClose = firstProcessAliveAfterClose,
+                SessionsAfterClose = sessionsAfterClose.Sessions.Select(s => s with { SessionId = "<session>", Pid = -1, ActiveWindowHandle = 0, CreatedAtUtc = "<time>" }).ToArray(),
+            });
         }
         finally
         {
@@ -139,18 +134,20 @@ public sealed class ControllerStateRecoverySnapshots
         return ex!.Message.Split("--- server stderr", StringSplitOptions.None)[0].TrimEnd();
     }
 
-    private async Task CloseAppIfAttachedAsync()
+    private async Task<CloseAppResponse?> CloseSessionAsync(string sessionId)
     {
         try
         {
-            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_app", new Dictionary<string, object?>
+            return await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
             {
+                ["sessionId"] = sessionId,
                 ["force"] = true,
                 ["timeoutMs"] = 2000
             });
         }
         catch
         {
+            return null;
         }
     }
 
@@ -163,6 +160,7 @@ public sealed class ControllerStateRecoverySnapshots
         KillProcessesByName(expectedProcessName);
 
         Process? process = null;
+        AttachToAppResponse? attached = null;
         try
         {
             process = Process.Start(new ProcessStartInfo
@@ -183,19 +181,31 @@ public sealed class ControllerStateRecoverySnapshots
                 ? $"{process.ProcessName}.exe"
                 : process.ProcessName;
 
-            var attached = await _mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+            attached = await _mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
             {
                 ["processName"] = requestedName
             });
 
-            var windows = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows");
+            var windows = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows", new Dictionary<string, object?>
+            {
+                ["sessionId"] = attached.SessionId
+            });
             Assert.That(windows.Windows, Is.Not.Empty);
 
             return attached;
         }
         finally
         {
-            await CloseAppIfAttachedAsync();
+            try
+            {
+                if (attached is not null)
+                {
+                    _ = await CloseSessionAsync(attached.SessionId);
+                }
+            }
+            catch
+            {
+            }
 
             if (process is not null)
             {

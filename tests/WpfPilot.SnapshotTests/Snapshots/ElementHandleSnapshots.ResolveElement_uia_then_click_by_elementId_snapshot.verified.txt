@@ -1,0 +1,17 @@
+{
+  Resolve: {
+    BackendUsed: Uia,
+    Element: {
+      Type: Button,
+      AutomationId: Basic_Button,
+      Name: Click me,
+      XPath: /Window/Button[1],
+      ElementId: <element>
+    }
+  },
+  Click: {
+    Clicked: true,
+    MethodUsed: mouse
+  },
+  Status: Clicks: 1
+}

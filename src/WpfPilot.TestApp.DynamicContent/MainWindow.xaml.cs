@@ -36,6 +36,18 @@ public partial class MainWindow : Window
         DynamicHost.Children.Add(_dynamicButton);
     }
 
+    private void RemoveDynamicButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_dynamicButton is null)
+        {
+            return;
+        }
+
+        _dynamicButton.Click -= DynamicButton_Click;
+        DynamicHost.Children.Remove(_dynamicButton);
+        _dynamicButton = null;
+    }
+
     private void DynamicButton_Click(object sender, RoutedEventArgs e)
     {
         _clicks++;
@@ -44,4 +56,3 @@ public partial class MainWindow : Window
 
     private void UpdateStatus() => DynamicStatus.Text = $"Clicks: {_clicks}";
 }
-

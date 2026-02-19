@@ -37,7 +37,7 @@ External dependency / setup friction:
 
 **Current posture:** `AutomationController` is registered as a DI singleton and carries mutable attachment state *and* mutable agent session state.
 
-**Risk:** If MCP clients (or orchestrators) issue concurrent tool calls (`close_app` + `take_screenshot` + `inject_agent`, etc.), state can interleave in undefined ways.
+**Risk:** If MCP clients (or orchestrators) issue concurrent tool calls (`close_session` + `take_screenshot` + `inject_agent`, etc.), state can interleave in undefined ways.
 
 **Mitigation implemented:** All MCP tool calls are serialized via a global async lock (`AutomationController.RunExclusiveAsync`) so state cannot interleave across concurrent tool calls.
 
@@ -111,13 +111,13 @@ The agent connect retry is ~3s total with short per-attempt timeouts. On slow ma
 
 ### Concurrency remains a fundamental risk (singleton controller + mutable state)
 
-`AutomationController` is a DI singleton with mutable attachment state *and now* mutable agent session state. If MCP clients issue concurrent tool calls (common with some LLM orchestrators), calls like `close_app` / `inject_agent` / `take_screenshot` can interleave in unsafe ways.
+`AutomationController` is a DI singleton with mutable attachment state *and now* mutable agent session state. If MCP clients issue concurrent tool calls (common with some LLM orchestrators), calls like `close_session` / `inject_agent` / `take_screenshot` can interleave in unsafe ways.
 
 This is called out in `docs/Phase1-CodeReviewFindings.md`, but it becomes more important as Phase 2 adds more long-running in-proc operations.
 
 ## Tooling / ergonomics
 
-- The Phase 2 “debug” tools (`inject_agent`, `agent_ping`, `get_wpf_visual_tree`) are fine for bring-up, but the PRD direction is to **upgrade** existing inspection tools (`get_visual_tree`, `get_element_properties`) with a `backend` switch and auto-fallback.
+- The Phase 2 “debug” tools (`inject_agent`, `agent_ping`) are fine for bring-up, but the PRD direction is to **upgrade** existing inspection tools (`get_visual_tree`, `get_element_properties`) with a `backend` switch and auto-fallback (and use `get_visual_tree backend=wpf` rather than a separate WPF-only tree tool).
 - `inject_agent` likely should accept an optional `windowHandle` so multi-window apps can inject targeting the desired dispatcher window.
 
 ## Testing gaps (recommended next)
