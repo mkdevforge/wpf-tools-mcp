@@ -140,4 +140,61 @@ public static class InspectionTools
             var (automation, _) = sessions.GetController(sessionId);
             return automation.RunExclusiveAsync(() => automation.ReleaseElementAsync(elementId), cancellationToken);
         });
+
+    [McpServerTool(Name = "pick_element_at_point"), Description("Pick an element at a screen coordinate (UIA or WPF).")]
+    public static Task<PickElementAtPointResponse> PickElementAtPoint(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Screen X coordinate (pixels)")] int x,
+        [Description("Screen Y coordinate (pixels)")] int y,
+        [Description("Inspection backend selection")] InspectionBackend backend = InspectionBackend.Auto,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Include ancestor chain in response")] bool includeAncestors = false,
+        [Description("Maximum number of ancestors returned")] int maxAncestors = 8,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.PickElementAtPointAsync(
+                    new PickElementAtPointRequest(
+                        X: x,
+                        Y: y,
+                        WindowHandle: effectiveWindowHandle,
+                        Backend: backend,
+                        IncludeAncestors: includeAncestors,
+                        MaxAncestors: maxAncestors),
+                    cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "highlight_element"), Description("Highlight an element on-screen (locator or elementId).")]
+    public static Task<HighlightElementResponse> HighlightElement(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
+        [Description("Inspection backend selection")] InspectionBackend backend = InspectionBackend.Auto,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Highlight duration (ms)")] int durationMs = 1500,
+        [Description("Stroke color (e.g. #3B82F6)")] string color = "#3B82F6",
+        [Description("Stroke thickness (px)")] int thickness = 3,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.HighlightElementAsync(
+                    new HighlightElementRequest(
+                        Locator: locator,
+                        ElementId: elementId,
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        Backend: backend,
+                        DurationMs: durationMs,
+                        Color: color,
+                        Thickness: thickness),
+                    cancellationToken),
+                cancellationToken);
+        });
 }

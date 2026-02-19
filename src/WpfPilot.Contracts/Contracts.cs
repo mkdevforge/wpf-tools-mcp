@@ -143,7 +143,50 @@ public sealed record TakeScreenshotResponse(
     int Width,
     int Height,
     string Format,
+    Rect CapturedBounds,
+    long WindowHandleUsed,
+    ScreenshotCaptureMode CaptureModeUsed,
     string? Base64 = null);
+
+public sealed record PickElementAtPointRequest(
+    int X,
+    int Y,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WindowHandle = null,
+    InspectionBackend Backend = InspectionBackend.Auto,
+    bool IncludeAncestors = false,
+    int MaxAncestors = 8);
+
+public sealed record PickElementAtPointResponse(
+    InspectionBackend BackendUsed,
+    ElementRef Element,
+    long WindowHandleUsed,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ElementRef>? Ancestors = null);
+
+public sealed record PickWpfElementAtPointRequest(
+    long? WindowHandle = null,
+    int X = 0,
+    int Y = 0,
+    bool IncludeAncestors = false,
+    int MaxAncestors = 8,
+    FindReturnFields ReturnFields = FindReturnFields.Standard);
+
+public sealed record PickWpfElementAtPointResponse(
+    ElementRef Element,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ElementRef>? Ancestors = null);
+
+public sealed record HighlightElementRequest(
+    ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WindowHandle = null,
+    InspectionBackend Backend = InspectionBackend.Auto,
+    int DurationMs = 1500,
+    string Color = "#3B82F6",
+    int Thickness = 3);
+
+public sealed record HighlightElementResponse(
+    bool Highlighted,
+    Rect Bounds,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null);
 
 public sealed record FocusWindowRequest(long? WindowHandle = null, string? Title = null);
 

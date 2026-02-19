@@ -1,0 +1,22 @@
+﻿{
+  Pick: {
+    BackendUsed: Wpf,
+    Element: {
+      Type: Border,
+      XPath: /Window/Border,
+      ClassName: System.Windows.Controls.Border,
+      Bounds: {
+        Width: 884,
+        Height: 611
+      },
+      ElementId: <element>
+    },
+    Ancestors: [
+      {
+        Type: MainWindow,
+        XPath: /Window,
+        ElementId: <ancestor:0>
+      }
+    ]
+  }
+}

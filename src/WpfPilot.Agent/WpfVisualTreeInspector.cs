@@ -1191,6 +1191,232 @@ internal static class WpfVisualTreeInspector
         return BuildElementRefWpf(resolved.Element, resolved.XPath, request.ReturnFields);
     }
 
+    public static PickWpfElementAtPointResponse PickElementAtPoint(PickWpfElementAtPointRequest request, CancellationToken cancellationToken)
+    {
+        var maxAncestors = Math.Clamp(request.MaxAncestors, 0, 50);
+
+        var window = ResolveWindow(request.WindowHandle);
+        using var treeService = new VisualTreeService();
+
+        var hit = PickWpfDependencyObjectAtPoint(window, request.X, request.Y);
+        hit = PromotePickedWpfElement(hit, window);
+
+        var chain = BuildXPathChainForElement(treeService, window, hit, visibleOnly: true, maxNodes: 200_000, cancellationToken);
+        var (pickedElement, pickedXPath) = chain[^1];
+
+        var elementRef = BuildElementRefWpf(pickedElement, pickedXPath, request.ReturnFields);
+
+        IReadOnlyList<ElementRef>? ancestors = null;
+        if (request.IncludeAncestors)
+        {
+            var candidateAncestors = chain.Take(Math.Max(0, chain.Count - 1)).ToArray();
+            if (maxAncestors > 0 && candidateAncestors.Length > maxAncestors)
+            {
+                candidateAncestors = candidateAncestors[^maxAncestors..];
+            }
+
+            ancestors = candidateAncestors
+                .Select(a => BuildElementRefWpf(a.Element, a.XPath, FindReturnFields.Minimal))
+                .ToArray();
+        }
+
+        return new PickWpfElementAtPointResponse(elementRef, ancestors);
+    }
+
+    private static DependencyObject PickWpfDependencyObjectAtPoint(Window window, int x, int y)
+    {
+        var screenPoint = new Point(x, y);
+        Point clientPoint;
+        try
+        {
+            clientPoint = window.PointFromScreen(screenPoint);
+        }
+        catch
+        {
+            return window;
+        }
+
+        try
+        {
+            var inputHit = window.InputHitTest(clientPoint);
+            if (inputHit is DependencyObject dependencyObject)
+            {
+                return dependencyObject;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var hit = VisualTreeHelper.HitTest(window, clientPoint);
+            if (hit?.VisualHit is DependencyObject visualHit)
+            {
+                return visualHit;
+            }
+        }
+        catch
+        {
+        }
+
+        return window;
+    }
+
+    private static DependencyObject PromotePickedWpfElement(DependencyObject element, Window window)
+    {
+        if (element is FrameworkElement or FrameworkContentElement or Window)
+        {
+            return element;
+        }
+
+        var current = element;
+        while (current is not null && current is not FrameworkElement && current is not FrameworkContentElement && current is not Window)
+        {
+            var parent = VisualTreeHelper.GetParent(current);
+            if (parent is null)
+            {
+                break;
+            }
+
+            current = parent;
+        }
+
+        return current ?? window;
+    }
+
+    private static List<(DependencyObject Element, string XPath)> BuildXPathChainForElement(
+        VisualTreeService treeService,
+        Window window,
+        DependencyObject element,
+        bool visibleOnly,
+        int maxNodes,
+        CancellationToken cancellationToken)
+    {
+        if (ReferenceEquals(element, window))
+        {
+            return [(window, "/Window")];
+        }
+
+        if (TryBuildXPathChainUpwards(treeService, window, element, visibleOnly, out var chain))
+        {
+            return chain;
+        }
+
+        var root = (DependencyObject)window;
+        var rootXPath = "/Window";
+
+        string? xpath = null;
+        foreach (var item in EnumerateDescendantsWithXPath(root, rootXPath, treeService, visibleOnly, maxNodes, cancellationToken))
+        {
+            if (ReferenceEquals(item.Element, element))
+            {
+                xpath = item.XPath;
+                break;
+            }
+        }
+
+        if (xpath is null)
+        {
+            return [(window, "/Window")];
+        }
+
+        var segments = xpath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .ToArray();
+
+        var chainFromRoot = new List<(DependencyObject Element, string XPath)> { (window, "/Window") };
+        var currentPath = "/Window";
+
+        for (var i = 1; i < segments.Length; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            currentPath += "/" + segments[i];
+            var resolved = ResolveByXPath(treeService, window, currentPath, visibleOnly, cancellationToken);
+            chainFromRoot.Add((resolved, currentPath));
+        }
+
+        return chainFromRoot;
+    }
+
+    private static bool TryBuildXPathChainUpwards(
+        VisualTreeService treeService,
+        Window window,
+        DependencyObject element,
+        bool visibleOnly,
+        out List<(DependencyObject Element, string XPath)> chain)
+    {
+        chain = [];
+
+        var segmentsLeafFirst = new List<string>();
+        var elementsLeafFirst = new List<DependencyObject>();
+        DependencyObject? current = element;
+
+        var safety = 0;
+        while (current is not null && !ReferenceEquals(current, window))
+        {
+            if (safety++ > 2048)
+            {
+                return false;
+            }
+
+            var parent = VisualTreeHelper.GetParent(current);
+            if (parent is null)
+            {
+                return false;
+            }
+
+            var rawChildren = GetChildrenWpf(parent, treeService, visibleOnly);
+            var label = GetXPathLabel(current);
+
+            var matching = 0;
+            var index = 0;
+            var found = false;
+
+            foreach (var child in rawChildren)
+            {
+                if (!string.Equals(GetXPathLabel(child), label, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                matching++;
+                if (ReferenceEquals(child, current))
+                {
+                    index = matching;
+                    found = true;
+                }
+            }
+
+            if (!found || matching <= 0)
+            {
+                return false;
+            }
+
+            var segment = matching > 1 ? $"{label}[{index}]" : label;
+            segmentsLeafFirst.Add(segment);
+            elementsLeafFirst.Add(current);
+            current = parent;
+        }
+
+        segmentsLeafFirst.Reverse();
+        elementsLeafFirst.Reverse();
+
+        chain = new List<(DependencyObject Element, string XPath)>(elementsLeafFirst.Count + 1)
+        {
+            (window, "/Window")
+        };
+
+        var xpath = "/Window";
+        for (var i = 0; i < segmentsLeafFirst.Count; i++)
+        {
+            xpath += "/" + segmentsLeafFirst[i];
+            chain.Add((elementsLeafFirst[i], xpath));
+        }
+
+        return true;
+    }
+
     private static string DescribeBindingSource(Binding binding)
     {
         if (binding.Source is not null)

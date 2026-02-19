@@ -1,0 +1,152 @@
+using FlaUI.Core.AutomationElements;
+using WpfPilot.Contracts;
+
+namespace WpfPilot.Automation;
+
+public sealed partial class AutomationController
+{
+    public async Task<HighlightElementResponse> HighlightElementAsync(
+        HighlightElementRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var hasLocator = request.Locator is not null;
+        var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
+        if (hasLocator == hasElementId)
+        {
+            throw new ArgumentException("highlight_element requires exactly one of: locator OR elementId.");
+        }
+
+        var application = EnsureAttached();
+        var automation = EnsureAutomation();
+
+        string? resolvedElementId = null;
+        var backend = request.Backend;
+        ElementLocator effectiveLocator = request.Locator ?? new ElementLocator();
+
+        long windowHandleUsed;
+        if (hasElementId)
+        {
+            resolvedElementId = request.ElementId!.Trim();
+            var handle = RequireHandle(resolvedElementId);
+            backend = handle.Backend;
+            windowHandleUsed = handle.WindowHandle;
+
+            if (request.WindowHandle is long requestedHandle && requestedHandle != windowHandleUsed)
+            {
+                throw new ArgumentException("windowHandle does not match the elementId window.");
+            }
+
+            effectiveLocator = new ElementLocator(XPath: handle.XPath);
+        }
+        else
+        {
+            if (backend == InspectionBackend.Auto)
+            {
+                backend = IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia;
+            }
+
+            windowHandleUsed = request.WindowHandle
+                ?? FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
+        }
+
+        Rect bounds;
+        try
+        {
+            bounds = backend switch
+            {
+                InspectionBackend.Uia => ResolveHighlightBoundsUia(application, automation, windowHandleUsed, effectiveLocator, resolvedElementId),
+                InspectionBackend.Wpf => await ResolveHighlightBoundsWpfAsync(windowHandleUsed, effectiveLocator, cancellationToken).ConfigureAwait(false),
+                _ => throw new ArgumentOutOfRangeException(nameof(backend), backend, "Unsupported backend.")
+            };
+        }
+        catch (InvalidOperationException ex) when (hasElementId &&
+                                                  resolvedElementId is not null &&
+                                                  backend == InspectionBackend.Wpf &&
+                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return new HighlightElementResponse(Highlighted: false, Bounds: bounds, Reason: "no_bounds");
+        }
+
+        var shown = await HighlightOverlay.ShowAsync(
+            bounds,
+            request.Color,
+            request.Thickness,
+            request.DurationMs,
+            cancellationToken).ConfigureAwait(false);
+
+        return shown
+            ? new HighlightElementResponse(Highlighted: true, Bounds: bounds)
+            : new HighlightElementResponse(Highlighted: false, Bounds: bounds, Reason: "overlay_failed");
+    }
+
+    private Rect ResolveHighlightBoundsUia(
+        FlaUI.Core.Application application,
+        FlaUI.UIA3.UIA3Automation automation,
+        long windowHandle,
+        ElementLocator locator,
+        string? elementId)
+    {
+        Window window;
+        try
+        {
+            window = FindWindowByHandle(application, automation, windowHandle);
+        }
+        catch
+        {
+            if (!string.IsNullOrWhiteSpace(elementId))
+            {
+                throw new InvalidOperationException($"stale_element: window_closed for '{elementId}'. Call resolve_element again.");
+            }
+
+            throw;
+        }
+
+        var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+        AutomationElement element;
+
+        if (!string.IsNullOrWhiteSpace(elementId))
+        {
+            element = ResolveUiaElementById(window, rawWalker, elementId.Trim(), out _);
+        }
+        else
+        {
+            var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+            element = ResolveElement(window, locator, controlWalker, rawWalker);
+        }
+
+        return ToRect(element.BoundingRectangle);
+    }
+
+    private async Task<Rect> ResolveHighlightBoundsWpfAsync(
+        long windowHandle,
+        ElementLocator locator,
+        CancellationToken cancellationToken)
+    {
+        var client = await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
+        if (client is null)
+        {
+            throw new InvalidOperationException("WPF agent is not connected. Call inject_agent first.");
+        }
+
+        var element = await client.CallAsync<ElementRef>(
+            "wpf/resolve_element",
+            new ResolveWpfElementRequest(
+                WindowHandle: windowHandle,
+                Locator: locator,
+                RootXPath: null,
+                VisibleOnly: true,
+                MaxNodes: 2000,
+                ReturnFields: FindReturnFields.Standard),
+            cancellationToken).ConfigureAwait(false);
+
+        return element.Bounds ?? new Rect(0, 0, 0, 0);
+    }
+}
+

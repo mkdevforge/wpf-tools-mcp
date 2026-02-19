@@ -1,0 +1,16 @@
+﻿{
+  Pick: {
+    BackendUsed: Uia,
+    Element: {
+      Type: Window,
+      Name: WpfPilot TestApp,
+      XPath: /Window,
+      ClassName: Window,
+      Bounds: {
+        Width: 900,
+        Height: 650
+      },
+      ElementId: <element>
+    }
+  }
+}

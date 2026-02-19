@@ -1,0 +1,7 @@
+﻿{
+  Highlighted: true,
+  Bounds: {
+    Width: 160,
+    Height: 20
+  }
+}

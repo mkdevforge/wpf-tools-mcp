@@ -633,22 +633,16 @@ public sealed partial class AutomationController : IDisposable
 
         var mode = request.CaptureMode;
         var captureSettings = new CaptureSettings { OutputScale = 1 };
+        var windowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64();
 
-        using var bitmapToSave = !hasElementTarget
-            ? mode switch
-            {
-                ScreenshotCaptureMode.Screen => CaptureWindowScreen(window, captureSettings),
-                ScreenshotCaptureMode.PrintWindow => CaptureWindowPrintWindow(window),
-                ScreenshotCaptureMode.Auto => CaptureWindowAuto(window, captureSettings),
-                _ => throw new ArgumentOutOfRangeException(nameof(request), $"Unknown capture mode '{mode}'.")
-            }
-            : mode switch
-            {
-                ScreenshotCaptureMode.Screen => CaptureElementScreen(element, captureSettings),
-                ScreenshotCaptureMode.PrintWindow => CaptureElementPrintWindow(window, element),
-                ScreenshotCaptureMode.Auto => CaptureElementAuto(window, element, captureSettings),
-                _ => throw new ArgumentOutOfRangeException(nameof(request), $"Unknown capture mode '{mode}'.")
-            };
+        var (bitmap, capturedBounds, captureModeUsed) = CaptureScreenshotWithMetadata(
+            window,
+            element,
+            hasElementTarget,
+            mode,
+            captureSettings);
+
+        using var bitmapToSave = bitmap;
 
         var outputPath = ResolveScreenshotOutputPath(request.OutputPath, request.Format);
         SaveBitmapWithWic(bitmapToSave, outputPath, request.Format, request.JpegQuality);
@@ -665,7 +659,168 @@ public sealed partial class AutomationController : IDisposable
             Width: bitmapToSave.Width,
             Height: bitmapToSave.Height,
             Format: GetImageFormatName(request.Format),
+            CapturedBounds: capturedBounds,
+            WindowHandleUsed: windowHandleUsed,
+            CaptureModeUsed: captureModeUsed,
             Base64: base64);
+    }
+
+    private static (Bitmap Bitmap, Rect CapturedBounds, ScreenshotCaptureMode CaptureModeUsed) CaptureScreenshotWithMetadata(
+        Window window,
+        AutomationElement element,
+        bool hasElementTarget,
+        ScreenshotCaptureMode requestedMode,
+        CaptureSettings captureSettings)
+    {
+        if (requestedMode == ScreenshotCaptureMode.Auto)
+        {
+            if (!hasElementTarget)
+            {
+                var printWindow = TryCaptureClientAreaWithPrintWindow(window);
+                if (printWindow is not null)
+                {
+                    var bounds = TryGetClientBoundsScreen(window, out var clientBounds)
+                        ? clientBounds
+                        : ToRect(window.BoundingRectangle);
+
+                    return (printWindow, bounds, ScreenshotCaptureMode.PrintWindow);
+                }
+
+                return CaptureWindowScreenWithMetadata(window, captureSettings);
+            }
+
+            using var clientBitmap = TryCaptureClientAreaWithPrintWindow(window);
+            if (clientBitmap is not null)
+            {
+                var cropped = TryCropElementFromClientBitmap(window, element, clientBitmap);
+                if (cropped is not null)
+                {
+                    var bounds = ComputeElementCapturedBoundsInClient(window, element);
+                    return (cropped, bounds, ScreenshotCaptureMode.PrintWindow);
+                }
+            }
+
+            return CaptureElementScreenWithMetadata(element, captureSettings);
+        }
+
+        if (!hasElementTarget)
+        {
+            return requestedMode switch
+            {
+                ScreenshotCaptureMode.Screen => CaptureWindowScreenWithMetadata(window, captureSettings),
+                ScreenshotCaptureMode.PrintWindow => CaptureWindowPrintWindowWithMetadata(window),
+                _ => throw new ArgumentOutOfRangeException(nameof(requestedMode), requestedMode, "Unsupported capture mode.")
+            };
+        }
+
+        return requestedMode switch
+        {
+            ScreenshotCaptureMode.Screen => CaptureElementScreenWithMetadata(element, captureSettings),
+            ScreenshotCaptureMode.PrintWindow => CaptureElementPrintWindowWithMetadata(window, element),
+            _ => throw new ArgumentOutOfRangeException(nameof(requestedMode), requestedMode, "Unsupported capture mode.")
+        };
+    }
+
+    private static (Bitmap Bitmap, Rect CapturedBounds, ScreenshotCaptureMode CaptureModeUsed) CaptureWindowScreenWithMetadata(
+        Window window,
+        CaptureSettings captureSettings)
+    {
+        using var capture = Capture.Element(window, captureSettings);
+        var bitmap = capture.Bitmap;
+
+        var croppedClientArea = TryCropToClientArea(window, bitmap);
+        if (croppedClientArea is not null)
+        {
+            var bounds = TryGetClientBoundsScreen(window, out var clientBounds)
+                ? clientBounds
+                : ToRect(window.BoundingRectangle);
+
+            return (croppedClientArea, bounds, ScreenshotCaptureMode.Screen);
+        }
+
+        var fullWindow = bitmap.Clone(new Rectangle(0, 0, bitmap.Width, bitmap.Height), bitmap.PixelFormat);
+        return (fullWindow, ToRect(window.BoundingRectangle), ScreenshotCaptureMode.Screen);
+    }
+
+    private static (Bitmap Bitmap, Rect CapturedBounds, ScreenshotCaptureMode CaptureModeUsed) CaptureWindowPrintWindowWithMetadata(Window window)
+    {
+        var bitmap = CaptureWindowPrintWindow(window);
+        var bounds = TryGetClientBoundsScreen(window, out var clientBounds)
+            ? clientBounds
+            : ToRect(window.BoundingRectangle);
+
+        return (bitmap, bounds, ScreenshotCaptureMode.PrintWindow);
+    }
+
+    private static (Bitmap Bitmap, Rect CapturedBounds, ScreenshotCaptureMode CaptureModeUsed) CaptureElementScreenWithMetadata(
+        AutomationElement element,
+        CaptureSettings captureSettings)
+    {
+        using var capture = Capture.Element(element, captureSettings);
+        var bitmap = capture.Bitmap;
+        var clone = bitmap.Clone(new Rectangle(0, 0, bitmap.Width, bitmap.Height), bitmap.PixelFormat);
+        return (clone, ToRect(element.BoundingRectangle), ScreenshotCaptureMode.Screen);
+    }
+
+    private static (Bitmap Bitmap, Rect CapturedBounds, ScreenshotCaptureMode CaptureModeUsed) CaptureElementPrintWindowWithMetadata(
+        Window window,
+        AutomationElement element)
+    {
+        using var clientBitmap = TryCaptureClientAreaWithPrintWindow(window)
+            ?? throw new InvalidOperationException("PrintWindow capture failed.");
+
+        var cropped = TryCropElementFromClientBitmap(window, element, clientBitmap)
+            ?? throw new InvalidOperationException("Failed to crop element from PrintWindow capture.");
+
+        var bounds = ComputeElementCapturedBoundsInClient(window, element);
+        return (cropped, bounds, ScreenshotCaptureMode.PrintWindow);
+    }
+
+    private static Rect ComputeElementCapturedBoundsInClient(Window window, AutomationElement element)
+    {
+        var elementBounds = ToRect(element.BoundingRectangle);
+        if (!TryGetClientBoundsScreen(window, out var clientBounds))
+        {
+            return elementBounds;
+        }
+
+        var left = Math.Max(elementBounds.X, clientBounds.X);
+        var top = Math.Max(elementBounds.Y, clientBounds.Y);
+        var right = Math.Min(elementBounds.X + elementBounds.Width, clientBounds.X + clientBounds.Width);
+        var bottom = Math.Min(elementBounds.Y + elementBounds.Height, clientBounds.Y + clientBounds.Height);
+
+        var width = Math.Max(0, right - left);
+        var height = Math.Max(0, bottom - top);
+        return new Rect(left, top, width, height);
+    }
+
+    private static bool TryGetClientBoundsScreen(Window window, out Rect bounds)
+    {
+        bounds = default;
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        var hwnd = window.Properties.NativeWindowHandle.Value;
+        if (hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (!TryGetClientTopLeftScreen(hwnd, out var clientTopLeft))
+        {
+            return false;
+        }
+
+        if (!GetClientRect(hwnd, out var clientRect))
+        {
+            return false;
+        }
+
+        bounds = new Rect(clientTopLeft.X, clientTopLeft.Y, clientRect.Width, clientRect.Height);
+        return true;
     }
 
     private static string ResolveScreenshotOutputPath(string? outputPath, ScreenshotImageFormat format)
