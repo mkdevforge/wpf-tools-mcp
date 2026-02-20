@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Navigation;
 
 namespace WpfPilot.TestApp;
 
@@ -32,6 +33,11 @@ public partial class MainWindow : Window
     {
         var selected = BasicListBox.SelectedItem as string;
         BasicListBoxStatus.Text = selected is null ? "Selected: (none)" : $"Selected: {selected}";
+    }
+
+    private void BasicHyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
+    {
+        e.Handled = true;
     }
 
     private void DisableWindowRounding()

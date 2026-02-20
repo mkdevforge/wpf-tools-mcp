@@ -1,4 +1,4 @@
-{
+﻿{
   Pid: -1,
   PipeName: <scrubbed>,
   FirstInjected: true,
@@ -12,6 +12,8 @@
     Basic_ClickStatus,
     Basic_ComboBox,
     Basic_Header,
+    Basic_Hyperlink,
+    Basic_HyperlinkTextBlock,
     Basic_ListBox,
     Basic_ListBoxStatus,
     Basic_Slider,
@@ -33,6 +35,7 @@
     Basic_ClickStatus,
     Basic_ComboBox,
     Basic_Header,
+    Basic_HyperlinkTextBlock,
     Basic_ListBox,
     Basic_ListBoxStatus,
     Basic_Slider,
@@ -48,6 +51,7 @@
     Basic_ClickStatus,
     Basic_ComboBox,
     Basic_Header,
+    Basic_HyperlinkTextBlock,
     Basic_ListBox,
     Basic_ListBoxStatus,
     Basic_Slider,

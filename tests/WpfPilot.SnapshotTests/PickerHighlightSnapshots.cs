@@ -123,6 +123,56 @@ public sealed class PickerHighlightSnapshots
     }
 
     [Test]
+    public async Task PickElementAtPoint_wpf_promotes_content_to_framework_element_snapshot()
+    {
+        try
+        {
+            _ = await _mcp.CallToolAsync<InjectAgentResponse>("inject_agent", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId
+            });
+        }
+        catch (InvalidOperationException ex) when (ShouldSkipForMissingAssets(ex))
+        {
+            Assert.Ignore(ex.Message);
+            return;
+        }
+
+        var hyperlinkTextBlock = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "Basic_HyperlinkTextBlock"
+            }
+        });
+
+        var bounds = hyperlinkTextBlock.Element.Bounds;
+        var x = bounds.X + Math.Max(1, bounds.Width / 2);
+        var y = bounds.Y + Math.Max(1, bounds.Height / 2);
+
+        var pick = await _mcp.CallToolAsync<PickElementAtPointResponse>("pick_element_at_point", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["backend"] = "wpf",
+            ["x"] = x,
+            ["y"] = y,
+            ["includeAncestors"] = true,
+            ["maxAncestors"] = 8
+        });
+
+        Assert.That(pick.Element.Type, Is.EqualTo("TextBlock"), "WPF picker should promote content hits to a FrameworkElement.");
+
+        var stable = new
+        {
+            HyperlinkTextBlock = hyperlinkTextBlock.Element with { Bounds = bounds with { X = 0, Y = 0 } },
+            Pick = ScrubPickResponse(pick)
+        };
+
+        await Verifier.Verify(stable);
+    }
+
+    [Test]
     public async Task HighlightElement_by_locator_snapshot()
     {
         var result = await _mcp.CallToolAsync<HighlightElementResponse>("highlight_element", new Dictionary<string, object?>
@@ -174,4 +224,3 @@ public sealed class PickerHighlightSnapshots
                || message.Contains("Snoop generic injector not found", StringComparison.OrdinalIgnoreCase);
     }
 }
-

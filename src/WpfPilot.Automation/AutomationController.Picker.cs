@@ -72,6 +72,58 @@ public sealed partial class AutomationController
         }
 
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+
+        // Ensure we don't compute XPaths against the wrong window (e.g., overlapping dialogs in the same process).
+        var inRequestedWindow = false;
+        long? actualWindowHandle = null;
+        AutomationElement? current = element;
+        var safety = 0;
+
+        while (current is not null && safety++ < 512)
+        {
+            if (AreSameElement(current, window))
+            {
+                inRequestedWindow = true;
+                break;
+            }
+
+            if (current.ControlType == FlaUI.Core.Definitions.ControlType.Window)
+            {
+                try
+                {
+                    actualWindowHandle = current.Properties.NativeWindowHandle.Value.ToInt64();
+                    if (actualWindowHandle == windowHandleUsed)
+                    {
+                        inRequestedWindow = true;
+                        break;
+                    }
+                }
+                catch
+                {
+                    actualWindowHandle = null;
+                }
+            }
+
+            AutomationElement? parent;
+            try
+            {
+                parent = rawWalker.GetParent(current);
+            }
+            catch
+            {
+                parent = null;
+            }
+
+            current = parent;
+        }
+
+        if (!inRequestedWindow)
+        {
+            var actual = actualWindowHandle?.ToString() ?? "unknown";
+            throw new InvalidOperationException(
+                $"pick_point_in_different_window: expected_window={windowHandleUsed} actual_window={actual}.");
+        }
+
         var xpath = ComputeXPath(window, element, rawWalker);
 
         var elementId = _elementHandles.RegisterUia(

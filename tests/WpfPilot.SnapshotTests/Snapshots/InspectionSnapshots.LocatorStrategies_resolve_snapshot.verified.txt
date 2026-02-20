@@ -1,4 +1,4 @@
-[
+﻿[
   {
     Strategy: automationId,
     Element: {
@@ -26,7 +26,7 @@
       },
       IsEnabled: true,
       IsOffscreen: false,
-      XPath: /Window/TextBlock[10]
+      XPath: /Window/TextBlock[12]
     }
   },
   {

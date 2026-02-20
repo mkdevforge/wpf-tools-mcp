@@ -1,0 +1,61 @@
+﻿{
+  HyperlinkTextBlock: {
+    ElementType: Text,
+    AutomationId: Basic_HyperlinkTextBlock,
+    Name: example.com,
+    ClassName: TextBlock,
+    Bounds: {
+      Width: 420,
+      Height: 16
+    },
+    IsEnabled: true,
+    IsOffscreen: false,
+    XPath: /Window/TextBlock[9]
+  },
+  Pick: {
+    BackendUsed: Wpf,
+    Element: {
+      Type: TextBlock,
+      AutomationId: Basic_HyperlinkTextBlock,
+      XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/TextBlock[8],
+      ClassName: System.Windows.Controls.TextBlock,
+      Bounds: {
+        Width: 420,
+        Height: 16
+      },
+      ElementId: <element>
+    },
+    Ancestors: [
+      {
+        Type: MainWindow,
+        XPath: /Window,
+        ElementId: <ancestor:0>
+      },
+      {
+        Type: Border,
+        XPath: /Window/Border,
+        ElementId: <ancestor:1>
+      },
+      {
+        Type: AdornerDecorator,
+        XPath: /Window/Border/AdornerDecorator,
+        ElementId: <ancestor:2>
+      },
+      {
+        Type: ContentPresenter,
+        XPath: /Window/Border/AdornerDecorator/ContentPresenter,
+        ElementId: <ancestor:3>
+      },
+      {
+        Type: Grid,
+        XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid,
+        ElementId: <ancestor:4>
+      },
+      {
+        Type: StackPanel,
+        XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel,
+        ElementId: <ancestor:5>
+      }
+    ]
+  }
+}

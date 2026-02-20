@@ -44,7 +44,7 @@ public sealed partial class AutomationController
         {
             if (backend == InspectionBackend.Auto)
             {
-                backend = IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia;
+                backend = InspectionBackend.Uia;
             }
 
             windowHandleUsed = request.WindowHandle
@@ -149,4 +149,3 @@ public sealed partial class AutomationController
         return element.Bounds ?? new Rect(0, 0, 0, 0);
     }
 }
-

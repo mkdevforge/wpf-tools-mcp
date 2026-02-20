@@ -93,6 +93,17 @@
                     Margin="0,0,0,12"
                     HorizontalAlignment="Left" />
 
+            <TextBlock Text="Hyperlink:"
+                       Margin="0,0,0,4" />
+            <TextBlock AutomationProperties.AutomationId="Basic_HyperlinkTextBlock"
+                       Margin="0,0,0,12">
+                <Hyperlink AutomationProperties.AutomationId="Basic_Hyperlink"
+                           NavigateUri="https://example.com"
+                           RequestNavigate="BasicHyperlink_RequestNavigate">
+                    <Run Text="example.com" />
+                </Hyperlink>
+            </TextBlock>
+
             <TextBlock Text="XPath Demo:"
                        Margin="0,8,0,4" />
 

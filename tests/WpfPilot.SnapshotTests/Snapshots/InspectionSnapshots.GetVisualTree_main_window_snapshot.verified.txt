@@ -1,10 +1,10 @@
-{
+﻿{
   BackendUsed: Uia,
   Root: {
     Type: Window,
     Name: WpfPilot TestApp,
     XPath: /Window,
-    ChildrenCount: 20,
+    ChildrenCount: 22,
     Children: [
       {
         Type: TitleBar,
@@ -242,13 +242,33 @@
       },
       {
         Type: Text,
-        Name: XPath Demo:,
+        Name: Hyperlink:,
         XPath: /Window/TextBlock[8]
       },
       {
         Type: Text,
+        AutomationId: Basic_HyperlinkTextBlock,
+        Name: example.com,
+        XPath: /Window/TextBlock[9],
+        ChildrenCount: 1,
+        Children: [
+          {
+            Type: Hyperlink,
+            AutomationId: Basic_Hyperlink,
+            Name: example.com,
+            XPath: /Window/TextBlock[9]/Hyperlink
+          }
+        ]
+      },
+      {
+        Type: Text,
+        Name: XPath Demo:,
+        XPath: /Window/TextBlock[10]
+      },
+      {
+        Type: Text,
         Name: Left Panel,
-        XPath: /Window/TextBlock[9]
+        XPath: /Window/TextBlock[11]
       },
       {
         Type: Button,
@@ -281,7 +301,7 @@
       {
         Type: Text,
         Name: Right Panel,
-        XPath: /Window/TextBlock[10]
+        XPath: /Window/TextBlock[12]
       },
       {
         Type: Button,
@@ -299,7 +319,7 @@
       }
     ]
   },
-  ReturnedNodes: 47,
-  ScannedNodes: 47,
+  ReturnedNodes: 50,
+  ScannedNodes: 50,
   Truncated: false
 }

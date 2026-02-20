@@ -561,15 +561,30 @@ internal static class WpfVisualTreeInspector
 
             var point = ue.PointToScreen(new Point(0, 0));
             var size = ue.RenderSize;
-            var width = size.Width;
-            var height = size.Height;
+            var widthDip = size.Width;
+            var heightDip = size.Height;
 
             // Fall back to ActualWidth/ActualHeight when available.
             if (element is FrameworkElement fe && fe.ActualWidth > 0 && fe.ActualHeight > 0)
             {
-                width = fe.ActualWidth;
-                height = fe.ActualHeight;
+                widthDip = fe.ActualWidth;
+                heightDip = fe.ActualHeight;
             }
+
+            var dpiScaleX = 1d;
+            var dpiScaleY = 1d;
+            try
+            {
+                var dpi = VisualTreeHelper.GetDpi(ue);
+                dpiScaleX = dpi.DpiScaleX;
+                dpiScaleY = dpi.DpiScaleY;
+            }
+            catch
+            {
+            }
+
+            var width = widthDip * dpiScaleX;
+            var height = heightDip * dpiScaleY;
 
             return new ContractRect(
                 X: (int)Math.Round(point.X),
@@ -1265,24 +1280,70 @@ internal static class WpfVisualTreeInspector
 
     private static DependencyObject PromotePickedWpfElement(DependencyObject element, Window window)
     {
-        if (element is FrameworkElement or FrameworkContentElement or Window)
+        if (element is FrameworkElement or Window)
         {
             return element;
         }
 
-        var current = element;
-        while (current is not null && current is not FrameworkElement && current is not FrameworkContentElement && current is not Window)
+        // InputHitTest can return content elements (e.g., Hyperlink / Run). Promote to a stable FrameworkElement.
+        if (element is ContentElement)
         {
-            var parent = VisualTreeHelper.GetParent(current);
+            DependencyObject? current = element;
+            var safety = 0;
+
+            while (current is not null && current is not FrameworkElement && current is not Window)
+            {
+                if (safety++ > 2048)
+                {
+                    break;
+                }
+
+                DependencyObject? parent = current switch
+                {
+                    FrameworkContentElement fce => fce.Parent,
+                    _ => LogicalTreeHelper.GetParent(current)
+                };
+
+                if (parent is null)
+                {
+                    break;
+                }
+
+                current = parent;
+            }
+
+            return current is FrameworkElement or Window ? current : window;
+        }
+
+        DependencyObject? visualCurrent = element;
+        var visualSafety = 0;
+
+        while (visualCurrent is not null && visualCurrent is not FrameworkElement && visualCurrent is not Window)
+        {
+            if (visualSafety++ > 2048)
+            {
+                break;
+            }
+
+            DependencyObject? parent;
+            try
+            {
+                parent = VisualTreeHelper.GetParent(visualCurrent);
+            }
+            catch
+            {
+                parent = null;
+            }
+
             if (parent is null)
             {
                 break;
             }
 
-            current = parent;
+            visualCurrent = parent;
         }
 
-        return current ?? window;
+        return visualCurrent is FrameworkElement or Window ? visualCurrent : window;
     }
 
     private static List<(DependencyObject Element, string XPath)> BuildXPathChainForElement(
