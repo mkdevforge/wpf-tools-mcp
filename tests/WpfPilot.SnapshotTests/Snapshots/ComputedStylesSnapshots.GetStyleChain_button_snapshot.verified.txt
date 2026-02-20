@@ -1,0 +1,19 @@
+﻿{
+  Element: {
+    Type: Button,
+    AutomationId: Basic_Button,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button,
+    ClassName: System.Windows.Controls.Button,
+    Bounds: {
+      Width: 160,
+      Height: 20
+    }
+  },
+  Styles: [
+    {
+      Kind: ThemeStyle,
+      TargetType: System.Windows.Controls.Button,
+      BasedOnCount: 1
+    }
+  ]
+}

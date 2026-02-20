@@ -1,0 +1,32 @@
+﻿{
+  Element: {
+    Type: Slider,
+    AutomationId: Basic_Slider,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Slider,
+    ClassName: System.Windows.Controls.Slider,
+    Bounds: {
+      Width: 240,
+      Height: 18
+    }
+  },
+  Template: {
+    Kind: ControlTemplate,
+    TemplateType: System.Windows.Controls.ControlTemplate,
+    TargetType: System.Windows.Controls.Slider,
+    TriggersCount: 5,
+    TemplateParts: [
+      {
+        Name: PART_SelectionRange,
+        ExpectedType: System.Windows.FrameworkElement,
+        Found: true,
+        ActualType: System.Windows.Shapes.Rectangle
+      },
+      {
+        Name: PART_Track,
+        ExpectedType: System.Windows.Controls.Primitives.Track,
+        Found: true,
+        ActualType: System.Windows.Controls.Primitives.Track
+      }
+    ]
+  }
+}

@@ -9,6 +9,7 @@ using System.Windows.Data;
 using System.Windows.Interop;
 using System.Windows.Media;
 using Snoop.Data.Tree;
+using Snoop.Infrastructure.Helpers;
 using WpfPilot.Contracts;
 using ContractRect = WpfPilot.Contracts.Rect;
 
@@ -2232,5 +2233,843 @@ internal static class WpfVisualTreeInspector
         return new GetDataContextResponse(
             DataContextType: dataContextType,
             Data: data);
+    }
+
+    public static GetComputedPropertiesResponse GetComputedProperties(GetComputedPropertiesRequest request, CancellationToken cancellationToken)
+    {
+        var locator = request.Locator ?? throw new ArgumentException("get_computed_properties requires a locator.");
+        var includeSources = request.IncludeSources;
+        var includeDefault = request.IncludeDefault;
+        var includeUnset = request.IncludeUnset;
+        var maxProperties = Math.Clamp(request.MaxProperties, 1, 50_000);
+        var valueFormat = string.IsNullOrWhiteSpace(request.ValueFormat) ? "string" : request.ValueFormat;
+
+        var window = ResolveWindow(request.WindowHandle);
+        using var treeService = new VisualTreeService();
+
+        var resolved = ResolveLocatorOrThrow(
+            window,
+            treeService,
+            rootObject: window,
+            rootXPath: "/Window",
+            locator,
+            visibleOnly: true,
+            maxNodes: 200_000,
+            cancellationToken);
+
+        var element = resolved.Element;
+        var xpath = resolved.XPath;
+
+        var elementRef = new ElementRef(
+            Type: element.GetType().Name,
+            AutomationId: GetAutomationId(element),
+            Name: GetName(element),
+            XPath: xpath,
+            ClassName: element.GetType().FullName,
+            Bounds: GetBoundsWpf(element));
+
+        var propertyNames = request.PropertyNames?
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p.Trim())
+            .ToArray();
+
+        var properties = new HashSet<DependencyProperty>(GetDependencyPropertiesCached(element.GetType()));
+        try
+        {
+            var enumerator = element.GetLocalValueEnumerator();
+            while (enumerator.MoveNext())
+            {
+                properties.Add(enumerator.Current.Property);
+            }
+        }
+        catch
+        {
+        }
+
+        var computed = new List<ComputedPropertyInfo>();
+        var warnings = new List<string>();
+        var truncated = false;
+        string? truncatedReason = null;
+
+        const int maxValueLength = 2000;
+
+        if (propertyNames is { Length: > 0 })
+        {
+            var missing = new List<string>();
+            foreach (var requestedName in propertyNames)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (computed.Count >= maxProperties)
+                {
+                    truncated = true;
+                    truncatedReason = "maxProperties";
+                    break;
+                }
+
+                if (!TryResolvePropertyByName(element.GetType(), properties, requestedName, out var dp))
+                {
+                    missing.Add(requestedName);
+                    continue;
+                }
+
+                computed.Add(BuildComputedPropertyInfo(element, dp, valueFormat, includeSources, maxValueLength));
+            }
+
+            return new GetComputedPropertiesResponse(
+                Element: elementRef,
+                Properties: computed,
+                Truncated: truncated,
+                TruncatedReason: truncatedReason,
+                MissingPropertyNames: missing.Count > 0 ? missing : null,
+                Warnings: warnings.Count > 0 ? warnings : null);
+        }
+
+        var orderedProperties = properties.OrderBy(dp => dp.Name, StringComparer.Ordinal).ToArray();
+
+        foreach (var property in orderedProperties)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (computed.Count >= maxProperties)
+            {
+                truncated = true;
+                truncatedReason = "maxProperties";
+                break;
+            }
+
+            ValueSource? valueSource = null;
+            try
+            {
+                valueSource = DependencyPropertyHelper.GetValueSource(element, property);
+            }
+            catch
+            {
+            }
+
+            var isExpression = valueSource?.IsExpression == true;
+            var baseValueSource = valueSource?.BaseValueSource ?? BaseValueSource.Default;
+
+            BindingExpressionBase? bindingExpression = null;
+            try
+            {
+                bindingExpression = BindingOperations.GetBindingExpressionBase(element, property);
+            }
+            catch
+            {
+            }
+
+            var include = includeDefault || baseValueSource != BaseValueSource.Default || isExpression || bindingExpression is not null;
+            if (!include)
+            {
+                continue;
+            }
+
+            if (!includeUnset)
+            {
+                try
+                {
+                    var value = element.GetValue(property);
+                    if (ReferenceEquals(value, DependencyProperty.UnsetValue))
+                    {
+                        continue;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            computed.Add(BuildComputedPropertyInfo(element, property, valueFormat, includeSources, maxValueLength));
+        }
+
+        return new GetComputedPropertiesResponse(
+            Element: elementRef,
+            Properties: computed,
+            Truncated: truncated,
+            TruncatedReason: truncatedReason,
+            MissingPropertyNames: null,
+            Warnings: warnings.Count > 0 ? warnings : null);
+    }
+
+    public static GetStyleChainResponse GetStyleChain(GetStyleChainRequest request, CancellationToken cancellationToken)
+    {
+        var locator = request.Locator ?? throw new ArgumentException("get_style_chain requires a locator.");
+        var includeThemeStyle = request.IncludeThemeStyle;
+        var includeResourceKeys = request.IncludeResourceKeys;
+        var maxBasedOnDepth = Math.Clamp(request.MaxBasedOnDepth, 0, 50);
+
+        var window = ResolveWindow(request.WindowHandle);
+        using var treeService = new VisualTreeService();
+
+        var resolved = ResolveLocatorOrThrow(
+            window,
+            treeService,
+            rootObject: window,
+            rootXPath: "/Window",
+            locator,
+            visibleOnly: true,
+            maxNodes: 200_000,
+            cancellationToken);
+
+        var element = resolved.Element;
+        var xpath = resolved.XPath;
+
+        var elementRef = new ElementRef(
+            Type: element.GetType().Name,
+            AutomationId: GetAutomationId(element),
+            Name: GetName(element),
+            XPath: xpath,
+            ClassName: element.GetType().FullName,
+            Bounds: GetBoundsWpf(element));
+
+        var warnings = new List<string>();
+        var styles = new List<StyleChainEntry>();
+
+        if (element is FrameworkElement fe)
+        {
+            var styleValueSource = TryGetValueSourceForStyle(fe);
+            var effectiveStyle = fe.Style;
+
+            if (effectiveStyle is not null)
+            {
+                var kind = styleValueSource?.BaseValueSource == BaseValueSource.ImplicitStyleReference
+                    ? StyleChainKind.ImplicitStyle
+                    : StyleChainKind.LocalStyle;
+
+                styles.Add(BuildStyleEntry(kind, fe, effectiveStyle, includeResourceKeys, maxBasedOnDepth, styleValueSource));
+            }
+
+            if (includeThemeStyle)
+            {
+                try
+                {
+                    var themeStyle = FrameworkElementHelper.GetThemeStyle(fe);
+                    if (themeStyle is not null)
+                    {
+                        styles.Add(BuildStyleEntry(StyleChainKind.ThemeStyle, fe, themeStyle, includeResourceKeys, maxBasedOnDepth, styleValueSource: null));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"theme_style_error: {ex.Message}");
+                }
+            }
+        }
+        else if (element is FrameworkContentElement fce)
+        {
+            ValueSource? valueSource = null;
+            try
+            {
+                valueSource = DependencyPropertyHelper.GetValueSource(fce, FrameworkContentElement.StyleProperty);
+            }
+            catch
+            {
+            }
+
+            var effectiveStyle = fce.Style;
+            if (effectiveStyle is not null)
+            {
+                var kind = valueSource?.BaseValueSource == BaseValueSource.ImplicitStyleReference
+                    ? StyleChainKind.ImplicitStyle
+                    : StyleChainKind.LocalStyle;
+
+                styles.Add(BuildStyleEntry(kind, fce, effectiveStyle, includeResourceKeys, maxBasedOnDepth, valueSource));
+            }
+
+            if (includeThemeStyle)
+            {
+                try
+                {
+                    var themeStyle = FrameworkElementHelper.GetThemeStyle(fce);
+                    if (themeStyle is not null)
+                    {
+                        styles.Add(BuildStyleEntry(StyleChainKind.ThemeStyle, fce, themeStyle, includeResourceKeys, maxBasedOnDepth, styleValueSource: null));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"theme_style_error: {ex.Message}");
+                }
+            }
+        }
+        else
+        {
+            warnings.Add("not_framework_element: Style inspection is supported only for FrameworkElement / FrameworkContentElement.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return new GetStyleChainResponse(
+            Element: elementRef,
+            Styles: styles,
+            Warnings: warnings.Count > 0 ? warnings : null);
+    }
+
+    public static GetTemplateInfoResponse GetTemplateInfo(GetTemplateInfoRequest request, CancellationToken cancellationToken)
+    {
+        var locator = request.Locator ?? throw new ArgumentException("get_template_info requires a locator.");
+        var includeNamedElements = request.IncludeNamedElements;
+        var includeResourceKeys = request.IncludeResourceKeys;
+        var maxNamedElements = Math.Clamp(request.MaxNamedElements, 0, 500);
+
+        var window = ResolveWindow(request.WindowHandle);
+        using var treeService = new VisualTreeService();
+
+        var resolved = ResolveLocatorOrThrow(
+            window,
+            treeService,
+            rootObject: window,
+            rootXPath: "/Window",
+            locator,
+            visibleOnly: true,
+            maxNodes: 200_000,
+            cancellationToken);
+
+        var element = resolved.Element;
+        var xpath = resolved.XPath;
+
+        var elementRef = new ElementRef(
+            Type: element.GetType().Name,
+            AutomationId: GetAutomationId(element),
+            Name: GetName(element),
+            XPath: xpath,
+            ClassName: element.GetType().FullName,
+            Bounds: GetBoundsWpf(element));
+
+        var warnings = new List<string>();
+
+        if (element is not FrameworkElement fe)
+        {
+            warnings.Add("not_framework_element: Template inspection is supported only for FrameworkElement.");
+            return new GetTemplateInfoResponse(
+                Element: elementRef,
+                Template: new TemplateInfo(TemplateKind.None),
+                Warnings: warnings);
+        }
+
+        FrameworkTemplate? template = null;
+        try
+        {
+            template = FrameworkElementHelper.GetTemplate(fe);
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"template_error: {ex.Message}");
+        }
+
+        if (template is null)
+        {
+            return new GetTemplateInfoResponse(
+                Element: elementRef,
+                Template: new TemplateInfo(TemplateKind.None),
+                Warnings: warnings.Count > 0 ? warnings : null);
+        }
+
+        var kind = template switch
+        {
+            System.Windows.Controls.ControlTemplate => TemplateKind.ControlTemplate,
+            DataTemplate => TemplateKind.DataTemplate,
+            System.Windows.Controls.ItemsPanelTemplate => TemplateKind.ItemsPanelTemplate,
+            _ => TemplateKind.FrameworkTemplate
+        };
+
+        string? targetType = null;
+        int triggersCount = 0;
+        try
+        {
+            switch (template)
+            {
+                case System.Windows.Controls.ControlTemplate controlTemplate:
+                    targetType = controlTemplate.TargetType?.FullName ?? controlTemplate.TargetType?.Name;
+                    triggersCount = controlTemplate.Triggers.Count;
+                    break;
+                case DataTemplate dataTemplate:
+                    targetType = dataTemplate.DataType?.ToString();
+                    triggersCount = dataTemplate.Triggers.Count;
+                    break;
+                case System.Windows.Controls.ItemsPanelTemplate:
+                    triggersCount = 0;
+                    break;
+            }
+        }
+        catch
+        {
+        }
+
+        string? templateType = null;
+        try
+        {
+            templateType = template.GetType().FullName ?? template.GetType().Name;
+        }
+        catch
+        {
+        }
+
+        string? resourceKey = null;
+        if (includeResourceKeys)
+        {
+            resourceKey = TryGetResourceKey(fe, template);
+        }
+
+        IReadOnlyList<TemplatePartInfo>? templateParts = null;
+        IReadOnlyList<NamedTemplateElementInfo>? namedElements = null;
+
+        if (fe is System.Windows.Controls.Control control && template is System.Windows.Controls.ControlTemplate appliedControlTemplate)
+        {
+            try
+            {
+                _ = control.ApplyTemplate();
+            }
+            catch
+            {
+            }
+
+            templateParts = ResolveTemplateParts(control, appliedControlTemplate);
+
+            if (includeNamedElements && maxNamedElements > 0)
+            {
+                namedElements = FindNamedTemplateElements(control, maxNamedElements, cancellationToken);
+            }
+        }
+        else if (includeNamedElements && maxNamedElements > 0)
+        {
+            warnings.Add("named_elements_unsupported: Named template elements are currently only supported for Control templates.");
+        }
+
+        return new GetTemplateInfoResponse(
+            Element: elementRef,
+            Template: new TemplateInfo(
+                Kind: kind,
+                TemplateType: templateType,
+                TargetType: targetType,
+                ResourceKey: resourceKey,
+                TriggersCount: triggersCount,
+                TemplateParts: templateParts,
+                NamedElements: namedElements),
+            Warnings: warnings.Count > 0 ? warnings : null);
+    }
+
+    private static ComputedPropertyInfo BuildComputedPropertyInfo(
+        DependencyObject element,
+        DependencyProperty property,
+        string valueFormat,
+        bool includeSources,
+        int maxStringLength)
+    {
+        var ownerType = property.OwnerType.FullName ?? property.OwnerType.Name;
+        string? value = null;
+        string? valueType = null;
+
+        try
+        {
+            var rawValue = element.GetValue(property);
+            value = FormatValueForBinding(rawValue, valueFormat, maxStringLength);
+
+            if (rawValue is not null && !ReferenceEquals(rawValue, DependencyProperty.UnsetValue))
+            {
+                valueType = rawValue.GetType().FullName ?? rawValue.GetType().Name;
+            }
+        }
+        catch
+        {
+        }
+
+        string? valueSource = null;
+        if (includeSources)
+        {
+            valueSource = GetValueSourceWpf(element, property);
+        }
+
+        string? bindingKind = null;
+        string? path = null;
+        string? mode = null;
+        string? updateSourceTrigger = null;
+        string? converter = null;
+        bool? isBinding = null;
+
+        try
+        {
+            var expression = BindingOperations.GetBindingExpressionBase(element, property);
+            if (expression is not null)
+            {
+                isBinding = true;
+                bindingKind = expression switch
+                {
+                    BindingExpression => "Binding",
+                    MultiBindingExpression => "MultiBinding",
+                    PriorityBindingExpression => "PriorityBinding",
+                    _ => "Binding"
+                };
+
+                if (expression is BindingExpression be)
+                {
+                    var binding = be.ParentBinding;
+                    path = binding.Path?.Path;
+                    mode = binding.Mode.ToString();
+                    updateSourceTrigger = binding.UpdateSourceTrigger.ToString();
+                    converter = binding.Converter?.GetType().FullName;
+                }
+                else if (expression is MultiBindingExpression mbe)
+                {
+                    var binding = mbe.ParentMultiBinding;
+                    bindingKind = "MultiBinding";
+                    mode = binding.Mode.ToString();
+                    updateSourceTrigger = binding.UpdateSourceTrigger.ToString();
+                    converter = binding.Converter?.GetType().FullName;
+                }
+                else if (expression is PriorityBindingExpression)
+                {
+                    bindingKind = "PriorityBinding";
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return new ComputedPropertyInfo(
+            Name: property.Name,
+            OwnerType: ownerType,
+            Value: value,
+            ValueType: valueType,
+            ValueSource: valueSource,
+            IsBinding: isBinding,
+            BindingKind: bindingKind,
+            Path: path,
+            Mode: mode,
+            UpdateSourceTrigger: updateSourceTrigger,
+            Converter: converter);
+    }
+
+    private static bool TryResolvePropertyByName(
+        Type elementType,
+        IReadOnlyCollection<DependencyProperty> candidates,
+        string requestedName,
+        out DependencyProperty dependencyProperty)
+    {
+        dependencyProperty = null!;
+        if (string.IsNullOrWhiteSpace(requestedName))
+        {
+            return false;
+        }
+
+        var trimmed = requestedName.Trim();
+        string? ownerHint = null;
+        var propertyName = trimmed;
+
+        var dot = trimmed.LastIndexOf('.');
+        if (dot > 0 && dot < trimmed.Length - 1)
+        {
+            ownerHint = trimmed[..dot];
+            propertyName = trimmed[(dot + 1)..];
+        }
+
+        var matches = candidates
+            .Where(dp => string.Equals(dp.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (!string.IsNullOrWhiteSpace(ownerHint))
+        {
+            matches = matches
+                .Where(dp =>
+                    string.Equals(dp.OwnerType.Name, ownerHint, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(dp.OwnerType.FullName, ownerHint, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
+        if (matches.Length == 0)
+        {
+            return false;
+        }
+
+        if (matches.Length == 1)
+        {
+            dependencyProperty = matches[0];
+            return true;
+        }
+
+        dependencyProperty = matches
+            .OrderBy(dp => GetInheritanceDistance(elementType, dp.OwnerType))
+            .ThenBy(dp => dp.OwnerType.FullName ?? dp.OwnerType.Name, StringComparer.Ordinal)
+            .First();
+
+        return true;
+    }
+
+    private static int GetInheritanceDistance(Type derivedType, Type baseType)
+    {
+        if (derivedType == baseType)
+        {
+            return 0;
+        }
+
+        if (!baseType.IsAssignableFrom(derivedType))
+        {
+            return int.MaxValue / 2;
+        }
+
+        var distance = 0;
+        var current = derivedType;
+
+        while (current != baseType && current.BaseType is not null)
+        {
+            distance++;
+            current = current.BaseType;
+        }
+
+        return distance;
+    }
+
+    private static ValueSource? TryGetValueSourceForStyle(FrameworkElement element)
+    {
+        try
+        {
+            return DependencyPropertyHelper.GetValueSource(element, FrameworkElement.StyleProperty);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static StyleChainEntry BuildStyleEntry(
+        StyleChainKind kind,
+        DependencyObject sourceElement,
+        Style style,
+        bool includeResourceKeys,
+        int maxBasedOnDepth,
+        ValueSource? styleValueSource)
+    {
+        string? targetType = null;
+        string? resourceKey = null;
+        var basedOn = new List<string>();
+        var settersCount = 0;
+        var triggersCount = 0;
+
+        try
+        {
+            targetType = style.TargetType?.FullName ?? style.TargetType?.Name;
+        }
+        catch
+        {
+        }
+
+        if (includeResourceKeys)
+        {
+            resourceKey = TryGetResourceKey(sourceElement, style);
+        }
+
+        try
+        {
+            settersCount = style.Setters.Count;
+            triggersCount = style.Triggers.Count;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var current = style.BasedOn;
+            var safety = 0;
+            while (current is not null && safety++ < maxBasedOnDepth)
+            {
+                var currentTargetType = current.TargetType?.FullName ?? current.TargetType?.Name;
+                if (!string.IsNullOrWhiteSpace(currentTargetType))
+                {
+                    basedOn.Add(currentTargetType);
+                }
+
+                current = current.BasedOn;
+            }
+        }
+        catch
+        {
+        }
+
+        string? valueSourceText = null;
+        if (styleValueSource is { } vs)
+        {
+            valueSourceText = vs.BaseValueSource.ToString();
+        }
+
+        return new StyleChainEntry(
+            Kind: kind,
+            TargetType: targetType,
+            ResourceKey: resourceKey,
+            BasedOnChainTargetTypes: basedOn,
+            SettersCount: settersCount,
+            TriggersCount: triggersCount,
+            StylePropertyValueSource: valueSourceText);
+    }
+
+    private static string? TryGetResourceKey(DependencyObject element, object resourceItem)
+    {
+        try
+        {
+            var key = ResourceDictionaryKeyHelpers.GetKeyOfResourceItem(element, resourceItem);
+            if (ReferenceEquals(key, DependencyProperty.UnsetValue) || key is null)
+            {
+                return null;
+            }
+
+            return FormatResourceKey(key);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string FormatResourceKey(object key)
+    {
+        if (key is Type type)
+        {
+            return type.FullName ?? type.Name;
+        }
+
+        try
+        {
+            return key.ToString() ?? key.GetType().FullName ?? key.GetType().Name;
+        }
+        catch
+        {
+            return key.GetType().FullName ?? key.GetType().Name;
+        }
+    }
+
+    private static IReadOnlyList<TemplatePartInfo> ResolveTemplateParts(
+        System.Windows.Controls.Control control,
+        System.Windows.Controls.ControlTemplate template)
+    {
+        var parts = new List<TemplatePartInfo>();
+        TemplatePartAttribute[] attributes;
+        try
+        {
+            attributes = control.GetType()
+                .GetCustomAttributes(typeof(TemplatePartAttribute), inherit: true)
+                .OfType<TemplatePartAttribute>()
+                .ToArray();
+        }
+        catch
+        {
+            attributes = [];
+        }
+
+        foreach (var attr in attributes)
+        {
+            var name = attr.Name ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            string? expectedType = null;
+            try
+            {
+                expectedType = attr.Type?.FullName ?? attr.Type?.Name;
+            }
+            catch
+            {
+            }
+
+            object? found = null;
+            try
+            {
+                found = template.FindName(name, control);
+            }
+            catch
+            {
+            }
+
+            string? actualType = null;
+            if (found is not null)
+            {
+                try
+                {
+                    actualType = found.GetType().FullName ?? found.GetType().Name;
+                }
+                catch
+                {
+                }
+            }
+
+            parts.Add(new TemplatePartInfo(
+                Name: name,
+                ExpectedType: expectedType,
+                Found: found is not null,
+                ActualType: actualType));
+        }
+
+        return parts
+            .OrderBy(p => p.Name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<NamedTemplateElementInfo> FindNamedTemplateElements(
+        System.Windows.Controls.Control control,
+        int maxNamedElements,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<NamedTemplateElementInfo>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        var stack = new Stack<DependencyObject>();
+        stack.Push(control);
+
+        while (stack.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var current = stack.Pop();
+
+            var count = 0;
+            try
+            {
+                count = VisualTreeHelper.GetChildrenCount(current);
+            }
+            catch
+            {
+            }
+
+            for (var i = 0; i < count; i++)
+            {
+                DependencyObject? child = null;
+                try
+                {
+                    child = VisualTreeHelper.GetChild(current, i);
+                }
+                catch
+                {
+                }
+
+                if (child is null)
+                {
+                    continue;
+                }
+
+                stack.Push(child);
+
+                if (child is FrameworkElement fe &&
+                    ReferenceEquals(fe.TemplatedParent, control) &&
+                    !string.IsNullOrWhiteSpace(fe.Name) &&
+                    seen.Add(fe.Name))
+                {
+                    var typeName = fe.GetType().FullName ?? fe.GetType().Name;
+                    results.Add(new NamedTemplateElementInfo(fe.Name, typeName));
+                    if (results.Count >= maxNamedElements)
+                    {
+                        return results
+                            .OrderBy(n => n.Name, StringComparer.Ordinal)
+                            .ToArray();
+                    }
+                }
+            }
+        }
+
+        return results
+            .OrderBy(n => n.Name, StringComparer.Ordinal)
+            .ToArray();
     }
 }

@@ -1,0 +1,33 @@
+﻿{
+  Element: {
+    Type: Button,
+    AutomationId: Basic_Button,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button,
+    ClassName: System.Windows.Controls.Button,
+    Bounds: {
+      Width: 160,
+      Height: 20
+    }
+  },
+  Properties: [
+    {
+      Name: Width,
+      OwnerType: System.Windows.FrameworkElement,
+      Value: 160,
+      ValueSource: Local
+    },
+    {
+      Name: HorizontalAlignment,
+      OwnerType: System.Windows.FrameworkElement,
+      Value: Left,
+      ValueSource: Local
+    },
+    {
+      Name: Margin,
+      OwnerType: System.Windows.FrameworkElement,
+      Value: 0,0,0,6,
+      ValueSource: Local
+    }
+  ],
+  Truncated: false
+}

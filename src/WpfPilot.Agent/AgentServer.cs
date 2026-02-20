@@ -169,6 +169,42 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case "wpf/get_computed_properties":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetComputedPropertiesRequest>(JsonOptions)
+                            ?? new GetComputedPropertiesRequest();
+
+                        var response = WpfVisualTreeInspector.GetComputedProperties(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case "wpf/get_style_chain":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetStyleChainRequest>(JsonOptions)
+                            ?? new GetStyleChainRequest();
+
+                        var response = WpfVisualTreeInspector.GetStyleChain(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case "wpf/get_template_info":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetTemplateInfoRequest>(JsonOptions)
+                            ?? new GetTemplateInfoRequest();
+
+                        var response = WpfVisualTreeInspector.GetTemplateInfo(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
                 default:
                     return new AgentResponse(
                         request.Id,

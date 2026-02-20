@@ -292,6 +292,189 @@ public sealed partial class AutomationController
         }
     }
 
+    public async Task<GetComputedPropertiesResponse> GetComputedPropertiesAsync(
+        ElementLocator? locator = null,
+        string? elementId = null,
+        long? windowHandle = null,
+        IReadOnlyList<string>? propertyNames = null,
+        bool includeSources = true,
+        bool includeDefault = false,
+        bool includeUnset = false,
+        int maxProperties = 500,
+        string valueFormat = "string",
+        CancellationToken cancellationToken = default)
+    {
+        var hasLocator = locator is not null;
+        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+        if (hasLocator == hasElementId)
+        {
+            throw new ArgumentException("get_computed_properties requires exactly one of: locator OR elementId.");
+        }
+
+        string? resolvedElementId = null;
+        long? effectiveWindowHandle = windowHandle;
+        ElementLocator effectiveLocator = locator ?? new ElementLocator();
+
+        if (hasElementId)
+        {
+            var id = elementId!.Trim();
+            resolvedElementId = id;
+            var handle = RequireHandle(id);
+            if (handle.Backend != InspectionBackend.Wpf)
+            {
+                throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
+            }
+
+            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            {
+                throw new ArgumentException("windowHandle does not match the elementId window.");
+            }
+
+            effectiveWindowHandle = handle.WindowHandle;
+            effectiveLocator = new ElementLocator(XPath: handle.XPath);
+        }
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var request = new GetComputedPropertiesRequest(
+            WindowHandle: effectiveWindowHandle,
+            Locator: effectiveLocator,
+            PropertyNames: propertyNames,
+            IncludeSources: includeSources,
+            IncludeDefault: includeDefault,
+            IncludeUnset: includeUnset,
+            MaxProperties: maxProperties,
+            ValueFormat: valueFormat);
+
+        try
+        {
+            return await client.CallAsync<GetComputedPropertiesResponse>("wpf/get_computed_properties", request, cancellationToken);
+        }
+        catch (InvalidOperationException ex) when (hasElementId &&
+                                                   resolvedElementId is not null &&
+                                                   ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+    }
+
+    public async Task<GetStyleChainResponse> GetStyleChainAsync(
+        ElementLocator? locator = null,
+        string? elementId = null,
+        long? windowHandle = null,
+        bool includeThemeStyle = true,
+        bool includeResourceKeys = true,
+        int maxBasedOnDepth = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var hasLocator = locator is not null;
+        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+        if (hasLocator == hasElementId)
+        {
+            throw new ArgumentException("get_style_chain requires exactly one of: locator OR elementId.");
+        }
+
+        string? resolvedElementId = null;
+        long? effectiveWindowHandle = windowHandle;
+        ElementLocator effectiveLocator = locator ?? new ElementLocator();
+
+        if (hasElementId)
+        {
+            var id = elementId!.Trim();
+            resolvedElementId = id;
+            var handle = RequireHandle(id);
+            if (handle.Backend != InspectionBackend.Wpf)
+            {
+                throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
+            }
+
+            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            {
+                throw new ArgumentException("windowHandle does not match the elementId window.");
+            }
+
+            effectiveWindowHandle = handle.WindowHandle;
+            effectiveLocator = new ElementLocator(XPath: handle.XPath);
+        }
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var request = new GetStyleChainRequest(
+            WindowHandle: effectiveWindowHandle,
+            Locator: effectiveLocator,
+            IncludeThemeStyle: includeThemeStyle,
+            IncludeResourceKeys: includeResourceKeys,
+            MaxBasedOnDepth: maxBasedOnDepth);
+
+        try
+        {
+            return await client.CallAsync<GetStyleChainResponse>("wpf/get_style_chain", request, cancellationToken);
+        }
+        catch (InvalidOperationException ex) when (hasElementId &&
+                                                   resolvedElementId is not null &&
+                                                   ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+    }
+
+    public async Task<GetTemplateInfoResponse> GetTemplateInfoAsync(
+        ElementLocator? locator = null,
+        string? elementId = null,
+        long? windowHandle = null,
+        bool includeNamedElements = false,
+        int maxNamedElements = 50,
+        bool includeResourceKeys = true,
+        CancellationToken cancellationToken = default)
+    {
+        var hasLocator = locator is not null;
+        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+        if (hasLocator == hasElementId)
+        {
+            throw new ArgumentException("get_template_info requires exactly one of: locator OR elementId.");
+        }
+
+        string? resolvedElementId = null;
+        long? effectiveWindowHandle = windowHandle;
+        ElementLocator effectiveLocator = locator ?? new ElementLocator();
+
+        if (hasElementId)
+        {
+            var id = elementId!.Trim();
+            resolvedElementId = id;
+            var handle = RequireHandle(id);
+            if (handle.Backend != InspectionBackend.Wpf)
+            {
+                throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
+            }
+
+            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            {
+                throw new ArgumentException("windowHandle does not match the elementId window.");
+            }
+
+            effectiveWindowHandle = handle.WindowHandle;
+            effectiveLocator = new ElementLocator(XPath: handle.XPath);
+        }
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var request = new GetTemplateInfoRequest(
+            WindowHandle: effectiveWindowHandle,
+            Locator: effectiveLocator,
+            IncludeNamedElements: includeNamedElements,
+            MaxNamedElements: maxNamedElements,
+            IncludeResourceKeys: includeResourceKeys);
+
+        try
+        {
+            return await client.CallAsync<GetTemplateInfoResponse>("wpf/get_template_info", request, cancellationToken);
+        }
+        catch (InvalidOperationException ex) when (hasElementId &&
+                                                   resolvedElementId is not null &&
+                                                   ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+    }
+
     internal async Task<GetVisualTreeResponse> GetVisualTreeWpfAsync(
         GetWpfVisualTreeRequestV2 request,
         bool injectIfMissing,

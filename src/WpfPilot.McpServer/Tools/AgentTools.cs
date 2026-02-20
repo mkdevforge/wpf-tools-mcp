@@ -88,4 +88,67 @@ public static class AgentTools
                 () => automation.GetDataContextAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, maxDepth, maxPropertiesPerObject, maxStringLength, includeNulls, cancellationToken),
                 cancellationToken);
         });
+
+    [McpServerTool(Name = "get_computed_properties"), Description("Inspect computed dependency property values for a WPF element via the injected agent.")]
+    public static Task<GetComputedPropertiesResponse> GetComputedProperties(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator (WPF XPath recommended)")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
+        [Description("Native window handle")] long? windowHandle = null,
+        [Description("Optional dependency property names to include (e.g. Width, Control.Width)")] string[]? propertyNames = null,
+        [Description("Include value source details")] bool includeSources = true,
+        [Description("Include default-valued properties when propertyNames is omitted")] bool includeDefault = false,
+        [Description("Include UnsetValue properties when propertyNames is omitted")] bool includeUnset = false,
+        [Description("Maximum number of properties returned")] int maxProperties = 500,
+        [Description("Value format (string|type)")] string valueFormat = "string",
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.GetComputedPropertiesAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, propertyNames, includeSources, includeDefault, includeUnset, maxProperties, valueFormat, cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "get_style_chain"), Description("Inspect the style chain for a WPF element via the injected agent.")]
+    public static Task<GetStyleChainResponse> GetStyleChain(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator (WPF XPath recommended)")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
+        [Description("Native window handle")] long? windowHandle = null,
+        [Description("Include ThemeStyle")] bool includeThemeStyle = true,
+        [Description("Include best-effort resource keys for style/template")] bool includeResourceKeys = true,
+        [Description("Maximum BasedOn chain depth")] int maxBasedOnDepth = 10,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.GetStyleChainAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, includeThemeStyle, includeResourceKeys, maxBasedOnDepth, cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "get_template_info"), Description("Inspect the applied template for a WPF element via the injected agent.")]
+    public static Task<GetTemplateInfoResponse> GetTemplateInfo(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator (WPF XPath recommended)")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
+        [Description("Native window handle")] long? windowHandle = null,
+        [Description("Include named elements in the applied template (Control only)")] bool includeNamedElements = false,
+        [Description("Maximum named elements returned")] int maxNamedElements = 50,
+        [Description("Include best-effort resource keys for style/template")] bool includeResourceKeys = true,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.GetTemplateInfoAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, includeNamedElements, maxNamedElements, includeResourceKeys, cancellationToken),
+                cancellationToken);
+        });
 }

@@ -419,3 +419,106 @@ public sealed record GetDataContextRequest(
 public sealed record GetDataContextResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DataContextType,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonNode? Data);
+
+// Milestone 4 (computed properties / style / template)
+
+public sealed record GetComputedPropertiesRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    IReadOnlyList<string>? PropertyNames = null,
+    bool IncludeSources = true,
+    bool IncludeDefault = false,
+    bool IncludeUnset = false,
+    int MaxProperties = 500,
+    string ValueFormat = "string");
+
+public sealed record ComputedPropertyInfo(
+    string Name,
+    string OwnerType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Value = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ValueType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ValueSource = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsBinding = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BindingKind = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Path = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Mode = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UpdateSourceTrigger = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Converter = null);
+
+public sealed record GetComputedPropertiesResponse(
+    ElementRef Element,
+    IReadOnlyList<ComputedPropertyInfo> Properties,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? MissingPropertyNames = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum StyleChainKind
+{
+    LocalStyle,
+    ImplicitStyle,
+    ThemeStyle
+}
+
+public sealed record GetStyleChainRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    bool IncludeThemeStyle = true,
+    bool IncludeResourceKeys = true,
+    int MaxBasedOnDepth = 10);
+
+public sealed record StyleChainEntry(
+    StyleChainKind Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TargetType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResourceKey = null,
+    IReadOnlyList<string> BasedOnChainTargetTypes = null!,
+    int SettersCount = 0,
+    int TriggersCount = 0,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StylePropertyValueSource = null);
+
+public sealed record GetStyleChainResponse(
+    ElementRef Element,
+    IReadOnlyList<StyleChainEntry> Styles,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TemplateKind
+{
+    None,
+    ControlTemplate,
+    DataTemplate,
+    ItemsPanelTemplate,
+    FrameworkTemplate
+}
+
+public sealed record GetTemplateInfoRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    bool IncludeNamedElements = false,
+    int MaxNamedElements = 50,
+    bool IncludeResourceKeys = true);
+
+public sealed record TemplatePartInfo(
+    string Name,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExpectedType = null,
+    bool Found = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ActualType = null);
+
+public sealed record NamedTemplateElementInfo(
+    string Name,
+    string Type);
+
+public sealed record TemplateInfo(
+    TemplateKind Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TemplateType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TargetType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResourceKey = null,
+    int TriggersCount = 0,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TemplatePartInfo>? TemplateParts = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<NamedTemplateElementInfo>? NamedElements = null);
+
+public sealed record GetTemplateInfoResponse(
+    ElementRef Element,
+    TemplateInfo Template,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
