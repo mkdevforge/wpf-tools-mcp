@@ -166,6 +166,45 @@ public sealed class ComputedStylesSnapshots
         await Verifier.Verify(stable);
     }
 
+    [Test]
+    public async Task GetTemplateInfo_slider_with_part_refs_snapshot()
+    {
+        var result = await _mcp.CallToolAsync<GetTemplateInfoResponse>("get_template_info", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "Basic_Slider"
+            },
+            ["includeResourceKeys"] = false,
+            ["includePartElementRefs"] = true
+        });
+
+        var stable = new
+        {
+            Element = ScrubElementRef(result.Element),
+            Template = new
+            {
+                result.Template.Kind,
+                result.Template.TemplateType,
+                result.Template.TargetType,
+                result.Template.TriggersCount,
+                TemplateParts = result.Template.TemplateParts?.Select(p => new
+                {
+                    p.Name,
+                    p.ExpectedType,
+                    p.Found,
+                    p.ActualType,
+                    HasXPath = !string.IsNullOrWhiteSpace(p.XPath),
+                    HasBounds = p.Bounds is { Width: > 0, Height: > 0 }
+                }).ToArray()
+            },
+            result.Warnings
+        };
+
+        await Verifier.Verify(stable);
+    }
+
     private static ElementRef ScrubElementRef(ElementRef element) =>
         element with
         {
@@ -182,4 +221,3 @@ public sealed class ComputedStylesSnapshots
                || message.Contains("Snoop generic injector not found", StringComparison.OrdinalIgnoreCase);
     }
 }
-

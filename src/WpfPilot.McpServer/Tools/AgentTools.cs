@@ -120,7 +120,7 @@ public static class AgentTools
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Native window handle")] long? windowHandle = null,
         [Description("Include ThemeStyle")] bool includeThemeStyle = true,
-        [Description("Include best-effort resource keys for style/template")] bool includeResourceKeys = true,
+        [Description("Include best-effort resource keys for style/template")] bool includeResourceKeys = false,
         [Description("Maximum BasedOn chain depth")] int maxBasedOnDepth = 10,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
@@ -141,14 +141,15 @@ public static class AgentTools
         [Description("Native window handle")] long? windowHandle = null,
         [Description("Include named elements in the applied template (Control only)")] bool includeNamedElements = false,
         [Description("Maximum named elements returned")] int maxNamedElements = 50,
-        [Description("Include best-effort resource keys for style/template")] bool includeResourceKeys = true,
+        [Description("Include best-effort resource keys for style/template")] bool includeResourceKeys = false,
+        [Description("Include template part element references (XPath + bounds)")] bool includePartElementRefs = false,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
             var hasElementId = !string.IsNullOrWhiteSpace(elementId);
             return automation.RunExclusiveAsync(
-                () => automation.GetTemplateInfoAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, includeNamedElements, maxNamedElements, includeResourceKeys, cancellationToken),
+                () => automation.GetTemplateInfoAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, includeNamedElements, maxNamedElements, includeResourceKeys, includePartElementRefs, cancellationToken),
                 cancellationToken);
         });
 }

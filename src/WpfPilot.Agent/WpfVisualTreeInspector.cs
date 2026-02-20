@@ -2511,6 +2511,7 @@ internal static class WpfVisualTreeInspector
         var locator = request.Locator ?? throw new ArgumentException("get_template_info requires a locator.");
         var includeNamedElements = request.IncludeNamedElements;
         var includeResourceKeys = request.IncludeResourceKeys;
+        var includePartElementRefs = request.IncludePartElementRefs;
         var maxNamedElements = Math.Clamp(request.MaxNamedElements, 0, 500);
 
         var window = ResolveWindow(request.WindowHandle);
@@ -2625,7 +2626,14 @@ internal static class WpfVisualTreeInspector
             {
             }
 
-            templateParts = ResolveTemplateParts(control, appliedControlTemplate);
+            templateParts = ResolveTemplateParts(
+                control,
+                appliedControlTemplate,
+                includePartElementRefs,
+                window,
+                treeService,
+                warnings,
+                cancellationToken);
 
             if (includeNamedElements && maxNamedElements > 0)
             {
@@ -2635,6 +2643,10 @@ internal static class WpfVisualTreeInspector
         else if (includeNamedElements && maxNamedElements > 0)
         {
             warnings.Add("named_elements_unsupported: Named template elements are currently only supported for Control templates.");
+        }
+        else if (includePartElementRefs)
+        {
+            warnings.Add("template_part_refs_unsupported: Template part element references are currently only supported for Control templates.");
         }
 
         return new GetTemplateInfoResponse(
@@ -2894,14 +2906,16 @@ internal static class WpfVisualTreeInspector
             valueSourceText = vs.BaseValueSource.ToString();
         }
 
-        return new StyleChainEntry(
-            Kind: kind,
-            TargetType: targetType,
-            ResourceKey: resourceKey,
-            BasedOnChainTargetTypes: basedOn,
-            SettersCount: settersCount,
-            TriggersCount: triggersCount,
-            StylePropertyValueSource: valueSourceText);
+        return new StyleChainEntry
+        {
+            Kind = kind,
+            TargetType = targetType,
+            ResourceKey = resourceKey,
+            BasedOnChainTargetTypes = basedOn,
+            SettersCount = settersCount,
+            TriggersCount = triggersCount,
+            StylePropertyValueSource = valueSourceText
+        };
     }
 
     private static string? TryGetResourceKey(DependencyObject element, object resourceItem)
@@ -2941,9 +2955,14 @@ internal static class WpfVisualTreeInspector
 
     private static IReadOnlyList<TemplatePartInfo> ResolveTemplateParts(
         System.Windows.Controls.Control control,
-        System.Windows.Controls.ControlTemplate template)
+        System.Windows.Controls.ControlTemplate template,
+        bool includePartElementRefs,
+        Window window,
+        VisualTreeService treeService,
+        List<string> warnings,
+        CancellationToken cancellationToken)
     {
-        var parts = new List<TemplatePartInfo>();
+        var parts = new List<TemplatePartDraft>();
         TemplatePartAttribute[] attributes;
         try
         {
@@ -2959,6 +2978,8 @@ internal static class WpfVisualTreeInspector
 
         foreach (var attr in attributes)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var name = attr.Name ?? string.Empty;
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -2984,6 +3005,7 @@ internal static class WpfVisualTreeInspector
             }
 
             string? actualType = null;
+            DependencyObject? foundElement = null;
             if (found is not null)
             {
                 try
@@ -2993,18 +3015,117 @@ internal static class WpfVisualTreeInspector
                 catch
                 {
                 }
+
+                foundElement = found as DependencyObject;
+                if (includePartElementRefs && foundElement is null)
+                {
+                    warnings.Add($"template_part_not_dependency_object: {name}");
+                }
             }
 
-            parts.Add(new TemplatePartInfo(
-                Name: name,
-                ExpectedType: expectedType,
-                Found: found is not null,
-                ActualType: actualType));
+            var partXPath = default(string);
+            ContractRect? bounds = null;
+
+            if (includePartElementRefs && foundElement is not null)
+            {
+                bounds = GetBoundsWpf(foundElement);
+
+                if (TryBuildXPathChainUpwards(treeService, window, foundElement, visibleOnly: true, out var chain) &&
+                    chain.Count > 0)
+                {
+                    partXPath = chain[^1].XPath;
+                }
+            }
+
+            parts.Add(new TemplatePartDraft(
+                name: name,
+                expectedType: expectedType,
+                found: found is not null,
+                actualType: actualType,
+                foundElement: foundElement,
+                xpath: partXPath,
+                bounds: bounds));
+        }
+
+        if (includePartElementRefs)
+        {
+            var unresolved = parts
+                .Where(p => p is { Found: true, FoundElement: not null, XPath: null })
+                .ToArray();
+
+            if (unresolved.Length > 0)
+            {
+                var missing = new HashSet<DependencyObject>(unresolved.Select(p => p.FoundElement!), ReferenceEqualityComparer.Instance);
+
+                try
+                {
+                    foreach (var (element, xpath) in EnumerateDescendantsWithXPath(
+                                 root: window,
+                                 rootXPath: "/Window",
+                                 treeService: treeService,
+                                 visibleOnly: true,
+                                 maxNodes: 200_000,
+                                 cancellationToken: cancellationToken))
+                    {
+                        if (!missing.Remove(element))
+                        {
+                            continue;
+                        }
+
+                        for (var i = 0; i < parts.Count; i++)
+                        {
+                            if (ReferenceEquals(parts[i].FoundElement, element))
+                            {
+                                parts[i].XPath = xpath;
+                            }
+                        }
+
+                        if (missing.Count == 0)
+                        {
+                            break;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"template_part_xpath_scan_error: {ex.Message}");
+                }
+
+                foreach (var part in parts.Where(p => p is { Found: true, FoundElement: not null, XPath: null }))
+                {
+                    warnings.Add($"template_part_xpath_unavailable: {part.Name}");
+                }
+            }
         }
 
         return parts
+            .Select(p => new TemplatePartInfo(
+                Name: p.Name,
+                ExpectedType: p.ExpectedType,
+                Found: p.Found,
+                ActualType: p.ActualType,
+                XPath: includePartElementRefs ? p.XPath : null,
+                Bounds: includePartElementRefs ? p.Bounds : null))
             .OrderBy(p => p.Name, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private sealed class TemplatePartDraft(
+        string name,
+        string? expectedType,
+        bool found,
+        string? actualType,
+        DependencyObject? foundElement,
+        string? xpath,
+        ContractRect? bounds)
+    {
+        public string Name { get; } = name;
+        public string? ExpectedType { get; } = expectedType;
+        public bool Found { get; } = found;
+        public string? ActualType { get; } = actualType;
+        public DependencyObject? FoundElement { get; } = foundElement;
+        public string? XPath { get; set; } = xpath;
+        public ContractRect? Bounds { get; } = bounds;
     }
 
     private static IReadOnlyList<NamedTemplateElementInfo> FindNamedTemplateElements(

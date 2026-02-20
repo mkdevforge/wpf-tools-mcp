@@ -465,17 +465,28 @@ public sealed record GetStyleChainRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
     bool IncludeThemeStyle = true,
-    bool IncludeResourceKeys = true,
+    bool IncludeResourceKeys = false,
     int MaxBasedOnDepth = 10);
 
-public sealed record StyleChainEntry(
-    StyleChainKind Kind,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TargetType = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResourceKey = null,
-    IReadOnlyList<string> BasedOnChainTargetTypes = null!,
-    int SettersCount = 0,
-    int TriggersCount = 0,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StylePropertyValueSource = null);
+public sealed record StyleChainEntry
+{
+    public required StyleChainKind Kind { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TargetType { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResourceKey { get; init; }
+
+    public IReadOnlyList<string> BasedOnChainTargetTypes { get; init; } = Array.Empty<string>();
+
+    public int SettersCount { get; init; }
+
+    public int TriggersCount { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StylePropertyValueSource { get; init; }
+}
 
 public sealed record GetStyleChainResponse(
     ElementRef Element,
@@ -497,13 +508,16 @@ public sealed record GetTemplateInfoRequest(
     ElementLocator? Locator = null,
     bool IncludeNamedElements = false,
     int MaxNamedElements = 50,
-    bool IncludeResourceKeys = true);
+    bool IncludeResourceKeys = false,
+    bool IncludePartElementRefs = false);
 
 public sealed record TemplatePartInfo(
     string Name,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExpectedType = null,
     bool Found = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ActualType = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ActualType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? XPath = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? Bounds = null);
 
 public sealed record NamedTemplateElementInfo(
     string Name,

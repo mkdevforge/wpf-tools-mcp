@@ -362,7 +362,7 @@ public sealed partial class AutomationController
         string? elementId = null,
         long? windowHandle = null,
         bool includeThemeStyle = true,
-        bool includeResourceKeys = true,
+        bool includeResourceKeys = false,
         int maxBasedOnDepth = 10,
         CancellationToken cancellationToken = default)
     {
@@ -422,7 +422,8 @@ public sealed partial class AutomationController
         long? windowHandle = null,
         bool includeNamedElements = false,
         int maxNamedElements = 50,
-        bool includeResourceKeys = true,
+        bool includeResourceKeys = false,
+        bool includePartElementRefs = false,
         CancellationToken cancellationToken = default)
     {
         var hasLocator = locator is not null;
@@ -461,7 +462,8 @@ public sealed partial class AutomationController
             Locator: effectiveLocator,
             IncludeNamedElements: includeNamedElements,
             MaxNamedElements: maxNamedElements,
-            IncludeResourceKeys: includeResourceKeys);
+            IncludeResourceKeys: includeResourceKeys,
+            IncludePartElementRefs: includePartElementRefs);
 
         try
         {
