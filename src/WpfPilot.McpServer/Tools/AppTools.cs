@@ -2,6 +2,7 @@ using System.ComponentModel;
 using ModelContextProtocol.Server;
 using WpfPilot.Automation;
 using WpfPilot.Contracts;
+using WpfPilot.McpServer.Subscriptions;
 
 namespace WpfPilot.McpServer.Tools;
 
@@ -46,12 +47,16 @@ public static class AppTools
     [McpServerTool(Name = "close_session"), Description("Close and dispose a session (and close the attached application).")]
     public static Task<CloseAppResponse> CloseSession(
         SessionManager sessions,
+        SubscriptionManager subscriptions,
         [Description("Session ID")] string sessionId,
         [Description("Force kill if graceful close fails")] bool force = false,
         [Description("Wait timeout (ms) before forcing")] int timeoutMs = 5000,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-            sessions.CloseSessionAsync(sessionId, new CloseAppRequest(force, timeoutMs), cancellationToken));
+        {
+            subscriptions.UnsubscribeAllForSession(sessionId);
+            return sessions.CloseSessionAsync(sessionId, new CloseAppRequest(force, timeoutMs), cancellationToken);
+        });
 
     [McpServerTool(Name = "list_sessions"), Description("List active sessions.")]
     public static Task<ListSessionsResponse> ListSessions(

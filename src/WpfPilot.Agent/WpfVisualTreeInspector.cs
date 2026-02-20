@@ -2009,6 +2009,226 @@ internal static class WpfVisualTreeInspector
             TruncatedReason: truncatedReason);
     }
 
+    public static GetUiaCoverageReportResponse GetUiaCoverageReport(GetUiaCoverageReportRequest request, CancellationToken cancellationToken)
+    {
+        var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
+        var maxFindings = Math.Clamp(request.MaxFindings, 1, 5000);
+        var visibleOnly = request.VisibleOnly;
+        var interactiveOnly = request.InteractiveOnly;
+        var interactiveMode = request.InteractiveMode;
+
+        var window = ResolveWindow(request.WindowHandle);
+        using var treeService = new VisualTreeService();
+
+        var rootObject = (DependencyObject)window;
+        var rootXPath = "/Window";
+
+        if (!string.IsNullOrWhiteSpace(request.RootXPath))
+        {
+            rootXPath = NormalizeXPath(request.RootXPath);
+            rootObject = ResolveByXPath(treeService, window, rootXPath, visibleOnly, cancellationToken);
+        }
+
+        var findings = new List<UiaCoverageFinding>();
+        var warnings = new List<string>();
+
+        var scannedNodes = 0;
+        var consideredNodes = 0;
+        var truncated = false;
+        string? truncatedReason = null;
+
+        try
+        {
+            foreach (var (element, xpath) in EnumerateDescendantsWithXPath(
+                         root: rootObject,
+                         rootXPath: rootXPath,
+                         treeService: treeService,
+                         visibleOnly: visibleOnly,
+                         maxNodes: maxNodes,
+                         cancellationToken: cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                scannedNodes++;
+
+                var isInteractive = IsInteractiveWpf(element, interactiveMode);
+                if (interactiveOnly && !isInteractive)
+                {
+                    continue;
+                }
+
+                consideredNodes++;
+
+                var elementRef = new ElementRef(
+                    Type: element.GetType().Name,
+                    AutomationId: GetAutomationId(element),
+                    Name: GetName(element),
+                    XPath: xpath,
+                    ClassName: element.GetType().FullName,
+                    Bounds: GetBoundsWpf(element));
+
+                var elementFindings = AnalyzeCoverageForElement(element, elementRef, isInteractive);
+                foreach (var finding in elementFindings)
+                {
+                    findings.Add(finding);
+                    if (findings.Count >= maxFindings)
+                    {
+                        truncated = true;
+                        truncatedReason = "maxFindings";
+                        break;
+                    }
+                }
+
+                if (truncated)
+                {
+                    break;
+                }
+            }
+        }
+        catch (InvalidOperationException ex) when (ex.Message.StartsWith("Search exceeded maxNodes=", StringComparison.OrdinalIgnoreCase))
+        {
+            truncated = true;
+            truncatedReason = "maxNodes";
+            warnings.Add(ex.Message);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var ordered = findings
+            .OrderByDescending(f => GetSeverityRank(f.Severity))
+            .ThenBy(f => f.Element.XPath, StringComparer.Ordinal)
+            .ToArray();
+
+        var summary = new UiaCoverageSummary(
+            ScannedNodes: scannedNodes,
+            ConsideredNodes: consideredNodes,
+            FindingsCount: ordered.Length,
+            Truncated: truncated,
+            TruncatedReason: truncatedReason);
+
+        return new GetUiaCoverageReportResponse(
+            Summary: summary,
+            Findings: ordered,
+            Warnings: warnings.Count > 0 ? warnings : null);
+    }
+
+    private static IReadOnlyList<UiaCoverageFinding> AnalyzeCoverageForElement(DependencyObject element, ElementRef elementRef, bool isInteractive)
+    {
+        var findings = new List<UiaCoverageFinding>();
+
+        var bounds = elementRef.Bounds;
+        if (bounds is null || bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            findings.Add(new UiaCoverageFinding(
+                IssueCode: "empty_bounds",
+                Severity: "info",
+                Element: elementRef,
+                Details: ["Element has empty or unavailable bounds."],
+                Suggestions:
+                [
+                    "Ensure the element is loaded and visible before interacting.",
+                    "If this is a custom control, verify Measure/Arrange produce a non-zero size."
+                ]));
+        }
+
+        var peer = TryCreateAutomationPeer(element);
+        if (peer is null)
+        {
+            // Only UIElement / ContentElement can participate in WPF automation peers.
+            if (element is UIElement or ContentElement)
+            {
+                var severity = isInteractive ? "error" : "info";
+                findings.Add(new UiaCoverageFinding(
+                    IssueCode: "no_automation_peer",
+                    Severity: severity,
+                    Element: elementRef,
+                    Details: ["No AutomationPeer was created for this element."],
+                    Suggestions:
+                    [
+                        "Implement OnCreateAutomationPeer() for custom controls.",
+                        "Use built-in WPF controls when possible (they expose UIA patterns automatically).",
+                        "Set AutomationProperties.Name and/or AutomationProperties.AutomationId to improve discoverability."
+                    ]));
+            }
+
+            return findings;
+        }
+
+        if (isInteractive && !HasAnyActionablePattern(peer))
+        {
+            findings.Add(new UiaCoverageFinding(
+                IssueCode: "no_actionable_patterns",
+                Severity: "warning",
+                Element: elementRef,
+                Details: ["AutomationPeer exists but exposes no common interaction patterns (Invoke/Value/RangeValue/Toggle/Selection/Scroll)."],
+                Suggestions:
+                [
+                    "If this control is interactive, implement UIA patterns by overriding AutomationPeer.GetPattern().",
+                    "If this is meant to be clickable, expose InvokePattern via a suitable AutomationPeer.",
+                    "If this is an input control, expose ValuePattern or RangeValuePattern as appropriate."
+                ]));
+        }
+
+        var hasName = !string.IsNullOrWhiteSpace(elementRef.Name);
+        var hasAutomationId = !string.IsNullOrWhiteSpace(elementRef.AutomationId);
+        if (isInteractive && !hasName && !hasAutomationId)
+        {
+            findings.Add(new UiaCoverageFinding(
+                IssueCode: "missing_accessible_name",
+                Severity: "warning",
+                Element: elementRef,
+                Details: ["Element has no accessible name (AutomationProperties.Name) and no AutomationId."],
+                Suggestions:
+                [
+                    "Set AutomationProperties.Name to an accessible, user-facing label.",
+                    "Optionally set AutomationProperties.AutomationId to a stable identifier for automation."
+                ]));
+        }
+
+        return findings;
+    }
+
+    private static AutomationPeer? TryCreateAutomationPeer(DependencyObject element)
+    {
+        try
+        {
+            return element switch
+            {
+                UIElement ue => UIElementAutomationPeer.CreatePeerForElement(ue),
+                ContentElement ce => ContentElementAutomationPeer.CreatePeerForElement(ce),
+                _ => null
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool HasAnyActionablePattern(AutomationPeer peer)
+    {
+        try
+        {
+            return peer.GetPattern(PatternInterface.Invoke) is not null
+                   || peer.GetPattern(PatternInterface.Selection) is not null
+                   || peer.GetPattern(PatternInterface.SelectionItem) is not null
+                   || peer.GetPattern(PatternInterface.Toggle) is not null
+                   || peer.GetPattern(PatternInterface.Value) is not null
+                   || peer.GetPattern(PatternInterface.RangeValue) is not null
+                   || peer.GetPattern(PatternInterface.Scroll) is not null
+                   || peer.GetPattern(PatternInterface.ScrollItem) is not null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static int GetSeverityRank(string severity) =>
+        severity.Equals("error", StringComparison.OrdinalIgnoreCase) ? 3 :
+        severity.Equals("warning", StringComparison.OrdinalIgnoreCase) ? 2 :
+        severity.Equals("info", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+
     private sealed record DataContextSerializationOptions(
         int MaxDepth,
         int MaxPropertiesPerObject,

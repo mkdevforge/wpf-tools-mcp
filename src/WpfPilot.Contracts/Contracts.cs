@@ -408,6 +408,55 @@ public sealed record GetBindingErrorsResponse(
     bool Truncated,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum SubscriptionKind
+{
+    BindingErrors
+}
+
+public sealed record SubscribeBindingErrorsResponse(string SubscriptionId);
+
+public sealed record SubscriptionEvent(
+    int Sequence,
+    string Kind,
+    JsonNode Payload);
+
+public sealed record PollSubscriptionResponse(
+    IReadOnlyList<SubscriptionEvent> Events,
+    int Dropped,
+    bool HasMore);
+
+public sealed record UnsubscribeResponse(bool Unsubscribed);
+
+public sealed record GetUiaCoverageReportRequest(
+    long? WindowHandle = null,
+    string? RootXPath = null,
+    bool VisibleOnly = true,
+    bool InteractiveOnly = true,
+    InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
+    int MaxNodes = 5000,
+    int MaxFindings = 200,
+    bool IncludePassing = false);
+
+public sealed record UiaCoverageSummary(
+    int ScannedNodes,
+    int ConsideredNodes,
+    int FindingsCount,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
+
+public sealed record UiaCoverageFinding(
+    string IssueCode,
+    string Severity,
+    ElementRef Element,
+    IReadOnlyList<string> Details,
+    IReadOnlyList<string> Suggestions);
+
+public sealed record GetUiaCoverageReportResponse(
+    UiaCoverageSummary Summary,
+    IReadOnlyList<UiaCoverageFinding> Findings,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+
 public sealed record GetDataContextRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,

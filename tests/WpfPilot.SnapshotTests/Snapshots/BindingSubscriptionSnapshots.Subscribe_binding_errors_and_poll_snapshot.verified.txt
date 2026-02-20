@@ -1,0 +1,17 @@
+﻿{
+  HasMore: false,
+  Events: [
+    {
+      Sequence: 1,
+      Kind: binding_error_added,
+      Payload: {
+        ElementType: TextBlock,
+        AutomationId: BindingErrors_BrokenText,
+        TargetProperty: Text,
+        Path: MissingProperty,
+        HasErrorMessage: false,
+        Status: PathError
+      }
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+﻿{
+  Truncated: false,
+  Findings: [
+    {
+      IssueCode: missing_accessible_name,
+      Severity: warning,
+      Element: {
+        Type: Button
+      },
+      SuggestionsCount: 2
+    },
+    {
+      IssueCode: missing_accessible_name,
+      Severity: warning,
+      Element: {
+        Type: MainWindow
+      },
+      SuggestionsCount: 2
+    },
+    {
+      IssueCode: no_actionable_patterns,
+      Severity: warning,
+      Element: {
+        Type: MainWindow
+      },
+      SuggestionsCount: 3
+    },
+    {
+      IssueCode: no_automation_peer,
+      Severity: info,
+      Element: {
+        Type: AdornerDecorator
+      },
+      SuggestionsCount: 3
+    },
+    {
+      IssueCode: no_automation_peer,
+      Severity: info,
+      Element: {
+        Type: AdornerLayer
+      },
+      SuggestionsCount: 3
+    },
+    {
+      IssueCode: no_automation_peer,
+      Severity: info,
+      Element: {
+        Type: Border
+      },
+      SuggestionsCount: 3
+    },
+    {
+      IssueCode: no_automation_peer,
+      Severity: info,
+      Element: {
+        Type: Border,
+        Name: border
+      },
+      SuggestionsCount: 3
+    },
+    {
+      IssueCode: no_automation_peer,
+      Severity: info,
+      Element: {
+        Type: ContentPresenter
+      },
+      SuggestionsCount: 3
+    },
+    {
+      IssueCode: no_automation_peer,
+      Severity: info,
+      Element: {
+        Type: ContentPresenter,
+        Name: contentPresenter
+      },
+      SuggestionsCount: 3
+    },
+    {
+      IssueCode: no_automation_peer,
+      Severity: info,
+      Element: {
+        Type: Grid
+      },
+      SuggestionsCount: 3
+    },
+    {
+      IssueCode: no_automation_peer,
+      Severity: info,
+      Element: {
+        Type: NoPeerControl
+      },
+      SuggestionsCount: 3
+    },
+    {
+      IssueCode: no_automation_peer,
+      Severity: info,
+      Element: {
+        Type: StackPanel
+      },
+      SuggestionsCount: 3
+    }
+  ]
+}

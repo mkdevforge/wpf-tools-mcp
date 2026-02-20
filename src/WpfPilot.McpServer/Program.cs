@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using System.Runtime.InteropServices;
 using WpfPilot.Automation;
+using WpfPilot.McpServer.Subscriptions;
 
 EnablePerMonitorV2DpiAwareness();
 
@@ -14,6 +15,7 @@ builder.Logging.AddConsole(consoleLogOptions =>
 });
 
 builder.Services.AddSingleton<SessionManager>();
+builder.Services.AddSingleton<SubscriptionManager>();
 
 builder.Services
     .AddMcpServer()

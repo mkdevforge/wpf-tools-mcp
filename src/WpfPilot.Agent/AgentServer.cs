@@ -157,6 +157,18 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case "wpf/uia_coverage_report":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetUiaCoverageReportRequest>(JsonOptions)
+                            ?? new GetUiaCoverageReportRequest();
+
+                        var response = WpfVisualTreeInspector.GetUiaCoverageReport(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
                 case "wpf/get_data_context":
                     return await RunOnUiAsync(() =>
                     {

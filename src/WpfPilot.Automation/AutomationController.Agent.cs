@@ -231,6 +231,31 @@ public sealed partial class AutomationController
         return await client.CallAsync<GetBindingErrorsResponse>("wpf/get_binding_errors", request, cancellationToken);
     }
 
+    public async Task<GetUiaCoverageReportResponse> GetUiaCoverageReportAsync(
+        long? windowHandle = null,
+        string? rootXPath = null,
+        bool visibleOnly = true,
+        bool interactiveOnly = true,
+        InteractiveMode interactiveMode = InteractiveMode.Heuristic,
+        int maxNodes = 5000,
+        int maxFindings = 200,
+        bool includePassing = false,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var request = new GetUiaCoverageReportRequest(
+            WindowHandle: windowHandle,
+            RootXPath: rootXPath,
+            VisibleOnly: visibleOnly,
+            InteractiveOnly: interactiveOnly,
+            InteractiveMode: interactiveMode,
+            MaxNodes: maxNodes,
+            MaxFindings: maxFindings,
+            IncludePassing: includePassing);
+
+        return await client.CallAsync<GetUiaCoverageReportResponse>("wpf/uia_coverage_report", request, cancellationToken);
+    }
+
     public async Task<GetDataContextResponse> GetDataContextAsync(
         ElementLocator? locator = null,
         string? elementId = null,

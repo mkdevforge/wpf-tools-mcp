@@ -68,6 +68,36 @@ public static class AgentTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "uia_coverage_report"), Description("Report UIA automation coverage gaps for WPF visual elements via the injected agent. Requires inject_agent.")]
+    public static Task<GetUiaCoverageReportResponse> GetUiaCoverageReport(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Native window handle")] long? windowHandle = null,
+        [Description("Optional WPF XPath root for subtree")] string? rootXPath = null,
+        [Description("Only include visible elements")] bool visibleOnly = true,
+        [Description("Only include interactive-looking elements")] bool interactiveOnly = true,
+        [Description("Interactive detection mode")] InteractiveMode interactiveMode = InteractiveMode.Heuristic,
+        [Description("Maximum nodes scanned")] int maxNodes = 5000,
+        [Description("Maximum findings returned")] int maxFindings = 200,
+        [Description("Include passing elements (diagnostic; verbose)")] bool includePassing = false,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.GetUiaCoverageReportAsync(
+                    effectiveWindowHandle,
+                    rootXPath,
+                    visibleOnly,
+                    interactiveOnly,
+                    interactiveMode,
+                    maxNodes,
+                    maxFindings,
+                    includePassing,
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "get_data_context"), Description("Serialize the DataContext of a WPF element via the injected agent.")]
     public static Task<GetDataContextResponse> GetDataContext(
         SessionManager sessions,

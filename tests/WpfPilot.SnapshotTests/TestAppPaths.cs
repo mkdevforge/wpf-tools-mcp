@@ -50,4 +50,7 @@ internal static class TestAppPaths
 
     public static string FindBrokenAutomationTestAppExecutable() =>
         FindExecutable("WpfPilot.TestApp.BrokenAutomation", "WpfPilot.TestApp.BrokenAutomation");
+
+    public static string FindBindingErrorsTestAppExecutable() =>
+        FindExecutable("WpfPilot.TestApp.BindingErrors", "WpfPilot.TestApp.BindingErrors");
 }
