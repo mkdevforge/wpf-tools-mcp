@@ -1151,6 +1151,8 @@ internal static class WpfVisualTreeInspector
         string rootXPath,
         ElementLocator locator,
         bool visibleOnly,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode,
         int maxNodes,
         CancellationToken cancellationToken)
     {
@@ -1176,6 +1178,11 @@ internal static class WpfVisualTreeInspector
                 {
                     throw new InvalidOperationException(mismatch);
                 }
+
+                if (interactiveOnly && !IsInteractiveWpf(element, interactiveMode))
+                {
+                    throw new InvalidOperationException("Locator did not match any element.");
+                }
                 return (element, normalized);
             }
             catch (InvalidOperationException ex)
@@ -1191,6 +1198,7 @@ internal static class WpfVisualTreeInspector
 
         var descendants = EnumerateDescendantsWithXPath(rootObject, rootXPath, treeService, visibleOnly, maxNodes, cancellationToken)
             .Skip(1)
+            .Where(e => !interactiveOnly || IsInteractiveWpf(e.Element, interactiveMode))
             .ToArray();
 
         if (IsIndexOnlyLocator(locator))
@@ -1468,6 +1476,8 @@ internal static class WpfVisualTreeInspector
             rootXPath,
             locator,
             request.VisibleOnly,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
             maxNodes,
             cancellationToken);
 
@@ -1498,6 +1508,8 @@ internal static class WpfVisualTreeInspector
             rootXPath,
             locator,
             request.VisibleOnly,
+            request.InteractiveOnly,
+            request.InteractiveMode,
             maxNodes,
             cancellationToken);
 
@@ -1935,6 +1947,8 @@ internal static class WpfVisualTreeInspector
             rootXPath: "/Window",
             locator,
             visibleOnly: true,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
             maxNodes: 200_000,
             cancellationToken);
 
@@ -2752,6 +2766,8 @@ internal static class WpfVisualTreeInspector
             rootXPath: "/Window",
             locator,
             visibleOnly: true,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
             maxNodes: 200_000,
             cancellationToken);
 
@@ -2808,6 +2824,8 @@ internal static class WpfVisualTreeInspector
             rootXPath: "/Window",
             locator,
             visibleOnly: true,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
             maxNodes: 200_000,
             cancellationToken);
 
@@ -2963,6 +2981,8 @@ internal static class WpfVisualTreeInspector
             rootXPath: "/Window",
             locator,
             visibleOnly: true,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
             maxNodes: 200_000,
             cancellationToken);
 
@@ -3078,6 +3098,8 @@ internal static class WpfVisualTreeInspector
             rootXPath: "/Window",
             locator,
             visibleOnly: true,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
             maxNodes: 200_000,
             cancellationToken);
 

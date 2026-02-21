@@ -118,14 +118,30 @@ public static class InspectionTools
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
         [Description("Element locator")] ElementLocator locator,
-        [Description("Inspection backend selection")] InspectionBackend backend = InspectionBackend.Uia,
+        [Description("Inspection backend selection")] InspectionBackend backend = InspectionBackend.Auto,
         [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Timeout (ms)")] int timeoutMs = 5000,
+        [Description("Polling interval (ms)")] int pollIntervalMs = 100,
+        [Description("Stable duration (ms)")] int stableMs = 0,
+        [Description("Filter to visible elements only")] bool visibleOnly = true,
+        [Description("Filter to interactive elements only")] bool interactiveOnly = false,
+        [Description("Interactive filtering mode")] InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
             return automation.RunExclusiveAsync(
-                () => automation.ResolveElementAsync(backend, locator, effectiveWindowHandle, cancellationToken),
+                () => automation.ResolveElementAsync(
+                    backend,
+                    locator,
+                    effectiveWindowHandle,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    visibleOnly,
+                    interactiveOnly,
+                    interactiveMode,
+                    cancellationToken),
                 cancellationToken);
         });
 

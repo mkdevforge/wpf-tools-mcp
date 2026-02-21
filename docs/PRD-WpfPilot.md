@@ -331,6 +331,8 @@ Phase 1 delivers a fully functional MCP server that can see and interact with WP
 
 #### P1-M2 — Interact
 - `click_element`, `type_text`, `set_value`, `select_item`, `invoke`
+- Playwright-like robustness: `wait_for` (attached|visible|enabled|actionable|stable|value_equals|name_contains)
+- Pointer interactions: `drag` (for sliders, splitters, reorder, etc.)
 - `scroll_to_element`, `set_active_window`
 - Element handles: `resolve_element` returns an `elementId` handle for re-use across subsequent tool calls (and `find_elements` can include `elementId` values). `uia_...` handles are validated best-effort (XPath + RuntimeId) while `wpf_...` handles are soft (XPath-based) and may go stale if the visual tree changes.
 - Test app expanded with all pages (DataGrid, Navigation, DeeplyNested, DynamicContent, Dialogs, CustomControls)
@@ -376,6 +378,7 @@ The MCP tool surface is extended — new tools are added and existing inspection
 - SSE transport for remote scenarios
 - Visual diff tool (screenshot comparison as MCP tool)
 - Accessibility audit tool (check for missing automation properties)
+- Trace + performance capture (DevTools-like): lightweight tool traces and UI-thread responsiveness sampling
 - .NET Framework 4.x target support
 - Live property editing (change values through Snoop agent for rapid iteration)
 - Extract minimal inspection classes from Snoop.Core into standalone library (reduce dependency footprint)

@@ -310,6 +310,7 @@ public sealed record WaitForRequest(
     ElementLocator? Locator = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
     long? WindowHandle = null,
+    InspectionBackend Backend = InspectionBackend.Auto,
     string State = "visible",
     int TimeoutMs = 5000,
     int PollIntervalMs = 100,
@@ -420,6 +421,8 @@ public sealed record ResolveWpfElementRequest(
     ElementLocator? Locator = null,
     string? RootXPath = null,
     bool VisibleOnly = true,
+    bool InteractiveOnly = false,
+    InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     int MaxNodes = 2000,
     FindReturnFields ReturnFields = FindReturnFields.Minimal);
 
@@ -676,3 +679,23 @@ public sealed record PerformanceSummary(
     int MaxLatencyMs);
 
 public sealed record PerformanceStopResponse(PerformanceSummary Summary);
+
+public sealed record TraceEvent(
+    string Tool,
+    DateTime StartedAtUtc,
+    int DurationMs,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Summary = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null);
+
+public sealed record TraceStartResponse(
+    string TraceId,
+    DateTime StartedAtUtc,
+    bool Started,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Message = null);
+
+public sealed record TraceStopResponse(
+    string TraceId,
+    DateTime StoppedAtUtc,
+    string OutputPath,
+    int EventCount,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TraceEvent>? Events = null);

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Linq;
 using FlaUI.Core;
@@ -10,21 +11,68 @@ public sealed partial class AutomationController
 {
     private readonly ElementHandleStore _elementHandles = new();
 
-    public Task<ResolveElementResponse> ResolveElementAsync(
+    public async Task<ResolveElementResponse> ResolveElementAsync(
         InspectionBackend backend,
         ElementLocator locator,
         long? windowHandle = null,
+        int timeoutMs = 5000,
+        int pollIntervalMs = 100,
+        int stableMs = 0,
+        bool visibleOnly = true,
+        bool interactiveOnly = false,
+        InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(locator);
 
-        return backend switch
+        var trace = BeginTraceSpan("resolve_element");
+        try
         {
-            InspectionBackend.Uia => ResolveUiaElementAsync(locator, windowHandle, cancellationToken),
-            InspectionBackend.Wpf => ResolveWpfElementAsync(locator, windowHandle, cancellationToken),
-            InspectionBackend.Auto => ResolveUiaElementAsync(locator, windowHandle, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(nameof(backend), backend, "Unsupported backend.")
-        };
+            timeoutMs = Math.Clamp(timeoutMs, 0, 60_000);
+            pollIntervalMs = Math.Clamp(pollIntervalMs, 25, 2000);
+            stableMs = Math.Clamp(stableMs, 0, 5000);
+
+            var effectiveBackend = backend == InspectionBackend.Auto
+                ? (IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia)
+                : backend;
+
+            var response = await (effectiveBackend switch
+            {
+                InspectionBackend.Uia => ResolveUiaElementAsync(
+                    locator,
+                    windowHandle,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    visibleOnly,
+                    interactiveOnly,
+                    interactiveMode,
+                    cancellationToken),
+                InspectionBackend.Wpf => ResolveWpfElementAsync(
+                    locator,
+                    windowHandle,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    visibleOnly,
+                    interactiveOnly,
+                    interactiveMode,
+                    cancellationToken),
+                _ => throw new ArgumentOutOfRangeException(nameof(backend), backend, "Unsupported backend.")
+            }).ConfigureAwait(false);
+
+            trace?.SetSummary($"{response.BackendUsed} {response.Element.Type} {response.Element.XPath}");
+            return response;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     public Task<ReleaseElementResponse> ReleaseElementAsync(string elementId)
@@ -37,6 +85,12 @@ public sealed partial class AutomationController
     private async Task<ResolveElementResponse> ResolveUiaElementAsync(
         ElementLocator locator,
         long? windowHandle,
+        int timeoutMs,
+        int pollIntervalMs,
+        int stableMs,
+        bool visibleOnly,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode,
         CancellationToken cancellationToken)
     {
         var application = EnsureAttached();
@@ -48,9 +102,46 @@ public sealed partial class AutomationController
 
         var hwnd = window.Properties.NativeWindowHandle.Value.ToInt64();
 
+        var start = Stopwatch.GetTimestamp();
+
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
-        var element = ResolveElement(window, locator, controlWalker, rawWalker);
+
+        var element = timeoutMs > 0
+            ? await ResolveUiaElementWithWaitAsync(
+                window,
+                locator,
+                controlWalker,
+                rawWalker,
+                timeoutMs,
+                pollIntervalMs,
+                ActionKind.Inspect,
+                visibleOnly,
+                interactiveOnly,
+                interactiveMode,
+                cancellationToken).ConfigureAwait(false)
+            : ResolveElement(window, locator, controlWalker, rawWalker, ActionKind.Inspect, visibleOnly, interactiveOnly, interactiveMode);
+
+        if (stableMs > 0 && timeoutMs > 0)
+        {
+            var elapsedMs = (int)Math.Round(
+                Stopwatch.GetElapsedTime(start).TotalMilliseconds,
+                MidpointRounding.AwayFromZero);
+            var remainingMs = Math.Max(0, timeoutMs - elapsedMs);
+            if (remainingMs > 0)
+            {
+                await WaitForResolvedElementStateAsync(
+                    element,
+                    WaitForState.Stable,
+                    remainingMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         var xpath = ComputeXPath(window, element, rawWalker);
 
         var elementId = _elementHandles.RegisterUia(
@@ -77,6 +168,12 @@ public sealed partial class AutomationController
     private async Task<ResolveElementResponse> ResolveWpfElementAsync(
         ElementLocator locator,
         long? windowHandle,
+        int timeoutMs,
+        int pollIntervalMs,
+        int stableMs,
+        bool visibleOnly,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode,
         CancellationToken cancellationToken)
     {
         var application = EnsureAttached();
@@ -88,7 +185,25 @@ public sealed partial class AutomationController
 
         var hwnd = window.Properties.NativeWindowHandle.Value.ToInt64();
 
-        var element = await ResolveWpfElementRefAsync(locator, hwnd, cancellationToken).ConfigureAwait(false);
+        var element = timeoutMs > 0
+            ? await ResolveWpfElementRefWithWaitAsync(
+                locator,
+                hwnd,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                visibleOnly,
+                interactiveOnly,
+                interactiveMode,
+                cancellationToken).ConfigureAwait(false)
+            : await ResolveWpfElementRefAsync(
+                locator,
+                hwnd,
+                visibleOnly,
+                interactiveOnly,
+                interactiveMode,
+                cancellationToken).ConfigureAwait(false);
+
         var elementId = _elementHandles.RegisterWpf(
             hwnd,
             element.XPath,
@@ -101,18 +216,135 @@ public sealed partial class AutomationController
         return new ResolveElementResponse(InspectionBackend.Wpf, elementRef, hwnd);
     }
 
-    private async Task<ElementRef> ResolveWpfElementRefAsync(ElementLocator locator, long windowHandle, CancellationToken cancellationToken)
+    private async Task<ElementRef> ResolveWpfElementRefWithWaitAsync(
+        ElementLocator locator,
+        long windowHandle,
+        int timeoutMs,
+        int pollIntervalMs,
+        int stableMs,
+        bool visibleOnly,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode,
+        CancellationToken cancellationToken)
+    {
+        var start = Stopwatch.GetTimestamp();
+        Rect? lastBounds = null;
+        long? stableStartTimestamp = null;
+        var currentLocator = locator;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            ElementRef element;
+            try
+            {
+                element = await ResolveWpfElementRefAsync(
+                    currentLocator,
+                    windowHandle,
+                    visibleOnly,
+                    interactiveOnly,
+                    interactiveMode,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
+            {
+                lastBounds = null;
+                stableStartTimestamp = null;
+
+                var elapsed = Stopwatch.GetElapsedTime(start);
+                if (elapsed.TotalMilliseconds >= timeoutMs)
+                {
+                    throw new InvalidOperationException($"timeout: element not found after {timeoutMs}ms.");
+                }
+
+                await Task.Delay(pollIntervalMs, cancellationToken);
+                continue;
+            }
+
+            if (stableMs <= 0)
+            {
+                return element;
+            }
+
+            var (stable, _) = CheckStableBounds(element.Bounds, stableMs, ref lastBounds, ref stableStartTimestamp);
+            if (stable)
+            {
+                return element;
+            }
+
+            currentLocator = new ElementLocator(XPath: element.XPath, PreferVisible: locator.PreferVisible, Strict: true);
+
+            var totalElapsed = Stopwatch.GetElapsedTime(start);
+            if (totalElapsed.TotalMilliseconds >= timeoutMs)
+            {
+                throw new InvalidOperationException($"timeout: element not stable after {timeoutMs}ms.");
+            }
+
+            await Task.Delay(pollIntervalMs, cancellationToken);
+        }
+    }
+
+    private async Task<ElementRef> ResolveWpfElementRefAsync(
+        ElementLocator locator,
+        long windowHandle,
+        bool visibleOnly,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode,
+        CancellationToken cancellationToken)
     {
         var request = new ResolveWpfElementRequest(
             WindowHandle: windowHandle,
             Locator: locator,
             RootXPath: null,
-            VisibleOnly: true,
+            VisibleOnly: visibleOnly,
+            InteractiveOnly: interactiveOnly,
+            InteractiveMode: interactiveMode,
             MaxNodes: 2000,
             ReturnFields: FindReturnFields.Standard);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
         return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static (bool Satisfied, string? FailureReason) CheckStableBounds(
+        Rect? bounds,
+        int stableMs,
+        ref Rect? lastBounds,
+        ref long? stableStartTimestamp)
+    {
+        if (bounds is null || bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            lastBounds = null;
+            stableStartTimestamp = null;
+            return (false, "invalid_bounds");
+        }
+
+        if (stableMs <= 0)
+        {
+            return (true, null);
+        }
+
+        if (lastBounds is null || bounds != lastBounds)
+        {
+            lastBounds = bounds;
+            stableStartTimestamp = Stopwatch.GetTimestamp();
+            return (false, "unstable");
+        }
+
+        stableStartTimestamp ??= Stopwatch.GetTimestamp();
+        if (Stopwatch.GetElapsedTime(stableStartTimestamp.Value).TotalMilliseconds >= stableMs)
+        {
+            return (true, null);
+        }
+
+        return (false, "unstable");
+    }
+
+    private static bool IsWaitableWpfNotFound(InvalidOperationException ex)
+    {
+        var message = ex.Message ?? string.Empty;
+        return message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase);
     }
 
     private ElementHandle RequireHandle(string elementId)

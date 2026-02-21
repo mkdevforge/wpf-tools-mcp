@@ -571,99 +571,115 @@ public sealed partial class AutomationController : IDisposable
         TakeScreenshotRequest request,
         CancellationToken cancellationToken = default)
     {
-        var application = EnsureAttached();
-        var automation = EnsureAutomation();
-
-        if (request.Locator is not null && !string.IsNullOrWhiteSpace(request.ElementId))
+        var trace = BeginTraceSpan("take_screenshot");
+        try
         {
-            throw new ArgumentException("Provide either locator or elementId, not both.");
-        }
+            var application = EnsureAttached();
+            var automation = EnsureAutomation();
 
-        var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
-
-        Window window;
-        if (hasElementId)
-        {
-            var elementId = request.ElementId!.Trim();
-            var handle = RequireHandle(elementId);
-            if (handle.Backend != InspectionBackend.Uia)
+            if (request.Locator is not null && !string.IsNullOrWhiteSpace(request.ElementId))
             {
-                throw new InvalidOperationException($"elementId '{elementId}' is not a UIA handle.");
+                throw new ArgumentException("Provide either locator or elementId, not both.");
             }
 
-            if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
+
+            Window window;
+            if (hasElementId)
             {
-                throw new ArgumentException("windowHandle does not match the elementId window.");
+                var elementId = request.ElementId!.Trim();
+                var handle = RequireHandle(elementId);
+                if (handle.Backend != InspectionBackend.Uia)
+                {
+                    throw new InvalidOperationException($"elementId '{elementId}' is not a UIA handle.");
+                }
+
+                if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+                {
+                    throw new ArgumentException("windowHandle does not match the elementId window.");
+                }
+
+                try
+                {
+                    window = FindWindowByHandle(application, automation, handle.WindowHandle);
+                }
+                catch
+                {
+                    throw new InvalidOperationException($"stale_element: window_closed for '{elementId}'. Call resolve_element again.");
+                }
+            }
+            else
+            {
+                window = request.WindowHandle is long requestedHandle
+                    ? FindWindowByHandle(application, automation, requestedHandle)
+                    : FindMainWindow(application, automation);
             }
 
-            try
+            await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs + 40, cancellationToken);
+
+            var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+            var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+
+            AutomationElement element;
+            var hasElementTarget = request.Locator is not null || hasElementId;
+            if (hasElementId)
             {
-                window = FindWindowByHandle(application, automation, handle.WindowHandle);
+                element = ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out _);
             }
-            catch
+            else if (request.Locator is not null)
             {
-                throw new InvalidOperationException($"stale_element: window_closed for '{elementId}'. Call resolve_element again.");
+                element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
             }
+            else
+            {
+                element = window;
+            }
+
+            var mode = request.CaptureMode;
+            var captureSettings = new CaptureSettings { OutputScale = 1 };
+            var windowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64();
+
+            var (bitmap, capturedBounds, captureModeUsed) = CaptureScreenshotWithMetadata(
+                window,
+                element,
+                hasElementTarget,
+                mode,
+                captureSettings);
+
+            using var bitmapToSave = bitmap;
+
+            var outputPath = ResolveScreenshotOutputPath(request.OutputPath, request.Format);
+            SaveBitmapWithWic(bitmapToSave, outputPath, request.Format, request.JpegQuality);
+
+            string? base64 = null;
+            if (request.ReturnBase64)
+            {
+                var bytes = await File.ReadAllBytesAsync(outputPath, cancellationToken);
+                base64 = Convert.ToBase64String(bytes);
+            }
+
+            var response = new TakeScreenshotResponse(
+                Path: outputPath,
+                Width: bitmapToSave.Width,
+                Height: bitmapToSave.Height,
+                Format: GetImageFormatName(request.Format),
+                CapturedBounds: capturedBounds,
+                WindowHandleUsed: windowHandleUsed,
+                CaptureModeUsed: captureModeUsed,
+                Base64: base64);
+
+            trace?.SetSummary($"{response.Format} {response.Width}x{response.Height} {Path.GetFileName(response.Path)}");
+            return response;
         }
-        else
+        catch (Exception ex)
         {
-            window = request.WindowHandle is long requestedHandle
-                ? FindWindowByHandle(application, automation, requestedHandle)
-                : FindMainWindow(application, automation);
+            trace?.SetError(ex);
+            throw;
         }
-
-        await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs + 40, cancellationToken);
-
-        var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
-        var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
-
-        AutomationElement element;
-        var hasElementTarget = request.Locator is not null || hasElementId;
-        if (hasElementId)
+        finally
         {
-            element = ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out _);
+            trace?.Dispose();
         }
-        else if (request.Locator is not null)
-        {
-            element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
-        }
-        else
-        {
-            element = window;
-        }
-
-        var mode = request.CaptureMode;
-        var captureSettings = new CaptureSettings { OutputScale = 1 };
-        var windowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64();
-
-        var (bitmap, capturedBounds, captureModeUsed) = CaptureScreenshotWithMetadata(
-            window,
-            element,
-            hasElementTarget,
-            mode,
-            captureSettings);
-
-        using var bitmapToSave = bitmap;
-
-        var outputPath = ResolveScreenshotOutputPath(request.OutputPath, request.Format);
-        SaveBitmapWithWic(bitmapToSave, outputPath, request.Format, request.JpegQuality);
-
-        string? base64 = null;
-        if (request.ReturnBase64)
-        {
-            var bytes = await File.ReadAllBytesAsync(outputPath, cancellationToken);
-            base64 = Convert.ToBase64String(bytes);
-        }
-
-        return new TakeScreenshotResponse(
-            Path: outputPath,
-            Width: bitmapToSave.Width,
-            Height: bitmapToSave.Height,
-            Format: GetImageFormatName(request.Format),
-            CapturedBounds: capturedBounds,
-            WindowHandleUsed: windowHandleUsed,
-            CaptureModeUsed: captureModeUsed,
-            Base64: base64);
     }
 
     private static (Bitmap Bitmap, Rect CapturedBounds, ScreenshotCaptureMode CaptureModeUsed) CaptureScreenshotWithMetadata(
@@ -975,6 +991,9 @@ public sealed partial class AutomationController : IDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var trace = BeginTraceSpan("click_element");
+        try
+        {
         var hasLocator = request.Locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
         if (hasLocator == hasElementId)
@@ -1082,6 +1101,7 @@ public sealed partial class AutomationController : IDisposable
                 {
                     await Task.Delay(UiDelayMs, cancellationToken);
                 }
+                trace?.SetSummary("method=invoke");
                 return new ClickElementResponse(Clicked: true, MethodUsed: "invoke");
             }
         }
@@ -1106,7 +1126,18 @@ public sealed partial class AutomationController : IDisposable
         {
             await Task.Delay(UiDelayMs, cancellationToken);
         }
+        trace?.SetSummary("method=mouse");
         return new ClickElementResponse(Clicked: true, MethodUsed: "mouse");
+    }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     private static bool ShouldAutoPreferInvoke(AutomationElement element)
@@ -1276,6 +1307,9 @@ public sealed partial class AutomationController : IDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var trace = BeginTraceSpan("type_text");
+        try
+        {
         var hasLocator = request.Locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
         if (hasLocator == hasElementId)
@@ -1402,10 +1436,11 @@ public sealed partial class AutomationController : IDisposable
             {
                 await Task.Delay(UiDelayMs, cancellationToken);
             }
+            trace?.SetSummary("method=valuePattern");
             return new TypeTextResponse(Typed: true, MethodUsed: "valuePattern");
         }
 
-        element.Focus();
+         element.Focus();
         if (UiDelayMs > 0)
         {
             await Task.Delay(UiDelayMs, cancellationToken);
@@ -1429,10 +1464,21 @@ public sealed partial class AutomationController : IDisposable
             }
         }
         else if (UiDelayMs > 0)
-        {
-            await Task.Delay(UiDelayMs, cancellationToken);
-        }
+         {
+             await Task.Delay(UiDelayMs, cancellationToken);
+         }
+        trace?.SetSummary("method=keyboard");
         return new TypeTextResponse(Typed: true, MethodUsed: "keyboard");
+    }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     public async Task<SetValueResponse> SetValueAsync(
@@ -2318,6 +2364,9 @@ public sealed partial class AutomationController : IDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var trace = BeginTraceSpan("wait_for");
+        try
+        {
         var hasLocator = request.Locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
         if (hasLocator == hasElementId)
@@ -2344,6 +2393,74 @@ public sealed partial class AutomationController : IDisposable
         var application = EnsureAttached();
         var automation = EnsureAutomation();
 
+        var backendForLocator = request.Backend;
+        if (backendForLocator == InspectionBackend.Auto)
+        {
+            backendForLocator = InspectionBackend.Uia;
+        }
+
+        if (hasElementId)
+        {
+            var elementId = request.ElementId!.Trim();
+            var handle = RequireHandle(elementId);
+
+            if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            {
+                throw new ArgumentException("windowHandle does not match the elementId window.");
+            }
+
+            if (handle.Backend == InspectionBackend.Wpf)
+            {
+                var response = await WaitForWpfAsync(
+                    stateText: request.State,
+                    state,
+                    windowHandle: handle.WindowHandle,
+                    locator: null,
+                    xpath: handle.XPath,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: request.ExpectedValue,
+                    expectedText: request.ExpectedText,
+                    throwOnTimeout: request.ThrowOnTimeout,
+                    cancellationToken).ConfigureAwait(false);
+
+                trace?.SetSummary($"{request.State} succeeded={response.Succeeded} attempts={response.Attempts}");
+                return response;
+            }
+
+            if (handle.Backend != InspectionBackend.Uia)
+            {
+                throw new InvalidOperationException($"elementId '{elementId}' has unsupported backend '{handle.Backend}'.");
+            }
+        }
+
+        if (hasLocator && backendForLocator == InspectionBackend.Wpf)
+        {
+            var uiaWindow = request.WindowHandle is long requestedHandle
+                ? FindWindowByHandle(application, automation, requestedHandle)
+                : FindMainWindow(application, automation);
+
+            var hwnd = uiaWindow.Properties.NativeWindowHandle.Value.ToInt64();
+
+            var response = await WaitForWpfAsync(
+                stateText: request.State,
+                state,
+                windowHandle: hwnd,
+                locator: request.Locator,
+                xpath: null,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: request.ExpectedValue,
+                expectedText: request.ExpectedText,
+                throwOnTimeout: request.ThrowOnTimeout,
+                cancellationToken).ConfigureAwait(false);
+
+            trace?.SetSummary($"{request.State} succeeded={response.Succeeded} attempts={response.Attempts}");
+            return response;
+        }
+
         Window window;
         string? xpathHint = null;
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
@@ -2353,15 +2470,6 @@ public sealed partial class AutomationController : IDisposable
         {
             var elementId = request.ElementId!.Trim();
             var handle = RequireHandle(elementId);
-            if (handle.Backend != InspectionBackend.Uia)
-            {
-                throw new InvalidOperationException($"elementId '{elementId}' is not a UIA handle.");
-            }
-
-            if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
-            {
-                throw new ArgumentException("windowHandle does not match the elementId window.");
-            }
 
             xpathHint = handle.XPath;
 
@@ -2442,6 +2550,7 @@ public sealed partial class AutomationController : IDisposable
             if (satisfied)
             {
                 var elapsedMs = (int)Math.Round(Stopwatch.GetElapsedTime(start).TotalMilliseconds, MidpointRounding.AwayFromZero);
+                trace?.SetSummary($"{request.State} succeeded=true attempts={attempts}");
                 return new WaitForResponse(
                     Succeeded: true,
                     State: request.State,
@@ -2467,11 +2576,348 @@ public sealed partial class AutomationController : IDisposable
                     throw new InvalidOperationException($"timeout: wait_for state='{request.State}' after {timeoutMs}ms ({failureReason ?? "timeout"}).");
                 }
 
+                trace?.SetSummary($"{request.State} succeeded=false attempts={attempts} reason={failureReason ?? "timeout"}");
                 return response;
             }
 
             await Task.Delay(pollIntervalMs, cancellationToken);
         }
+    }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
+    }
+
+    private async Task<WaitForResponse> WaitForWpfAsync(
+        string stateText,
+        WaitForState state,
+        long windowHandle,
+        ElementLocator? locator,
+        string? xpath,
+        int timeoutMs,
+        int pollIntervalMs,
+        int stableMs,
+        double? expectedValue,
+        string? expectedText,
+        bool throwOnTimeout,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(xpath) && locator is null)
+        {
+            throw new ArgumentException("wait_for requires either an elementId (WPF handle) or a locator for backend=wpf.");
+        }
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+        var start = Stopwatch.GetTimestamp();
+        var attempts = 0;
+        WaitForObservation? lastObservation = null;
+
+        Rect? lastBounds = null;
+        long? stableStartTimestamp = null;
+
+        string? currentXPath = string.IsNullOrWhiteSpace(xpath) ? null : NormalizeWpfXPath(xpath);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            attempts++;
+
+            var satisfied = false;
+            string? failureReason = null;
+
+            if (state == WaitForState.ValueEquals)
+            {
+                if (expectedValue is null)
+                {
+                    throw new ArgumentException("expectedValue is required when state=value_equals.");
+                }
+
+                if (string.IsNullOrWhiteSpace(currentXPath))
+                {
+                    try
+                    {
+                        var resolved = await ResolveWpfElementRefAsync(
+                            locator!,
+                            windowHandle,
+                            visibleOnly: false,
+                            interactiveOnly: false,
+                            interactiveMode: InteractiveMode.Heuristic,
+                            cancellationToken).ConfigureAwait(false);
+                        currentXPath = NormalizeWpfXPath(resolved.XPath);
+                    }
+                    catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
+                    {
+                        failureReason = "not_attached";
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(currentXPath))
+                {
+                    try
+                    {
+                        var computed = await client.CallAsync<GetComputedPropertiesResponse>(
+                            "wpf/get_computed_properties",
+                            new GetComputedPropertiesRequest(
+                                WindowHandle: windowHandle,
+                                Locator: new ElementLocator(XPath: currentXPath),
+                                PropertyNames: ["Value", "Text"],
+                                IncludeSources: false,
+                                IncludeDefault: false,
+                                IncludeUnset: true,
+                                MaxProperties: 4,
+                                ValueFormat: "string"),
+                            cancellationToken).ConfigureAwait(false);
+
+                        lastObservation = new WaitForObservation(
+                            Type: computed.Element.Type,
+                            AutomationId: computed.Element.AutomationId,
+                            Name: computed.Element.Name,
+                            XPath: computed.Element.XPath,
+                            Bounds: computed.Element.Bounds,
+                            IsEnabled: null,
+                            IsOffscreen: null);
+
+                        (satisfied, failureReason) = CheckWpfComputedValueEquals(computed.Properties, expectedValue.Value);
+                    }
+                    catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
+                    {
+                        currentXPath = null;
+                        lastObservation = null;
+                        failureReason = "not_attached";
+                    }
+                }
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(currentXPath))
+                {
+                    try
+                    {
+                        var resolved = await ResolveWpfElementRefAsync(
+                            locator!,
+                            windowHandle,
+                            visibleOnly: false,
+                            interactiveOnly: false,
+                            interactiveMode: InteractiveMode.Heuristic,
+                            cancellationToken).ConfigureAwait(false);
+
+                        currentXPath = NormalizeWpfXPath(resolved.XPath);
+
+                        if (state == WaitForState.Attached)
+                        {
+                            lastObservation = new WaitForObservation(
+                                Type: resolved.Type,
+                                AutomationId: resolved.AutomationId,
+                                Name: resolved.Name,
+                                XPath: resolved.XPath,
+                                Bounds: resolved.Bounds,
+                                IsEnabled: null,
+                                IsOffscreen: null);
+
+                            satisfied = true;
+                        }
+                    }
+                    catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
+                    {
+                        failureReason = "not_attached";
+                    }
+                }
+
+                if (!satisfied && !string.IsNullOrWhiteSpace(currentXPath))
+                {
+                    TreeNode? node = null;
+                    try
+                    {
+                        var tree = await client.CallAsync<GetVisualTreeResponse>(
+                            "wpf/get_visual_tree",
+                            new GetWpfVisualTreeRequestV2(
+                                WindowHandle: windowHandle,
+                                RootXPath: currentXPath,
+                                Depth: 1,
+                                MaxNodes: 1,
+                                VisibleOnly: false,
+                                InteractiveOnly: false,
+                                InteractiveMode: InteractiveMode.Heuristic,
+                                Preset: TreePreset.Standard,
+                                Fields: null),
+                            cancellationToken).ConfigureAwait(false);
+
+                        node = tree.Root;
+                    }
+                    catch (InvalidOperationException ex) when (IsWaitableWpfXPathNotFound(ex))
+                    {
+                        currentXPath = null;
+                        lastObservation = null;
+                        failureReason = "not_attached";
+                    }
+
+                    if (node is not null)
+                    {
+                        lastObservation = new WaitForObservation(
+                            Type: node.Type,
+                            AutomationId: node.AutomationId,
+                            Name: node.Name,
+                            XPath: node.XPath,
+                            Bounds: node.Bounds,
+                            IsEnabled: node.IsEnabled,
+                            IsOffscreen: null);
+
+                        (satisfied, failureReason) = CheckWaitForStateWpf(
+                            node,
+                            state,
+                            stableMs,
+                            expectedText,
+                            ref lastBounds,
+                            ref stableStartTimestamp);
+                    }
+                }
+            }
+
+            if (satisfied)
+            {
+                var elapsedMs = (int)Math.Round(Stopwatch.GetElapsedTime(start).TotalMilliseconds, MidpointRounding.AwayFromZero);
+                return new WaitForResponse(
+                    Succeeded: true,
+                    State: stateText,
+                    ElapsedMs: elapsedMs,
+                    Attempts: attempts,
+                    LastObservation: lastObservation);
+            }
+
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (elapsed.TotalMilliseconds >= timeoutMs)
+            {
+                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
+                var response = new WaitForResponse(
+                    Succeeded: false,
+                    State: stateText,
+                    ElapsedMs: elapsedMs,
+                    Attempts: attempts,
+                    LastObservation: lastObservation,
+                    FailureReason: failureReason ?? "timeout");
+
+                if (throwOnTimeout)
+                {
+                    throw new InvalidOperationException($"timeout: wait_for state='{stateText}' after {timeoutMs}ms ({failureReason ?? "timeout"}).");
+                }
+
+                return response;
+            }
+
+            await Task.Delay(pollIntervalMs, cancellationToken);
+        }
+    }
+
+    private static string NormalizeWpfXPath(string xpath)
+    {
+        var trimmed = xpath.Trim();
+        while (trimmed.Length > 0 && trimmed.EndsWith("/", StringComparison.Ordinal))
+        {
+            trimmed = trimmed[..^1];
+        }
+
+        if (trimmed.Equals("/Window", StringComparison.OrdinalIgnoreCase))
+        {
+            return "/Window";
+        }
+
+        return trimmed;
+    }
+
+    private static bool IsWaitableWpfXPathNotFound(InvalidOperationException ex)
+    {
+        var message = ex.Message ?? string.Empty;
+        return message.Contains("XPath segment", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static (bool Satisfied, string? FailureReason) CheckWaitForStateWpf(
+        TreeNode node,
+        WaitForState state,
+        int stableMs,
+        string? expectedText,
+        ref Rect? lastBounds,
+        ref long? stableStartTimestamp)
+    {
+        switch (state)
+        {
+            case WaitForState.Attached:
+                return (true, null);
+            case WaitForState.Visible:
+                if (node.Bounds is null || node.Bounds.Width <= 0 || node.Bounds.Height <= 0)
+                {
+                    return (false, "invalid_bounds");
+                }
+
+                return node.IsVisible == true ? (true, null) : (false, "not_visible");
+            case WaitForState.Enabled:
+                if (node.IsEnabled is null)
+                {
+                    return (false, "enabled_unknown");
+                }
+
+                return node.IsEnabled.Value ? (true, null) : (false, "disabled");
+            case WaitForState.Actionable:
+                if (node.Bounds is null || node.Bounds.Width <= 0 || node.Bounds.Height <= 0)
+                {
+                    return (false, "invalid_bounds");
+                }
+
+                if (node.IsVisible != true)
+                {
+                    return (false, "not_visible");
+                }
+
+                if (node.IsEnabled != true)
+                {
+                    return (false, "disabled");
+                }
+
+                return (true, null);
+            case WaitForState.Stable:
+                return CheckStableBounds(node.Bounds, stableMs, ref lastBounds, ref stableStartTimestamp);
+            case WaitForState.NameContains:
+                if (string.IsNullOrWhiteSpace(expectedText))
+                {
+                    return (false, "expected_text_missing");
+                }
+
+                var name = node.Name ?? "";
+                return name.Contains(expectedText, StringComparison.OrdinalIgnoreCase) ? (true, null) : (false, "name_mismatch");
+            case WaitForState.ValueEquals:
+                throw new InvalidOperationException("ValueEquals is handled separately for WPF.");
+            default:
+                throw new ArgumentOutOfRangeException(nameof(state), state, null);
+        }
+    }
+
+    private static (bool Satisfied, string? FailureReason) CheckWpfComputedValueEquals(
+        IReadOnlyList<ComputedPropertyInfo> properties,
+        double expectedValue)
+    {
+        const double epsilon = 0.01;
+
+        foreach (var name in new[] { "Value", "Text" })
+        {
+            var match = properties.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (match?.Value is null)
+            {
+                continue;
+            }
+
+            if (double.TryParse(match.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+            {
+                return Math.Abs(parsed - expectedValue) <= epsilon ? (true, null) : (false, "value_mismatch");
+            }
+        }
+
+        return (false, "value_not_numeric");
     }
 
     private enum WaitForState
@@ -2540,11 +2986,14 @@ public sealed partial class AutomationController : IDisposable
         ElementLocator locator,
         ITreeWalker controlWalker,
         ITreeWalker rawWalker,
-        ActionKind actionKind)
+        ActionKind actionKind,
+        bool visibleOnly = false,
+        bool interactiveOnly = false,
+        InteractiveMode interactiveMode = InteractiveMode.Heuristic)
     {
         try
         {
-            return ResolveElement(window, locator, controlWalker, rawWalker, actionKind);
+            return ResolveElement(window, locator, controlWalker, rawWalker, actionKind, visibleOnly, interactiveOnly, interactiveMode);
         }
         catch (InvalidOperationException ex) when (IsWaitableNotFound(ex))
         {
@@ -2822,13 +3271,48 @@ public sealed partial class AutomationController : IDisposable
         ActionKind actionKind,
         CancellationToken cancellationToken)
     {
+        return await ResolveUiaElementWithWaitAsync(
+            window,
+            locator,
+            controlWalker,
+            rawWalker,
+            timeoutMs,
+            pollIntervalMs,
+            actionKind,
+            visibleOnly: false,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<AutomationElement> ResolveUiaElementWithWaitAsync(
+        Window window,
+        ElementLocator locator,
+        ITreeWalker controlWalker,
+        ITreeWalker rawWalker,
+        int timeoutMs,
+        int pollIntervalMs,
+        ActionKind actionKind,
+        bool visibleOnly,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode,
+        CancellationToken cancellationToken)
+    {
         var start = Stopwatch.GetTimestamp();
 
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var element = TryResolveWithMissingAsNull(window, locator, controlWalker, rawWalker, actionKind);
+            var element = TryResolveWithMissingAsNull(
+                window,
+                locator,
+                controlWalker,
+                rawWalker,
+                actionKind,
+                visibleOnly,
+                interactiveOnly,
+                interactiveMode);
             if (element is not null)
             {
                 return element;
@@ -5170,7 +5654,10 @@ public sealed partial class AutomationController : IDisposable
         ElementLocator locator,
         ITreeWalker controlWalker,
         ITreeWalker rawWalker,
-        ActionKind actionKind = ActionKind.Inspect)
+        ActionKind actionKind = ActionKind.Inspect,
+        bool visibleOnly = false,
+        bool interactiveOnly = false,
+        InteractiveMode interactiveMode = InteractiveMode.Heuristic)
     {
         if (locator is null)
         {
@@ -5200,10 +5687,20 @@ public sealed partial class AutomationController : IDisposable
                 throw new InvalidOperationException(mismatch);
             }
 
+            if (visibleOnly && !IsVisibleUia(resolved))
+            {
+                throw new InvalidOperationException("Locator did not match any element (visibleOnly=true).");
+            }
+
+            if (interactiveOnly && !IsInteractiveUia(resolved, interactiveMode))
+            {
+                throw new InvalidOperationException("Locator did not match any element (interactiveOnly=true).");
+            }
+
             return resolved;
         }
 
-        var indexOnly = TryResolveByIndexOnly(window, locator, controlWalker);
+        var indexOnly = TryResolveByIndexOnly(window, locator, controlWalker, visibleOnly, interactiveOnly, interactiveMode);
         if (indexOnly is not null)
         {
             return indexOnly;
@@ -5211,6 +5708,8 @@ public sealed partial class AutomationController : IDisposable
 
         var matches = EnumerateSelfAndDescendantsDepthFirst(window, controlWalker)
             .Where(e => MatchesLocatorUia(e, locator))
+            .Where(e => !visibleOnly || IsVisibleUia(e))
+            .Where(e => !interactiveOnly || IsInteractiveUia(e, interactiveMode))
             .ToArray();
 
         if (matches.Length == 0)
@@ -5220,6 +5719,23 @@ public sealed partial class AutomationController : IDisposable
 
         return SelectMatch(matches, locator, actionKind)
             ?? throw new InvalidOperationException("Locator did not match any element.");
+    }
+
+    private static bool IsVisibleUia(AutomationElement element)
+    {
+        if (!HasValidBounds(element))
+        {
+            return false;
+        }
+
+        try
+        {
+            return !element.Properties.IsOffscreen.Value;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool IsEmptyLocator(ElementLocator locator)
@@ -5616,7 +6132,13 @@ public sealed partial class AutomationController : IDisposable
         return current;
     }
 
-    private static AutomationElement? TryResolveByIndexOnly(Window window, ElementLocator locator, ITreeWalker walker)
+    private static AutomationElement? TryResolveByIndexOnly(
+        Window window,
+        ElementLocator locator,
+        ITreeWalker walker,
+        bool visibleOnly,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode)
     {
         if (locator.Index is null)
         {
@@ -5642,7 +6164,18 @@ public sealed partial class AutomationController : IDisposable
             throw new ArgumentOutOfRangeException(nameof(locator), "index must be >= 0.");
         }
 
-        var descendants = EnumerateSelfAndDescendantsDepthFirst(window, walker).Skip(1).ToArray();
+        var query = EnumerateSelfAndDescendantsDepthFirst(window, walker).Skip(1);
+        if (visibleOnly)
+        {
+            query = query.Where(IsVisibleUia);
+        }
+
+        if (interactiveOnly)
+        {
+            query = query.Where(e => IsInteractiveUia(e, interactiveMode));
+        }
+
+        var descendants = query.ToArray();
         if (index >= descendants.Length)
         {
             throw new InvalidOperationException($"index {index} is out of range (found {descendants.Length} descendants).");

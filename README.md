@@ -19,6 +19,11 @@ wpfpilot
 
 The server speaks MCP over **stdio**.
 
+## Debugging tools
+
+- `trace_start` / `trace_stop`: record MCP tool timings and write a JSON trace file (defaults to `%TEMP%`).
+- `performance_start` / `performance_stop`: lightweight UI-thread latency sampling.
+
 ## MCP client config
 
 Example (generic MCP config):
