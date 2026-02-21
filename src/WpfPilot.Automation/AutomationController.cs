@@ -515,13 +515,18 @@ public sealed partial class AutomationController : IDisposable
             throw new InvalidOperationException("No application is attached. Call launch_app or attach_to_app first.");
         }
 
+        var trace = BeginTraceSpan("close_session");
+        try
+        {
         var timeout = request.TimeoutMs <= 0 ? 5000 : request.TimeoutMs;
         var application = _application;
 
         if (!IsApplicationRunning(application))
         {
             Cleanup();
-            return Task.FromResult(new CloseAppResponse(Closed: true));
+            var response = new CloseAppResponse(Closed: true);
+            trace?.SetSummary($"closed={response.Closed}");
+            return Task.FromResult(response);
         }
 
         var closedGracefully = false;
@@ -549,7 +554,19 @@ public sealed partial class AutomationController : IDisposable
 
         var closed = !IsApplicationRunning(application);
         Cleanup();
-        return Task.FromResult(new CloseAppResponse(closed));
+        var result = new CloseAppResponse(closed);
+        trace?.SetSummary($"closed={result.Closed} graceful={closedGracefully} force={request.Force}");
+        return Task.FromResult(result);
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     public Task<ListWindowsResponse> ListWindowsAsync(CancellationToken cancellationToken = default)
@@ -641,66 +658,122 @@ public sealed partial class AutomationController : IDisposable
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
             var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
 
-            AutomationElement element = window;
-            Rect? wpfElementBounds = null;
-            var hasElementTarget = request.Locator is not null || hasElementId;
-            if (hasElementId)
-            {
-                var elementId = request.ElementId!.Trim();
-                if (elementBackend == InspectionBackend.Uia)
-                {
-                    element = ResolveUiaElementById(window, rawWalker, elementId, out _);
-                }
-                else if (elementBackend == InspectionBackend.Wpf)
-                {
-                    var handle = elementHandle ?? RequireHandle(elementId);
-                    var resolved = await ResolveWpfElementRefAsync(
-                        new ElementLocator(XPath: handle.XPath),
-                        handle.WindowHandle,
-                        visibleOnly: true,
-                        interactiveOnly: false,
-                        interactiveMode: InteractiveMode.Heuristic,
-                        cancellationToken).ConfigureAwait(false);
-
-                    wpfElementBounds = resolved.Bounds;
-                }
-                else
-                {
-                    throw new ArgumentOutOfRangeException(nameof(elementBackend), elementBackend, "Unsupported backend.");
-                }
-            }
-            else if (request.Locator is not null)
-            {
-                if (elementBackend == InspectionBackend.Wpf)
-                {
-                    var windowHandleUsedForAgent = window.Properties.NativeWindowHandle.Value.ToInt64();
-                    var resolved = await ResolveWpfElementRefAsync(
-                        request.Locator,
-                        windowHandleUsedForAgent,
-                        visibleOnly: true,
-                        interactiveOnly: false,
-                        interactiveMode: InteractiveMode.Heuristic,
-                        cancellationToken).ConfigureAwait(false);
-
-                    wpfElementBounds = resolved.Bounds;
-                }
-                else if (elementBackend == InspectionBackend.Uia)
-                {
-                    element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
-                }
-                else
-                {
-                    throw new ArgumentOutOfRangeException(nameof(elementBackend), elementBackend, "Unsupported backend.");
-                }
-            }
-
             var mode = request.CaptureMode;
             var captureSettings = new CaptureSettings { OutputScale = 1 };
             var windowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64();
 
-            var (bitmap, capturedBounds, requestedBounds, wasClipped, captureModeUsed) = elementBackend == InspectionBackend.Wpf && hasElementTarget
-                ? CaptureWpfElementScreenshotWithMetadata(window, wpfElementBounds, mode, captureSettings)
-                : CaptureScreenshotWithMetadata(window, element, hasElementTarget, mode, captureSettings);
+            AutomationElement element = window;
+            Rect? wpfElementBounds = null;
+            var hasElementTarget = request.Locator is not null || hasElementId;
+            var backendUsed = elementBackend;
+            var fallbackUsed = false;
+
+            (Bitmap Bitmap, Rect CapturedBounds, Rect? RequestedBounds, bool WasClipped, ScreenshotCaptureMode CaptureModeUsed)? capture = null;
+            var recovered = false;
+
+            try
+            {
+                if (hasElementId)
+                {
+                    var elementId = request.ElementId!.Trim();
+                    if (elementBackend == InspectionBackend.Uia)
+                    {
+                        element = ResolveUiaElementById(window, rawWalker, elementId, out _);
+                    }
+                    else if (elementBackend == InspectionBackend.Wpf)
+                    {
+                        var handle = elementHandle ?? RequireHandle(elementId);
+                        var resolved = await ResolveWpfElementRefAsync(
+                            new ElementLocator(XPath: handle.XPath),
+                            handle.WindowHandle,
+                            visibleOnly: true,
+                            interactiveOnly: false,
+                            interactiveMode: InteractiveMode.Heuristic,
+                            cancellationToken).ConfigureAwait(false);
+
+                        wpfElementBounds = resolved.Bounds;
+                    }
+                    else
+                    {
+                        throw new ArgumentOutOfRangeException(nameof(elementBackend), elementBackend, "Unsupported backend.");
+                    }
+                }
+                else if (request.Locator is not null)
+                {
+                    if (elementBackend == InspectionBackend.Wpf)
+                    {
+                        var resolved = await ResolveWpfElementRefAsync(
+                            request.Locator,
+                            windowHandleUsed,
+                            visibleOnly: true,
+                            interactiveOnly: false,
+                            interactiveMode: InteractiveMode.Heuristic,
+                            cancellationToken).ConfigureAwait(false);
+
+                        wpfElementBounds = resolved.Bounds;
+                    }
+                    else if (elementBackend == InspectionBackend.Uia)
+                    {
+                        element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
+                    }
+                    else
+                    {
+                        throw new ArgumentOutOfRangeException(nameof(elementBackend), elementBackend, "Unsupported backend.");
+                    }
+                }
+
+                capture = elementBackend == InspectionBackend.Wpf && hasElementTarget
+                    ? CaptureWpfElementScreenshotWithMetadata(window, wpfElementBounds, mode, captureSettings)
+                    : CaptureScreenshotWithMetadata(window, element, hasElementTarget, mode, captureSettings);
+            }
+            catch (Exception ex)
+            {
+                if (requestedBackend == InspectionBackend.Auto &&
+                    !hasElementId &&
+                    request.Locator is not null &&
+                    elementBackend == InspectionBackend.Uia &&
+                    IsAgentConnected &&
+                    IsEligibleAutoScreenshotFallback(ex))
+                {
+                    try
+                    {
+                        var resolved = await ResolveWpfElementRefAsync(
+                            request.Locator,
+                            windowHandleUsed,
+                            visibleOnly: true,
+                            interactiveOnly: false,
+                            interactiveMode: InteractiveMode.Heuristic,
+                            cancellationToken).ConfigureAwait(false);
+
+                        wpfElementBounds = resolved.Bounds;
+                        backendUsed = InspectionBackend.Wpf;
+                        fallbackUsed = true;
+
+                        capture = CaptureWpfElementScreenshotWithMetadata(window, wpfElementBounds, mode, captureSettings);
+                        recovered = true;
+                    }
+                    catch (Exception fallbackEx)
+                    {
+                        throw new InvalidOperationException(
+                            "take_screenshot failed using UIA and WPF fallback. " +
+                            $"UIA error: {ex.GetBaseException().Message}. " +
+                            $"WPF error: {fallbackEx.GetBaseException().Message}",
+                            fallbackEx);
+                    }
+                }
+
+                if (!recovered)
+                {
+                    throw;
+                }
+            }
+
+            if (capture is null)
+            {
+                throw new InvalidOperationException("Failed to capture screenshot.");
+            }
+
+            var (bitmap, capturedBounds, requestedBounds, wasClipped, captureModeUsed) = capture.Value;
 
             using var bitmapToSave = bitmap;
 
@@ -726,7 +799,7 @@ public sealed partial class AutomationController : IDisposable
                 CaptureModeUsed: captureModeUsed,
                 Base64: base64);
 
-            trace?.SetSummary($"{response.Format} {response.Width}x{response.Height} {Path.GetFileName(response.Path)}");
+            trace?.SetSummary($"{response.Format} {response.Width}x{response.Height} {Path.GetFileName(response.Path)} backend={backendUsed} fallback={fallbackUsed}");
             return response;
         }
         catch (Exception ex)
@@ -738,6 +811,33 @@ public sealed partial class AutomationController : IDisposable
         {
             trace?.Dispose();
         }
+    }
+
+    private static bool IsEligibleAutoScreenshotFallback(Exception ex)
+    {
+        ex = ex.GetBaseException();
+
+        if (ex is ArgumentException)
+        {
+            return false;
+        }
+
+        if (ex is not InvalidOperationException)
+        {
+            return false;
+        }
+
+        var message = ex.Message ?? "";
+        if (message.Contains("ambiguous", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return message.Contains("Locator did not match any element", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("Element is outside the window client area", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("Failed to compute crop rectangle", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("PrintWindow capture failed", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("Failed to crop element", StringComparison.OrdinalIgnoreCase);
     }
 
     private static (Bitmap Bitmap, Rect CapturedBounds, Rect? RequestedBounds, bool WasClipped, ScreenshotCaptureMode CaptureModeUsed) CaptureScreenshotWithMetadata(
@@ -3958,7 +4058,7 @@ public sealed partial class AutomationController : IDisposable
             ? GetScrollTargetElement(scrollElement, element, rawWalker, controlWalker)
             : element;
 
-        var needsScroll = element.IsOffscreen ||
+        var needsScroll = scrollTarget.IsOffscreen ||
             (scrollElement is not null && IsElementOutsideViewport(scrollElement, scrollTarget));
 
         if (!needsScroll)

@@ -8,6 +8,18 @@ public sealed partial class AutomationController
 {
     private TraceSession? _traceSession;
 
+    public ToolTraceSpan? BeginToolTrace(string tool)
+    {
+        var trace = _traceSession;
+        if (trace is null)
+        {
+            return null;
+        }
+
+        tool = string.IsNullOrWhiteSpace(tool) ? "tool" : tool.Trim();
+        return new ToolTraceSpan(trace, tool);
+    }
+
     public Task<TraceStartResponse> TraceStartAsync(
         bool resetIfRunning,
         CancellationToken cancellationToken = default)
@@ -65,11 +77,17 @@ public sealed partial class AutomationController
             Directory.CreateDirectory(directory);
         }
 
+        TraceEvent[] events;
+        lock (session.Sync)
+        {
+            events = session.Events.ToArray();
+        }
+
         var payload = new TracePayload(
             TraceId: traceId,
             StartedAtUtc: session.StartedAtUtc,
             StoppedAtUtc: stoppedAt,
-            Events: session.Events);
+            Events: events);
 
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(path, json, cancellationToken).ConfigureAwait(false);
@@ -84,19 +102,12 @@ public sealed partial class AutomationController
             Events: includeEvents ? payload.Events : null);
     }
 
-    private TraceSpan? BeginTraceSpan(string tool)
+    private ToolTraceSpan? BeginTraceSpan(string tool)
     {
-        var trace = _traceSession;
-        if (trace is null)
-        {
-            return null;
-        }
-
-        tool = string.IsNullOrWhiteSpace(tool) ? "tool" : tool.Trim();
-        return new TraceSpan(trace, tool);
+        return BeginToolTrace(tool);
     }
 
-    private sealed class TraceSpan : IDisposable
+    public sealed class ToolTraceSpan : IDisposable
     {
         private readonly TraceSession _trace;
         private readonly string _tool;
@@ -105,7 +116,7 @@ public sealed partial class AutomationController
         private string? _summary;
         private string? _error;
 
-        public TraceSpan(TraceSession trace, string tool)
+        internal ToolTraceSpan(TraceSession trace, string tool)
         {
             _trace = trace;
             _tool = tool;
@@ -136,17 +147,22 @@ public sealed partial class AutomationController
                 Stopwatch.GetElapsedTime(_startTimestamp).TotalMilliseconds,
                 MidpointRounding.AwayFromZero);
 
-            _trace.Events.Add(new TraceEvent(
-                Tool: _tool,
-                StartedAtUtc: _startedAtUtc,
-                DurationMs: durationMs,
-                Summary: _summary,
-                Error: _error));
+            lock (_trace.Sync)
+            {
+                _trace.Events.Add(new TraceEvent(
+                    Tool: _tool,
+                    StartedAtUtc: _startedAtUtc,
+                    DurationMs: durationMs,
+                    Summary: _summary,
+                    Error: _error));
+            }
         }
     }
 
-    private sealed record TraceSession(string TraceId, DateTime StartedAtUtc)
+    internal sealed record TraceSession(string TraceId, DateTime StartedAtUtc)
     {
+        public object Sync { get; } = new();
+
         public List<TraceEvent> Events { get; } = [];
     }
 
@@ -156,4 +172,3 @@ public sealed partial class AutomationController
         DateTime StoppedAtUtc,
         IReadOnlyList<TraceEvent> Events);
 }
-

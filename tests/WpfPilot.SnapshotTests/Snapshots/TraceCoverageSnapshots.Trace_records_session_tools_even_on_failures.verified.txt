@@ -1,0 +1,35 @@
+{
+  TraceId: Guid_1,
+  Tools: [
+    {
+      Tool: get_active_window,
+      Present: true,
+      AnySummary: true,
+      AnyError: false
+    },
+    {
+      Tool: subscribe_binding_errors,
+      Present: true,
+      AnySummary: true,
+      AnyError: false
+    },
+    {
+      Tool: poll_subscription,
+      Present: true,
+      AnySummary: false,
+      AnyError: true
+    },
+    {
+      Tool: unsubscribe,
+      Present: true,
+      AnySummary: true,
+      AnyError: false
+    },
+    {
+      Tool: take_screenshot,
+      Present: true,
+      AnySummary: true,
+      AnyError: false
+    }
+  ]
+}

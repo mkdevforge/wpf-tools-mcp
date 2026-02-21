@@ -26,32 +26,50 @@ public static class SubscriptionTools
         {
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
 
-            // Fail fast with a clear message if the agent is not connected.
-            try
+            return await automation.RunExclusiveAsync(async () =>
             {
-                _ = await automation.RunExclusiveAsync(
-                    () => automation.AgentPingAsync(cancellationToken),
-                    cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Agent is not connected. Call inject_agent first. ({ex.Message})");
-            }
+                var trace = automation.BeginToolTrace("subscribe_binding_errors");
+                try
+                {
+                    // Fail fast with a clear message if the agent is not connected.
+                    try
+                    {
+                        _ = await automation.AgentPingAsync(cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new InvalidOperationException($"Agent is not connected. Call inject_agent first. ({ex.Message})");
+                    }
 
-            return subscriptions.SubscribeBindingErrors(
-                sessionId: sessionId,
-                automation: automation,
-                windowHandleUsed: effectiveWindowHandle,
-                rootXPath: rootXPath,
-                depth: depth,
-                maxErrors: maxErrors,
-                maxNodes: maxNodes,
-                pollIntervalMs: pollIntervalMs,
-                maxQueue: maxQueue);
+                    var response = subscriptions.SubscribeBindingErrors(
+                        sessionId: sessionId,
+                        automation: automation,
+                        windowHandleUsed: effectiveWindowHandle,
+                        rootXPath: rootXPath,
+                        depth: depth,
+                        maxErrors: maxErrors,
+                        maxNodes: maxNodes,
+                        pollIntervalMs: pollIntervalMs,
+                        maxQueue: maxQueue);
+
+                    trace?.SetSummary($"id={response.SubscriptionId} pollMs={pollIntervalMs} maxQueue={maxQueue}");
+                    return response;
+                }
+                catch (Exception ex)
+                {
+                    trace?.SetError(ex);
+                    throw;
+                }
+                finally
+                {
+                    trace?.Dispose();
+                }
+            }, cancellationToken);
         });
 
     [McpServerTool(Name = "poll_subscription"), Description("Poll a subscription for queued events.")]
     public static Task<PollSubscriptionResponse> PollSubscription(
+        SessionManager sessions,
         SubscriptionManager subscriptions,
         [Description("Session ID")] string sessionId,
         [Description("Subscription ID")] string subscriptionId,
@@ -59,13 +77,72 @@ public static class SubscriptionTools
         [Description("Wait up to timeout for at least one event (ms). 0 = do not wait.")] int timeoutMs = 0,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-            subscriptions.PollAsync(sessionId, subscriptionId, maxBatch, timeoutMs, cancellationToken));
+        {
+            AutomationController? automation = null;
+            try
+            {
+                (automation, _) = sessions.GetController(sessionId);
+            }
+            catch
+            {
+            }
+
+            var trace = automation?.BeginToolTrace("poll_subscription");
+            return TraceAsync();
+
+            async Task<PollSubscriptionResponse> TraceAsync()
+            {
+                try
+                {
+                    var response = await subscriptions.PollAsync(sessionId, subscriptionId, maxBatch, timeoutMs, cancellationToken);
+                    trace?.SetSummary($"events={response.Events.Count} dropped={response.Dropped} hasMore={response.HasMore}");
+                    return response;
+                }
+                catch (Exception ex)
+                {
+                    trace?.SetError(ex);
+                    throw;
+                }
+                finally
+                {
+                    trace?.Dispose();
+                }
+            }
+        });
 
     [McpServerTool(Name = "unsubscribe"), Description("Unsubscribe a subscription.")]
     public static Task<UnsubscribeResponse> Unsubscribe(
+        SessionManager sessions,
         SubscriptionManager subscriptions,
         [Description("Session ID")] string sessionId,
         [Description("Subscription ID")] string subscriptionId,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() => Task.FromResult(subscriptions.Unsubscribe(sessionId, subscriptionId)));
+        McpToolErrors.RunAsync(() =>
+        {
+            AutomationController? automation = null;
+            try
+            {
+                (automation, _) = sessions.GetController(sessionId);
+            }
+            catch
+            {
+            }
+
+            var trace = automation?.BeginToolTrace("unsubscribe");
+            try
+            {
+                var response = subscriptions.Unsubscribe(sessionId, subscriptionId);
+                trace?.SetSummary($"unsubscribed={response.Unsubscribed}");
+                return Task.FromResult(response);
+            }
+            catch (Exception ex)
+            {
+                trace?.SetError(ex);
+                throw;
+            }
+            finally
+            {
+                trace?.Dispose();
+            }
+        });
 }

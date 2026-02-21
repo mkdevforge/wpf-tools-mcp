@@ -1626,17 +1626,34 @@ internal static class WpfVisualTreeInspector
 
     private static void RestoreHighlightOptions()
     {
-        if (_savedHighlightBorderBrush is null || _savedHighlightBorderThickness is null || _savedHighlightEnabled is null)
-        {
-            return;
-        }
+        var thickness = _savedHighlightBorderThickness;
+        var enabled = _savedHighlightEnabled;
+        var brush = _savedHighlightBorderBrush;
 
         try
         {
+            if (thickness is null || enabled is null)
+            {
+                return;
+            }
+
             var options = SelectionHighlightOptions.Default;
-            options.BorderBrush = _savedHighlightBorderBrush;
-            options.BorderThickness = _savedHighlightBorderThickness.Value;
-            options.HighlightSelectedItem = _savedHighlightEnabled.Value;
+            try
+            {
+                options.BorderThickness = thickness.Value;
+                options.HighlightSelectedItem = enabled.Value;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                options.BorderBrush = brush!;
+            }
+            catch
+            {
+            }
         }
         catch
         {

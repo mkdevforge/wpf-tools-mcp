@@ -165,23 +165,42 @@ public sealed class SessionManager : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
 
         var session = GetSession(sessionId);
-        var (handle, title) = session.GetActiveWindow();
-
-        if (handle != 0 && IsWindowHandleValid(handle, session.Pid))
+        return await session.Controller.RunExclusiveAsync(async () =>
         {
-            return new GetActiveWindowResponse(handle, title);
-        }
+            var trace = session.Controller.BeginToolTrace("get_active_window");
+            try
+            {
+                var (handle, title) = session.GetActiveWindow();
 
-        if (handle != 0 && !IsWindowHandleValid(handle, session.Pid))
-        {
-            session.SetActiveWindow(0, "");
-        }
+                if (handle != 0 && IsWindowHandleValid(handle, session.Pid))
+                {
+                    var response = new GetActiveWindowResponse(handle, title);
+                    trace?.SetSummary($"handle={response.Handle} title={response.Title}");
+                    return response;
+                }
 
-        var focused = await session.Controller.RunExclusiveAsync(
-            () => session.Controller.FocusWindowAsync(new FocusWindowRequest(), cancellationToken),
-            cancellationToken);
-        session.SetActiveWindow(focused.Handle, focused.Title);
-        return new GetActiveWindowResponse(focused.Handle, focused.Title);
+                if (handle != 0 && !IsWindowHandleValid(handle, session.Pid))
+                {
+                    session.SetActiveWindow(0, "");
+                }
+
+                var focused = await session.Controller.FocusWindowAsync(new FocusWindowRequest(), cancellationToken);
+                session.SetActiveWindow(focused.Handle, focused.Title);
+
+                var result = new GetActiveWindowResponse(focused.Handle, focused.Title);
+                trace?.SetSummary($"handle={result.Handle} title={result.Title}");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                trace?.SetError(ex);
+                throw;
+            }
+            finally
+            {
+                trace?.Dispose();
+            }
+        }, cancellationToken);
     }
 
     public (AutomationController Controller, long? WindowHandle) GetController(string sessionId, long? windowHandleOverride = null)
