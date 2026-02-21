@@ -116,7 +116,9 @@ public sealed class BrokenAutomationSnapshots
                     ["locator"] = new Dictionary<string, object?>
                     {
                         ["className"] = "NoPeerControl"
-                    }
+                    },
+                    ["timeoutMs"] = 250,
+                    ["pollIntervalMs"] = 50,
                 });
                 Assert.Fail("Expected click_element to fail because NoPeerControl is not exposed via UIA.");
             }

@@ -4,6 +4,7 @@ using System.Drawing.Imaging;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Windows.Media.Imaging;
@@ -25,7 +26,7 @@ public sealed partial class AutomationController : IDisposable
     private UIA3Automation? _automation;
     private readonly SemaphoreSlim _toolMutex = new(1, 1);
 
-    private static readonly int UiDelayMs = GetEnvInt("WPFPILOT_UI_DELAY_MS", defaultValue: 30, minValue: 0, maxValue: 1000);
+    private static readonly int UiDelayMs = GetEnvInt("WPFPILOT_UI_DELAY_MS", defaultValue: 0, minValue: 0, maxValue: 1000);
     private static readonly int UiDelayScrollMs = GetEnvInt("WPFPILOT_UI_SCROLL_DELAY_MS", defaultValue: 35, minValue: 0, maxValue: 1000);
     private static readonly int UiDelayWindowSettleMs = GetEnvInt("WPFPILOT_UI_WINDOW_SETTLE_MS", defaultValue: 60, minValue: 0, maxValue: 5000);
     private static readonly bool ScreenshotDebugEnabled =
@@ -984,6 +985,10 @@ public sealed partial class AutomationController : IDisposable
         var application = EnsureAttached();
         var automation = EnsureAutomation();
 
+        var timeoutMs = Math.Clamp(request.TimeoutMs, 0, 60_000);
+        var pollIntervalMs = Math.Clamp(request.PollIntervalMs, 25, 2000);
+        var stableMs = Math.Clamp(request.StableMs, 0, 5000);
+
         Window window;
         AutomationElement element;
 
@@ -1023,10 +1028,45 @@ public sealed partial class AutomationController : IDisposable
             await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
-            element = ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+            element = request.AutoWait
+                ? await ResolveUiaElementWithWaitAsync(
+                    window,
+                    request.Locator!,
+                    controlWalker,
+                    rawWalker,
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken)
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
         }
 
         TryScrollIntoView(element);
+
+        if (request.AutoWait)
+        {
+            if (stableMs > 0)
+            {
+                await WaitForResolvedElementStateAsync(
+                    element,
+                    WaitForState.Stable,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken);
+            }
+
+            await WaitForResolvedElementStateAsync(
+                element,
+                WaitForState.Actionable,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: null,
+                expectedText: null,
+                cancellationToken);
+        }
 
         if (request.ClickType == ClickType.Single &&
             request.ClickMode != ClickMode.MouseAlways)
@@ -1037,7 +1077,10 @@ public sealed partial class AutomationController : IDisposable
             if (shouldTryInvoke && element.Patterns.Invoke.PatternOrDefault is { } invoke)
             {
                 invoke.Invoke();
-                await Task.Delay(UiDelayMs, cancellationToken);
+                if (UiDelayMs > 0)
+                {
+                    await Task.Delay(UiDelayMs, cancellationToken);
+                }
                 return new ClickElementResponse(Clicked: true, MethodUsed: "invoke");
             }
         }
@@ -1058,7 +1101,10 @@ public sealed partial class AutomationController : IDisposable
                 throw new ArgumentOutOfRangeException(nameof(request), $"Unknown clickType '{request.ClickType}'.");
         }
 
-        await Task.Delay(UiDelayMs, cancellationToken);
+        if (UiDelayMs > 0)
+        {
+            await Task.Delay(UiDelayMs, cancellationToken);
+        }
         return new ClickElementResponse(Clicked: true, MethodUsed: "mouse");
     }
 
@@ -1124,6 +1170,10 @@ public sealed partial class AutomationController : IDisposable
         var application = EnsureAttached();
         var automation = EnsureAutomation();
 
+        var timeoutMs = Math.Clamp(request.TimeoutMs, 0, 60_000);
+        var pollIntervalMs = Math.Clamp(request.PollIntervalMs, 25, 2000);
+        var stableMs = Math.Clamp(request.StableMs, 0, 5000);
+
         Window window;
         AutomationElement element;
 
@@ -1163,10 +1213,45 @@ public sealed partial class AutomationController : IDisposable
             await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
-            element = ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+            element = request.AutoWait
+                ? await ResolveUiaElementWithWaitAsync(
+                    window,
+                    request.Locator!,
+                    controlWalker,
+                    rawWalker,
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken)
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
         }
 
         TryScrollIntoView(element);
+
+        if (request.AutoWait)
+        {
+            if (stableMs > 0)
+            {
+                await WaitForResolvedElementStateAsync(
+                    element,
+                    WaitForState.Stable,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken);
+            }
+
+            await WaitForResolvedElementStateAsync(
+                element,
+                WaitForState.Enabled,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: null,
+                expectedText: null,
+                cancellationToken);
+        }
 
         var invoke = element.Patterns.Invoke.PatternOrDefault;
         if (invoke is null)
@@ -1176,7 +1261,10 @@ public sealed partial class AutomationController : IDisposable
         }
 
         invoke.Invoke();
-        await Task.Delay(UiDelayMs, cancellationToken);
+        if (UiDelayMs > 0)
+        {
+            await Task.Delay(UiDelayMs, cancellationToken);
+        }
         return new InvokeResponse(Invoked: true);
     }
 
@@ -1201,6 +1289,10 @@ public sealed partial class AutomationController : IDisposable
         var application = EnsureAttached();
         var automation = EnsureAutomation();
 
+        var timeoutMs = Math.Clamp(request.TimeoutMs, 0, 60_000);
+        var pollIntervalMs = Math.Clamp(request.PollIntervalMs, 25, 2000);
+        var stableMs = Math.Clamp(request.StableMs, 0, 5000);
+
         Window window;
         AutomationElement element;
 
@@ -1240,27 +1332,103 @@ public sealed partial class AutomationController : IDisposable
             await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
-            element = ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+            element = request.AutoWait
+                ? await ResolveUiaElementWithWaitAsync(
+                    window,
+                    request.Locator!,
+                    controlWalker,
+                    rawWalker,
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken)
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
         }
 
         TryScrollIntoView(element);
+
+        if (request.AutoWait)
+        {
+            if (stableMs > 0)
+            {
+                await WaitForResolvedElementStateAsync(
+                    element,
+                    WaitForState.Stable,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken);
+            }
+
+            await WaitForResolvedElementStateAsync(
+                element,
+                WaitForState.Visible,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: null,
+                expectedText: null,
+                cancellationToken);
+
+            await WaitForResolvedElementStateAsync(
+                element,
+                WaitForState.Enabled,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: null,
+                expectedText: null,
+                cancellationToken);
+        }
 
         var valuePattern = element.Patterns.Value.PatternOrDefault;
         if (valuePattern is not null && valuePattern.IsReadOnly == false)
         {
             valuePattern.SetValue(request.Text);
-            await Task.Delay(UiDelayMs, cancellationToken);
+            if (request.AutoWait)
+            {
+                await WaitForValuePatternTextAsync(
+                    valuePattern,
+                    expected: request.Text,
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken);
+            }
+            else if (UiDelayMs > 0)
+            {
+                await Task.Delay(UiDelayMs, cancellationToken);
+            }
             return new TypeTextResponse(Typed: true, MethodUsed: "valuePattern");
         }
 
         element.Focus();
-        await Task.Delay(UiDelayMs, cancellationToken);
+        if (UiDelayMs > 0)
+        {
+            await Task.Delay(UiDelayMs, cancellationToken);
+        }
 
         Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
         Keyboard.Type(VirtualKeyShort.DELETE);
         Keyboard.Type(request.Text);
 
-        await Task.Delay(UiDelayMs, cancellationToken);
+        if (request.AutoWait)
+        {
+            var afterValuePattern = element.Patterns.Value.PatternOrDefault;
+            if (afterValuePattern is not null && afterValuePattern.IsReadOnly == false)
+            {
+                await WaitForValuePatternTextAsync(
+                    afterValuePattern,
+                    expected: request.Text,
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken);
+            }
+        }
+        else if (UiDelayMs > 0)
+        {
+            await Task.Delay(UiDelayMs, cancellationToken);
+        }
         return new TypeTextResponse(Typed: true, MethodUsed: "keyboard");
     }
 
@@ -1280,6 +1448,10 @@ public sealed partial class AutomationController : IDisposable
         var application = EnsureAttached();
         var automation = EnsureAutomation();
 
+        var timeoutMs = Math.Clamp(request.TimeoutMs, 0, 60_000);
+        var pollIntervalMs = Math.Clamp(request.PollIntervalMs, 25, 2000);
+        var stableMs = Math.Clamp(request.StableMs, 0, 5000);
+
         Window window;
         AutomationElement element;
 
@@ -1319,16 +1491,68 @@ public sealed partial class AutomationController : IDisposable
             await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
-            element = ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+            element = request.AutoWait
+                ? await ResolveUiaElementWithWaitAsync(
+                    window,
+                    request.Locator!,
+                    controlWalker,
+                    rawWalker,
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken)
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
         }
 
         TryScrollIntoView(element);
+
+        if (request.AutoWait)
+        {
+            if (stableMs > 0)
+            {
+                await WaitForResolvedElementStateAsync(
+                    element,
+                    WaitForState.Stable,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken);
+            }
+
+            await WaitForResolvedElementStateAsync(
+                element,
+                WaitForState.Visible,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: null,
+                expectedText: null,
+                cancellationToken);
+
+            await WaitForResolvedElementStateAsync(
+                element,
+                WaitForState.Enabled,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: null,
+                expectedText: null,
+                cancellationToken);
+        }
 
         var rangeValue = element.Patterns.RangeValue.PatternOrDefault;
         if (rangeValue is not null && rangeValue.IsReadOnly == false)
         {
             rangeValue.SetValue(request.Value);
-            await Task.Delay(UiDelayMs, cancellationToken);
+            if (request.AutoWait)
+            {
+                await WaitForRangeValueAsync(rangeValue, expected: request.Value, timeoutMs, pollIntervalMs, cancellationToken);
+            }
+            else if (UiDelayMs > 0)
+            {
+                await Task.Delay(UiDelayMs, cancellationToken);
+            }
             return new SetValueResponse(Set: true, MethodUsed: "rangeValue");
         }
 
@@ -1336,7 +1560,19 @@ public sealed partial class AutomationController : IDisposable
         if (valuePattern is not null && valuePattern.IsReadOnly == false)
         {
             valuePattern.SetValue(request.Value.ToString(CultureInfo.InvariantCulture));
-            await Task.Delay(UiDelayMs, cancellationToken);
+            if (request.AutoWait)
+            {
+                await WaitForValuePatternTextAsync(
+                    valuePattern,
+                    expected: request.Value.ToString(CultureInfo.InvariantCulture),
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken);
+            }
+            else if (UiDelayMs > 0)
+            {
+                await Task.Delay(UiDelayMs, cancellationToken);
+            }
             return new SetValueResponse(Set: true, MethodUsed: "valuePattern");
         }
 
@@ -1380,6 +1616,10 @@ public sealed partial class AutomationController : IDisposable
         var application = EnsureAttached();
         var automation = EnsureAutomation();
 
+        var timeoutMs = Math.Clamp(request.TimeoutMs, 0, 60_000);
+        var pollIntervalMs = Math.Clamp(request.PollIntervalMs, 25, 2000);
+        var stableMs = Math.Clamp(request.StableMs, 0, 5000);
+
         Window window;
         AutomationElement container;
 
@@ -1419,10 +1659,55 @@ public sealed partial class AutomationController : IDisposable
                 : FindMainWindow(application, automation);
 
             await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
-            container = ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+            container = request.AutoWait
+                ? await ResolveUiaElementWithWaitAsync(
+                    window,
+                    request.Locator!,
+                    controlWalker,
+                    rawWalker,
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken)
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
         }
 
         TryScrollIntoView(container);
+
+        if (request.AutoWait)
+        {
+            if (stableMs > 0)
+            {
+                await WaitForResolvedElementStateAsync(
+                    container,
+                    WaitForState.Stable,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken);
+            }
+
+            await WaitForResolvedElementStateAsync(
+                container,
+                WaitForState.Visible,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: null,
+                expectedText: null,
+                cancellationToken);
+
+            await WaitForResolvedElementStateAsync(
+                container,
+                WaitForState.Enabled,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: null,
+                expectedText: null,
+                cancellationToken);
+        }
 
         if (hasItemElementId)
         {
@@ -1442,7 +1727,10 @@ public sealed partial class AutomationController : IDisposable
             TryScrollIntoView(item);
             SelectItemElement(item);
 
-            await Task.Delay(UiDelayMs, cancellationToken);
+            if (UiDelayMs > 0)
+            {
+                await Task.Delay(UiDelayMs, cancellationToken);
+            }
             return new SelectItemResponse(Selected: true);
         }
 
@@ -1456,7 +1744,10 @@ public sealed partial class AutomationController : IDisposable
             TryScrollIntoView(item);
             SelectItemElement(item);
 
-            await Task.Delay(UiDelayMs, cancellationToken);
+            if (UiDelayMs > 0)
+            {
+                await Task.Delay(UiDelayMs, cancellationToken);
+            }
             return new SelectItemResponse(Selected: true);
         }
 
@@ -1472,7 +1763,10 @@ public sealed partial class AutomationController : IDisposable
                 comboBox.Select(request.Text!);
             }
 
-            await Task.Delay(UiDelayMs, cancellationToken);
+            if (UiDelayMs > 0)
+            {
+                await Task.Delay(UiDelayMs, cancellationToken);
+            }
             return new SelectItemResponse(Selected: true);
         }
 
@@ -1536,7 +1830,10 @@ public sealed partial class AutomationController : IDisposable
         TryScrollIntoView(selectedItem);
         SelectItemElement(selectedItem);
 
-        await Task.Delay(UiDelayMs, cancellationToken);
+        if (UiDelayMs > 0)
+        {
+            await Task.Delay(UiDelayMs, cancellationToken);
+        }
         return new SelectItemResponse(Selected: true);
     }
 
@@ -1560,6 +1857,10 @@ public sealed partial class AutomationController : IDisposable
 
         var application = EnsureAttached();
         var automation = EnsureAutomation();
+
+        var timeoutMs = Math.Clamp(request.TimeoutMs, 0, 60_000);
+        var pollIntervalMs = Math.Clamp(request.PollIntervalMs, 25, 2000);
+        var stableMs = Math.Clamp(request.StableMs, 0, 5000);
 
         Window window;
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
@@ -1647,7 +1948,16 @@ public sealed partial class AutomationController : IDisposable
         }
         else
         {
-            element = ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+            element = request.AutoWait
+                ? await ResolveUiaElementWithWaitAsync(
+                    window,
+                    request.Locator!,
+                    controlWalker,
+                    rawWalker,
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken)
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
         }
 
         var elementToScroll = element;
@@ -1686,6 +1996,32 @@ public sealed partial class AutomationController : IDisposable
             controlWalker,
             rawWalker,
             cancellationToken);
+
+        if (request.AutoWait)
+        {
+            if (stableMs > 0)
+            {
+                await WaitForResolvedElementStateAsync(
+                    elementToScroll,
+                    WaitForState.Stable,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken);
+            }
+
+            await WaitForResolvedElementStateAsync(
+                elementToScroll,
+                WaitForState.Visible,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: null,
+                expectedText: null,
+                cancellationToken);
+        }
 
         var methodUsed = scrolledDuringSearch
             ? bringIntoViewMethod == "alreadyVisible"
@@ -1737,6 +2073,10 @@ public sealed partial class AutomationController : IDisposable
 
         var application = EnsureAttached();
         var automation = EnsureAutomation();
+
+        var timeoutMs = Math.Clamp(request.TimeoutMs, 0, 60_000);
+        var pollIntervalMs = Math.Clamp(request.PollIntervalMs, 25, 2000);
+        var stableMs = Math.Clamp(request.StableMs, 0, 5000);
 
         Window window;
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
@@ -1804,8 +2144,43 @@ public sealed partial class AutomationController : IDisposable
 
         var source = hasElementId
             ? ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out _)
-            : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+            : request.AutoWait
+                ? await ResolveUiaElementWithWaitAsync(
+                    window,
+                    request.Locator!,
+                    controlWalker,
+                    rawWalker,
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken)
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
         TryScrollIntoView(source);
+
+        if (request.AutoWait)
+        {
+            if (stableMs > 0)
+            {
+                await WaitForResolvedElementStateAsync(
+                    source,
+                    WaitForState.Stable,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken);
+            }
+
+            await WaitForResolvedElementStateAsync(
+                source,
+                WaitForState.Actionable,
+                timeoutMs,
+                pollIntervalMs,
+                stableMs,
+                expectedValue: null,
+                expectedText: null,
+                cancellationToken);
+        }
 
         var start = GetDragPoint(source);
 
@@ -1814,12 +2189,71 @@ public sealed partial class AutomationController : IDisposable
         {
             var target = ResolveUiaElementById(window, rawWalker, request.TargetElementId!.Trim(), out _);
             TryScrollIntoView(target);
+            if (request.AutoWait)
+            {
+                if (stableMs > 0)
+                {
+                    await WaitForResolvedElementStateAsync(
+                        target,
+                        WaitForState.Stable,
+                        timeoutMs,
+                        pollIntervalMs,
+                        stableMs,
+                        expectedValue: null,
+                        expectedText: null,
+                        cancellationToken);
+                }
+
+                await WaitForResolvedElementStateAsync(
+                    target,
+                    WaitForState.Visible,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken);
+            }
             end = GetDragPoint(target);
         }
         else if (request.TargetLocator is not null)
         {
-            var target = ResolveElement(window, request.TargetLocator, controlWalker, rawWalker);
+            var target = request.AutoWait
+                ? await ResolveUiaElementWithWaitAsync(
+                    window,
+                    request.TargetLocator,
+                    controlWalker,
+                    rawWalker,
+                    timeoutMs,
+                    pollIntervalMs,
+                    cancellationToken)
+                : ResolveElement(window, request.TargetLocator, controlWalker, rawWalker);
             TryScrollIntoView(target);
+            if (request.AutoWait)
+            {
+                if (stableMs > 0)
+                {
+                    await WaitForResolvedElementStateAsync(
+                        target,
+                        WaitForState.Stable,
+                        timeoutMs,
+                        pollIntervalMs,
+                        stableMs,
+                        expectedValue: null,
+                        expectedText: null,
+                        cancellationToken);
+                }
+
+                await WaitForResolvedElementStateAsync(
+                    target,
+                    WaitForState.Visible,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken);
+            }
             end = GetDragPoint(target);
         }
         else
@@ -1863,8 +2297,645 @@ public sealed partial class AutomationController : IDisposable
             }
         }
 
-        await Task.Delay(UiDelayMs, cancellationToken);
+        if (UiDelayMs > 0)
+        {
+            await Task.Delay(UiDelayMs, cancellationToken);
+        }
         return new DragResponse(Dragged: true, MethodUsed: "mouse");
+    }
+
+    public async Task<WaitForResponse> WaitForAsync(
+        WaitForRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var hasLocator = request.Locator is not null;
+        var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
+        if (hasLocator == hasElementId)
+        {
+            throw new ArgumentException("wait_for requires exactly one of: locator OR elementId.");
+        }
+
+        var state = ParseWaitForState(request.State);
+
+        if (state == WaitForState.ValueEquals && request.ExpectedValue is null)
+        {
+            throw new ArgumentException("expectedValue is required when state=value_equals.");
+        }
+
+        if (state == WaitForState.NameContains && string.IsNullOrWhiteSpace(request.ExpectedText))
+        {
+            throw new ArgumentException("expectedText is required when state=name_contains.");
+        }
+
+        var timeoutMs = Math.Clamp(request.TimeoutMs, 0, 60_000);
+        var pollIntervalMs = Math.Clamp(request.PollIntervalMs, 25, 2000);
+        var stableMs = Math.Clamp(request.StableMs, 0, 5000);
+
+        var application = EnsureAttached();
+        var automation = EnsureAutomation();
+
+        Window window;
+        string? xpathHint = null;
+        var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+        var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+
+        if (hasElementId)
+        {
+            var elementId = request.ElementId!.Trim();
+            var handle = RequireHandle(elementId);
+            if (handle.Backend != InspectionBackend.Uia)
+            {
+                throw new InvalidOperationException($"elementId '{elementId}' is not a UIA handle.");
+            }
+
+            if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            {
+                throw new ArgumentException("windowHandle does not match the elementId window.");
+            }
+
+            xpathHint = handle.XPath;
+
+            try
+            {
+                window = FindWindowByHandle(application, automation, handle.WindowHandle);
+            }
+            catch
+            {
+                throw new InvalidOperationException($"stale_element: window_closed for '{elementId}'. Call resolve_element again.");
+            }
+        }
+        else
+        {
+            window = request.WindowHandle is long requestedHandle
+                ? FindWindowByHandle(application, automation, requestedHandle)
+                : FindMainWindow(application, automation);
+
+            xpathHint = request.Locator?.XPath;
+        }
+
+        var start = Stopwatch.GetTimestamp();
+        var attempts = 0;
+        WaitForObservation? lastObservation = null;
+
+        Rectangle? lastBounds = null;
+        long? stableStartTimestamp = null;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            attempts++;
+
+            AutomationElement? element;
+            try
+            {
+                if (hasElementId)
+                {
+                    element = ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out _);
+                }
+                else
+                {
+                    element = TryResolveWithMissingAsNull(window, request.Locator!, controlWalker, rawWalker);
+                }
+            }
+            catch
+            {
+                throw;
+            }
+
+            var satisfied = false;
+            string? failureReason = null;
+
+            if (element is null)
+            {
+                if (state == WaitForState.Attached)
+                {
+                    failureReason = "not_attached";
+                }
+                else
+                {
+                    failureReason = "not_attached";
+                }
+            }
+            else
+            {
+                lastObservation = BuildWaitObservation(window, element, rawWalker, xpathHint);
+                (satisfied, failureReason) = CheckWaitForState(
+                    element,
+                    state,
+                    expectedValue: request.ExpectedValue,
+                    expectedText: request.ExpectedText,
+                    stableMs: stableMs,
+                    ref lastBounds,
+                    ref stableStartTimestamp);
+            }
+
+            if (satisfied)
+            {
+                var elapsedMs = (int)Math.Round(Stopwatch.GetElapsedTime(start).TotalMilliseconds, MidpointRounding.AwayFromZero);
+                return new WaitForResponse(
+                    Succeeded: true,
+                    State: request.State,
+                    ElapsedMs: elapsedMs,
+                    Attempts: attempts,
+                    LastObservation: lastObservation);
+            }
+
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (elapsed.TotalMilliseconds >= timeoutMs)
+            {
+                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
+                var response = new WaitForResponse(
+                    Succeeded: false,
+                    State: request.State,
+                    ElapsedMs: elapsedMs,
+                    Attempts: attempts,
+                    LastObservation: lastObservation,
+                    FailureReason: failureReason ?? "timeout");
+
+                if (request.ThrowOnTimeout)
+                {
+                    throw new InvalidOperationException($"timeout: wait_for state='{request.State}' after {timeoutMs}ms ({failureReason ?? "timeout"}).");
+                }
+
+                return response;
+            }
+
+            await Task.Delay(pollIntervalMs, cancellationToken);
+        }
+    }
+
+    private enum WaitForState
+    {
+        Attached,
+        Visible,
+        Enabled,
+        Actionable,
+        Stable,
+        ValueEquals,
+        NameContains
+    }
+
+    private static WaitForState ParseWaitForState(string? state)
+    {
+        if (string.IsNullOrWhiteSpace(state))
+        {
+            return WaitForState.Visible;
+        }
+
+        var value = state.Trim();
+        if (value.Equals("attached", StringComparison.OrdinalIgnoreCase))
+        {
+            return WaitForState.Attached;
+        }
+
+        if (value.Equals("visible", StringComparison.OrdinalIgnoreCase))
+        {
+            return WaitForState.Visible;
+        }
+
+        if (value.Equals("enabled", StringComparison.OrdinalIgnoreCase))
+        {
+            return WaitForState.Enabled;
+        }
+
+        if (value.Equals("actionable", StringComparison.OrdinalIgnoreCase))
+        {
+            return WaitForState.Actionable;
+        }
+
+        if (value.Equals("stable", StringComparison.OrdinalIgnoreCase))
+        {
+            return WaitForState.Stable;
+        }
+
+        if (value.Equals("value_equals", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("valueEquals", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("valueequals", StringComparison.OrdinalIgnoreCase))
+        {
+            return WaitForState.ValueEquals;
+        }
+
+        if (value.Equals("name_contains", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("nameContains", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("namecontains", StringComparison.OrdinalIgnoreCase))
+        {
+            return WaitForState.NameContains;
+        }
+
+        throw new ArgumentException($"Unknown wait state '{state}'. Valid values: attached, visible, enabled, actionable, stable, value_equals, name_contains.");
+    }
+
+    private static AutomationElement? TryResolveWithMissingAsNull(
+        Window window,
+        ElementLocator locator,
+        ITreeWalker controlWalker,
+        ITreeWalker rawWalker)
+    {
+        try
+        {
+            return ResolveElement(window, locator, controlWalker, rawWalker);
+        }
+        catch (InvalidOperationException ex) when (IsWaitableNotFound(ex))
+        {
+            return null;
+        }
+    }
+
+    private static bool IsWaitableNotFound(InvalidOperationException ex)
+    {
+        var message = ex.Message ?? "";
+        return message.Contains("did not match any element", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("XPath segment not found", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("XPath index", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static WaitForObservation BuildWaitObservation(
+        Window window,
+        AutomationElement element,
+        ITreeWalker rawWalker,
+        string? xpathHint)
+    {
+        Rect? bounds = null;
+        try
+        {
+            var rect = element.BoundingRectangle;
+            if (rect.Width > 0 && rect.Height > 0)
+            {
+                bounds = ToRect(rect);
+            }
+        }
+        catch
+        {
+        }
+
+        var xpath = xpathHint;
+        if (string.IsNullOrWhiteSpace(xpath))
+        {
+            try
+            {
+                xpath = ComputeXPath(window, element, rawWalker);
+            }
+            catch
+            {
+                xpath = null;
+            }
+        }
+
+        bool? isEnabled = null;
+        bool? isOffscreen = null;
+        try
+        {
+            isEnabled = element.Properties.IsEnabled.Value;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            isOffscreen = element.Properties.IsOffscreen.Value;
+        }
+        catch
+        {
+        }
+
+        return new WaitForObservation(
+            Type: GetXPathLabel(element),
+            AutomationId: GetAutomationId(element),
+            Name: GetName(element),
+            XPath: xpath,
+            Bounds: bounds,
+            IsEnabled: isEnabled,
+            IsOffscreen: isOffscreen);
+    }
+
+    private static (bool Satisfied, string? FailureReason) CheckWaitForState(
+        AutomationElement element,
+        WaitForState state,
+        double? expectedValue,
+        string? expectedText,
+        int stableMs,
+        ref Rectangle? lastBounds,
+        ref long? stableStartTimestamp)
+    {
+        switch (state)
+        {
+            case WaitForState.Attached:
+                return (true, null);
+            case WaitForState.Visible:
+                if (!HasValidBounds(element))
+                {
+                    return (false, "invalid_bounds");
+                }
+
+                try
+                {
+                    if (element.Properties.IsOffscreen.Value)
+                    {
+                        return (false, "offscreen");
+                    }
+                }
+                catch
+                {
+                    return (false, "offscreen_unknown");
+                }
+
+                return (true, null);
+            case WaitForState.Enabled:
+                try
+                {
+                    return element.Properties.IsEnabled.Value ? (true, null) : (false, "disabled");
+                }
+                catch
+                {
+                    return (false, "enabled_unknown");
+                }
+            case WaitForState.Actionable:
+                if (!HasValidBounds(element))
+                {
+                    return (false, "invalid_bounds");
+                }
+
+                try
+                {
+                    if (element.Properties.IsOffscreen.Value)
+                    {
+                        return (false, "offscreen");
+                    }
+                }
+                catch
+                {
+                    return (false, "offscreen_unknown");
+                }
+
+                try
+                {
+                    if (!element.Properties.IsEnabled.Value)
+                    {
+                        return (false, "disabled");
+                    }
+                }
+                catch
+                {
+                    return (false, "enabled_unknown");
+                }
+
+                try
+                {
+                    _ = GetClickPoint(element);
+                }
+                catch
+                {
+                    return (false, "no_click_point");
+                }
+
+                return (true, null);
+            case WaitForState.Stable:
+                {
+                    Rectangle bounds;
+                    try
+                    {
+                        bounds = element.BoundingRectangle;
+                    }
+                    catch
+                    {
+                        lastBounds = null;
+                        stableStartTimestamp = null;
+                        return (false, "invalid_bounds");
+                    }
+
+                    if (bounds.Width <= 0 || bounds.Height <= 0)
+                    {
+                        lastBounds = null;
+                        stableStartTimestamp = null;
+                        return (false, "invalid_bounds");
+                    }
+
+                    if (stableMs <= 0)
+                    {
+                        return (true, null);
+                    }
+
+                    if (lastBounds is null ||
+                        bounds.Left != lastBounds.Value.Left ||
+                        bounds.Top != lastBounds.Value.Top ||
+                        bounds.Width != lastBounds.Value.Width ||
+                        bounds.Height != lastBounds.Value.Height)
+                    {
+                        lastBounds = bounds;
+                        stableStartTimestamp = Stopwatch.GetTimestamp();
+                        return (false, "unstable");
+                    }
+
+                    stableStartTimestamp ??= Stopwatch.GetTimestamp();
+                    if (Stopwatch.GetElapsedTime(stableStartTimestamp.Value).TotalMilliseconds >= stableMs)
+                    {
+                        return (true, null);
+                    }
+
+                    return (false, "unstable");
+                }
+            case WaitForState.ValueEquals:
+                {
+                    if (expectedValue is null)
+                    {
+                        return (false, "expected_value_missing");
+                    }
+
+                    var target = expectedValue.Value;
+                    var epsilon = 0.01;
+
+                    var rangeValue = element.Patterns.RangeValue.PatternOrDefault;
+                    if (rangeValue is not null)
+                    {
+                        var current = rangeValue.Value;
+                        return Math.Abs(current - target) <= epsilon ? (true, null) : (false, "value_mismatch");
+                    }
+
+                    var valuePattern = element.Patterns.Value.PatternOrDefault;
+                    if (valuePattern is not null)
+                    {
+                        var s = valuePattern.Value ?? "";
+                        if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+                        {
+                            return Math.Abs(parsed - target) <= epsilon ? (true, null) : (false, "value_mismatch");
+                        }
+
+                        return (false, "value_not_numeric");
+                    }
+
+                    return (false, "no_value_pattern");
+                }
+            case WaitForState.NameContains:
+                {
+                    if (string.IsNullOrWhiteSpace(expectedText))
+                    {
+                        return (false, "expected_text_missing");
+                    }
+
+                    var name = GetName(element) ?? "";
+                    return name.Contains(expectedText, StringComparison.OrdinalIgnoreCase) ? (true, null) : (false, "name_mismatch");
+                }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(state), state, null);
+        }
+    }
+
+    private static async Task<AutomationElement> ResolveUiaElementWithWaitAsync(
+        Window window,
+        ElementLocator locator,
+        ITreeWalker controlWalker,
+        ITreeWalker rawWalker,
+        int timeoutMs,
+        int pollIntervalMs,
+        CancellationToken cancellationToken)
+    {
+        var start = Stopwatch.GetTimestamp();
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var element = TryResolveWithMissingAsNull(window, locator, controlWalker, rawWalker);
+            if (element is not null)
+            {
+                return element;
+            }
+
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (elapsed.TotalMilliseconds >= timeoutMs)
+            {
+                throw new InvalidOperationException($"timeout: element not found after {timeoutMs}ms.");
+            }
+
+            await Task.Delay(pollIntervalMs, cancellationToken);
+        }
+    }
+
+    private static async Task WaitForResolvedElementStateAsync(
+        AutomationElement element,
+        WaitForState state,
+        int timeoutMs,
+        int pollIntervalMs,
+        int stableMs,
+        double? expectedValue,
+        string? expectedText,
+        CancellationToken cancellationToken)
+    {
+        var start = Stopwatch.GetTimestamp();
+        Rectangle? lastBounds = null;
+        long? stableStartTimestamp = null;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var (ok, reason) = CheckWaitForState(
+                element,
+                state,
+                expectedValue,
+                expectedText,
+                stableMs,
+                ref lastBounds,
+                ref stableStartTimestamp);
+
+            if (ok)
+            {
+                return;
+            }
+
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (elapsed.TotalMilliseconds >= timeoutMs)
+            {
+                throw new InvalidOperationException($"timeout: wait_for state='{state}' after {timeoutMs}ms ({reason ?? "timeout"}).");
+            }
+
+            await Task.Delay(pollIntervalMs, cancellationToken);
+        }
+    }
+
+    private static async Task WaitForValuePatternTextAsync(
+        IValuePattern valuePattern,
+        string expected,
+        int timeoutMs,
+        int pollIntervalMs,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(valuePattern);
+        expected ??= "";
+
+        var start = Stopwatch.GetTimestamp();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string? current;
+            try
+            {
+                current = valuePattern.Value;
+            }
+            catch
+            {
+                current = null;
+            }
+
+            if (string.Equals(current, expected, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (elapsed.TotalMilliseconds >= timeoutMs)
+            {
+                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
+                throw new InvalidOperationException($"timeout: value did not update after {elapsedMs}ms.");
+            }
+
+            await Task.Delay(pollIntervalMs, cancellationToken);
+        }
+    }
+
+    private static async Task WaitForRangeValueAsync(
+        IRangeValuePattern rangeValue,
+        double expected,
+        int timeoutMs,
+        int pollIntervalMs,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(rangeValue);
+
+        var start = Stopwatch.GetTimestamp();
+        var epsilon = 0.01;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            double current;
+            try
+            {
+                current = rangeValue.Value;
+            }
+            catch
+            {
+                current = double.NaN;
+            }
+
+            if (!double.IsNaN(current) && Math.Abs(current - expected) <= epsilon)
+            {
+                return;
+            }
+
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (elapsed.TotalMilliseconds >= timeoutMs)
+            {
+                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
+                throw new InvalidOperationException($"timeout: range value did not update after {elapsedMs}ms.");
+            }
+
+            await Task.Delay(pollIntervalMs, cancellationToken);
+        }
     }
 
     private static FlaUI.Core.Input.MouseButton ParseMouseButton(string? button)
@@ -4061,10 +5132,14 @@ public sealed partial class AutomationController : IDisposable
 
         var strategies = new List<Func<AutomationElement?>>()
         {
-            () => TryResolveByAutomationId(window, locator, controlWalker),
-            () => TryResolveByName(window, locator, controlWalker),
-            () => TryResolveByClassName(window, locator, controlWalker),
             () => TryResolveByXPath(window, locator, rawWalker),
+            () => TryResolveByAutomationId(window, locator, controlWalker),
+            () => TryResolveByAutomationIdContains(window, locator, controlWalker),
+            () => TryResolveByName(window, locator, controlWalker),
+            () => TryResolveByNameContains(window, locator, controlWalker),
+            () => TryResolveByClassName(window, locator, controlWalker),
+            () => TryResolveByClassNameContains(window, locator, controlWalker),
+            () => TryResolveByTypeEquals(window, locator, controlWalker),
             () => TryResolveByIndexOnly(window, locator, controlWalker),
         };
 
@@ -4094,6 +5169,26 @@ public sealed partial class AutomationController : IDisposable
         return SelectMatch(matches, locator, "automationId");
     }
 
+    private static AutomationElement? TryResolveByAutomationIdContains(Window window, ElementLocator locator, ITreeWalker walker)
+    {
+        if (string.IsNullOrWhiteSpace(locator.AutomationIdContains))
+        {
+            return null;
+        }
+
+        var value = locator.AutomationIdContains.Trim();
+        if (value.Length == 0)
+        {
+            return null;
+        }
+
+        var matches = EnumerateSelfAndDescendantsDepthFirst(window, walker)
+            .Where(e => (GetAutomationId(e) ?? "").Contains(value, StringComparison.Ordinal))
+            .ToArray();
+
+        return SelectMatch(matches, locator, "automationIdContains");
+    }
+
     private static AutomationElement? TryResolveByName(Window window, ElementLocator locator, ITreeWalker walker)
     {
         if (string.IsNullOrWhiteSpace(locator.Name))
@@ -4108,6 +5203,26 @@ public sealed partial class AutomationController : IDisposable
         return SelectMatch(matches, locator, "name");
     }
 
+    private static AutomationElement? TryResolveByNameContains(Window window, ElementLocator locator, ITreeWalker walker)
+    {
+        if (string.IsNullOrWhiteSpace(locator.NameContains))
+        {
+            return null;
+        }
+
+        var value = locator.NameContains.Trim();
+        if (value.Length == 0)
+        {
+            return null;
+        }
+
+        var matches = EnumerateSelfAndDescendantsDepthFirst(window, walker)
+            .Where(e => (GetName(e) ?? "").Contains(value, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        return SelectMatch(matches, locator, "nameContains");
+    }
+
     private static AutomationElement? TryResolveByClassName(Window window, ElementLocator locator, ITreeWalker walker)
     {
         if (string.IsNullOrWhiteSpace(locator.ClassName))
@@ -4120,6 +5235,46 @@ public sealed partial class AutomationController : IDisposable
             .ToArray();
 
         return SelectMatch(matches, locator, "className");
+    }
+
+    private static AutomationElement? TryResolveByClassNameContains(Window window, ElementLocator locator, ITreeWalker walker)
+    {
+        if (string.IsNullOrWhiteSpace(locator.ClassNameContains))
+        {
+            return null;
+        }
+
+        var value = locator.ClassNameContains.Trim();
+        if (value.Length == 0)
+        {
+            return null;
+        }
+
+        var matches = EnumerateSelfAndDescendantsDepthFirst(window, walker)
+            .Where(e => (GetClassName(e) ?? "").Contains(value, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        return SelectMatch(matches, locator, "classNameContains");
+    }
+
+    private static AutomationElement? TryResolveByTypeEquals(Window window, ElementLocator locator, ITreeWalker walker)
+    {
+        if (string.IsNullOrWhiteSpace(locator.TypeEquals))
+        {
+            return null;
+        }
+
+        var value = locator.TypeEquals.Trim();
+        if (value.Length == 0)
+        {
+            return null;
+        }
+
+        var matches = EnumerateSelfAndDescendantsDepthFirst(window, walker)
+            .Where(e => string.Equals(GetXPathLabel(e), value, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        return SelectMatch(matches, locator, "typeEquals");
     }
 
     private static AutomationElement? TryResolveByXPath(Window window, ElementLocator locator, ITreeWalker walker)
@@ -4196,8 +5351,12 @@ public sealed partial class AutomationController : IDisposable
         }
 
         if (!string.IsNullOrWhiteSpace(locator.AutomationId) ||
+            !string.IsNullOrWhiteSpace(locator.AutomationIdContains) ||
             !string.IsNullOrWhiteSpace(locator.Name) ||
+            !string.IsNullOrWhiteSpace(locator.NameContains) ||
             !string.IsNullOrWhiteSpace(locator.ClassName) ||
+            !string.IsNullOrWhiteSpace(locator.ClassNameContains) ||
+            !string.IsNullOrWhiteSpace(locator.TypeEquals) ||
             !string.IsNullOrWhiteSpace(locator.XPath))
         {
             return null;
@@ -4232,7 +5391,16 @@ public sealed partial class AutomationController : IDisposable
                 return matches[0];
             }
 
-            throw new InvalidOperationException($"Locator strategy '{strategyName}' is ambiguous (found {matches.Count}). Provide 'index' to disambiguate.");
+            if (locator.Strict)
+            {
+                var details = BuildAmbiguousCandidatesDetails(matches, maxCandidates: 5);
+                throw new InvalidOperationException(
+                    $"Locator strategy '{strategyName}' is ambiguous (found {matches.Count}). Provide 'index' to disambiguate."
+                    + details);
+            }
+
+            var ordered = OrderMatches(matches, locator);
+            return ordered.Count > 0 ? ordered[0] : matches[0];
         }
 
         var index = locator.Index.Value;
@@ -4243,6 +5411,163 @@ public sealed partial class AutomationController : IDisposable
         }
 
         return matches[index];
+    }
+
+    private static IReadOnlyList<AutomationElement> OrderMatches(IReadOnlyList<AutomationElement> matches, ElementLocator locator)
+    {
+        if (matches.Count <= 1)
+        {
+            return matches;
+        }
+
+        var list = matches.ToList();
+        list.Sort((a, b) =>
+        {
+            var offA = locator.PreferVisible ? GetOffscreenRank(a) : 0;
+            var offB = locator.PreferVisible ? GetOffscreenRank(b) : 0;
+            var cmp = offA.CompareTo(offB);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = GetEnabledRank(a).CompareTo(GetEnabledRank(b));
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            var ba = TryGetBounds(a);
+            var bb = TryGetBounds(b);
+            cmp = (ba?.Top ?? int.MaxValue).CompareTo(bb?.Top ?? int.MaxValue);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = (ba?.Left ?? int.MaxValue).CompareTo(bb?.Left ?? int.MaxValue);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = string.Compare(GetAutomationId(a), GetAutomationId(b), StringComparison.Ordinal);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = string.Compare(GetName(a), GetName(b), StringComparison.Ordinal);
+            return cmp;
+        });
+        return list;
+    }
+
+    private static int GetOffscreenRank(AutomationElement element)
+    {
+        try
+        {
+            return element.Properties.IsOffscreen.Value ? 1 : 0;
+        }
+        catch
+        {
+            return 2;
+        }
+    }
+
+    private static int GetEnabledRank(AutomationElement element)
+    {
+        try
+        {
+            return element.Properties.IsEnabled.Value ? 0 : 1;
+        }
+        catch
+        {
+            return 2;
+        }
+    }
+
+    private static Rectangle? TryGetBounds(AutomationElement element)
+    {
+        try
+        {
+            return element.BoundingRectangle;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string BuildAmbiguousCandidatesDetails(IReadOnlyList<AutomationElement> matches, int maxCandidates)
+    {
+        if (matches.Count == 0 || maxCandidates <= 0)
+        {
+            return "";
+        }
+
+        var take = Math.Min(maxCandidates, matches.Count);
+        var sb = new StringBuilder();
+        sb.AppendLine();
+        sb.AppendLine("Candidates:");
+        for (var i = 0; i < take; i++)
+        {
+            var e = matches[i];
+            var type = GetXPathLabel(e);
+            var name = GetName(e);
+            var automationId = GetAutomationId(e);
+            var bounds = TryGetBounds(e);
+            var boundsText = bounds is null || bounds.Value.Width <= 0 || bounds.Value.Height <= 0
+                ? "bounds=n/a"
+                : $"bounds={bounds.Value.Left},{bounds.Value.Top} {bounds.Value.Width}x{bounds.Value.Height}";
+
+            var enabled = TryGetBooleanString(() => e.Properties.IsEnabled.Value);
+            var offscreen = TryGetBooleanString(() => e.Properties.IsOffscreen.Value);
+
+            sb.Append("  - ");
+            sb.Append(type);
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                sb.Append($", name='{name}'");
+            }
+
+            if (!string.IsNullOrWhiteSpace(automationId))
+            {
+                sb.Append($", automationId='{automationId}'");
+            }
+
+            sb.Append($", {boundsText}");
+            if (enabled is not null)
+            {
+                sb.Append($", enabled={enabled}");
+            }
+
+            if (offscreen is not null)
+            {
+                sb.Append($", offscreen={offscreen}");
+            }
+
+            sb.AppendLine();
+        }
+
+        if (matches.Count > take)
+        {
+            sb.AppendLine($"  ... and {matches.Count - take} more");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string? TryGetBooleanString(Func<bool> action)
+    {
+        try
+        {
+            return action() ? "true" : "false";
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static void TryScrollIntoView(AutomationElement element)

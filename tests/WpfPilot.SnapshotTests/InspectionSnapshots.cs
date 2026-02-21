@@ -145,10 +145,15 @@ public sealed class InspectionSnapshots
         var resolved = new[]
         {
             new { Strategy = "automationId", Element = await ResolveAsync(new Dictionary<string, object?> { ["automationId"] = "Basic_TextBox" }) },
+            new { Strategy = "automationIdContains", Element = await ResolveAsync(new Dictionary<string, object?> { ["automationIdContains"] = "TextBox" }) },
             new { Strategy = "name", Element = await ResolveAsync(new Dictionary<string, object?> { ["name"] = "Right Panel" }) },
+            new { Strategy = "nameContains", Element = await ResolveAsync(new Dictionary<string, object?> { ["nameContains"] = "Basic Controls" }) },
             new { Strategy = "className", Element = await ResolveAsync(new Dictionary<string, object?> { ["className"] = "Slider" }) },
+            new { Strategy = "classNameContains", Element = await ResolveAsync(new Dictionary<string, object?> { ["classNameContains"] = "Slid" }) },
+            new { Strategy = "typeEquals", Element = await ResolveAsync(new Dictionary<string, object?> { ["typeEquals"] = "TextBox" }) },
             new { Strategy = "xpath", Element = await ResolveAsync(new Dictionary<string, object?> { ["xpath"] = xpathTarget.XPath }) },
             new { Strategy = "index-disambiguation", Element = await ResolveAsync(new Dictionary<string, object?> { ["name"] = "Alpha", ["index"] = 0 }) },
+            new { Strategy = "strict-false", Element = await ResolveAsync(new Dictionary<string, object?> { ["name"] = "Alpha", ["strict"] = false }) },
         };
 
         var stable = resolved

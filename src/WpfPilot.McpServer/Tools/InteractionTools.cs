@@ -41,6 +41,10 @@ public static class InteractionTools
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Click type: single | double | right")] string? clickType = null,
         [Description("Click mode: auto | mouseAlways | invokePreferred")] string? clickMode = null,
+        [Description("Timeout (ms)")] int timeoutMs = 5000,
+        [Description("Auto-wait for actionability")] bool autoWait = true,
+        [Description("Polling interval (ms)")] int pollIntervalMs = 100,
+        [Description("Stable duration (ms)")] int stableMs = 150,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -53,7 +57,11 @@ public static class InteractionTools
                         ElementId: elementId,
                         WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
                         ClickType: ParseClickType(clickType),
-                        ClickMode: ParseClickMode(clickMode)),
+                        ClickMode: ParseClickMode(clickMode),
+                        TimeoutMs: timeoutMs,
+                        AutoWait: autoWait,
+                        PollIntervalMs: pollIntervalMs,
+                        StableMs: stableMs),
                     cancellationToken),
                 cancellationToken);
         });
@@ -65,6 +73,10 @@ public static class InteractionTools
         [Description("Element locator")] ElementLocator? locator = null,
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Timeout (ms)")] int timeoutMs = 5000,
+        [Description("Auto-wait for actionability")] bool autoWait = true,
+        [Description("Polling interval (ms)")] int pollIntervalMs = 100,
+        [Description("Stable duration (ms)")] int stableMs = 150,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -75,7 +87,11 @@ public static class InteractionTools
                     new InvokeRequest(
                         Locator: locator,
                         ElementId: elementId,
-                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle),
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        TimeoutMs: timeoutMs,
+                        AutoWait: autoWait,
+                        PollIntervalMs: pollIntervalMs,
+                        StableMs: stableMs),
                     cancellationToken),
                 cancellationToken);
         });
@@ -88,6 +104,10 @@ public static class InteractionTools
         [Description("Element locator")] ElementLocator? locator = null,
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Timeout (ms)")] int timeoutMs = 5000,
+        [Description("Auto-wait for actionability")] bool autoWait = true,
+        [Description("Polling interval (ms)")] int pollIntervalMs = 100,
+        [Description("Stable duration (ms)")] int stableMs = 150,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -99,7 +119,11 @@ public static class InteractionTools
                         Locator: locator,
                         Text: text,
                         ElementId: elementId,
-                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle),
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        TimeoutMs: timeoutMs,
+                        AutoWait: autoWait,
+                        PollIntervalMs: pollIntervalMs,
+                        StableMs: stableMs),
                     cancellationToken),
                 cancellationToken);
         });
@@ -112,6 +136,10 @@ public static class InteractionTools
         [Description("Element locator")] ElementLocator? locator = null,
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Timeout (ms)")] int timeoutMs = 5000,
+        [Description("Auto-wait for actionability")] bool autoWait = true,
+        [Description("Polling interval (ms)")] int pollIntervalMs = 100,
+        [Description("Stable duration (ms)")] int stableMs = 150,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -123,7 +151,11 @@ public static class InteractionTools
                         Locator: locator,
                         Value: value,
                         ElementId: elementId,
-                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle),
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        TimeoutMs: timeoutMs,
+                        AutoWait: autoWait,
+                        PollIntervalMs: pollIntervalMs,
+                        StableMs: stableMs),
                     cancellationToken),
                 cancellationToken);
         });
@@ -139,6 +171,10 @@ public static class InteractionTools
         [Description("Optional item locator (select a specific item element)")] ElementLocator? itemLocator = null,
         [Description("Optional item elementId (select a specific item element)")] string? itemElementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Timeout (ms)")] int timeoutMs = 5000,
+        [Description("Auto-wait for actionability")] bool autoWait = true,
+        [Description("Polling interval (ms)")] int pollIntervalMs = 100,
+        [Description("Stable duration (ms)")] int stableMs = 150,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -153,7 +189,11 @@ public static class InteractionTools
                         WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
                         ItemLocator: itemLocator,
                         ElementId: elementId,
-                        ItemElementId: itemElementId),
+                        ItemElementId: itemElementId,
+                        TimeoutMs: timeoutMs,
+                        AutoWait: autoWait,
+                        PollIntervalMs: pollIntervalMs,
+                        StableMs: stableMs),
                     cancellationToken),
                 cancellationToken);
         });
@@ -167,6 +207,10 @@ public static class InteractionTools
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Optional container locator (preferred scroll root)")] ElementLocator? containerLocator = null,
         [Description("Optional container elementId (preferred scroll root)")] string? containerElementId = null,
+        [Description("Timeout (ms)")] int timeoutMs = 5000,
+        [Description("Auto-wait for actionability")] bool autoWait = true,
+        [Description("Polling interval (ms)")] int pollIntervalMs = 100,
+        [Description("Stable duration (ms)")] int stableMs = 150,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -179,7 +223,11 @@ public static class InteractionTools
                         WindowHandle: hasAnyElementId ? windowHandle : effectiveWindowHandle,
                         ContainerLocator: containerLocator,
                         ElementId: elementId,
-                        ContainerElementId: containerElementId),
+                        ContainerElementId: containerElementId,
+                        TimeoutMs: timeoutMs,
+                        AutoWait: autoWait,
+                        PollIntervalMs: pollIntervalMs,
+                        StableMs: stableMs),
                     cancellationToken),
                 cancellationToken);
         });
@@ -197,6 +245,10 @@ public static class InteractionTools
         [Description("Target Y screen coordinate (required if targetLocator is not set)")] int? toY = null,
         [Description("Number of mouse move steps")] int steps = 20,
         [Description("Mouse button: left | right | middle")] string? button = null,
+        [Description("Timeout (ms)")] int timeoutMs = 5000,
+        [Description("Auto-wait for actionability")] bool autoWait = true,
+        [Description("Polling interval (ms)")] int pollIntervalMs = 100,
+        [Description("Stable duration (ms)")] int stableMs = 150,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -213,7 +265,11 @@ public static class InteractionTools
                         Steps: steps,
                         Button: button,
                         ElementId: elementId,
-                        TargetElementId: targetElementId),
+                        TargetElementId: targetElementId,
+                        TimeoutMs: timeoutMs,
+                        AutoWait: autoWait,
+                        PollIntervalMs: pollIntervalMs,
+                        StableMs: stableMs),
                     cancellationToken),
                 cancellationToken);
         });

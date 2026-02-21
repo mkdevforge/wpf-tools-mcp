@@ -1,1 +1,1 @@
-Tool 'click_element' failed: An error occurred invoking 'click_element': Locator did not match any element.
+﻿Tool 'click_element' failed: An error occurred invoking 'click_element': timeout: element not found after 250ms.

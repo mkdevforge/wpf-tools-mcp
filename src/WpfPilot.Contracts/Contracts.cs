@@ -46,10 +46,16 @@ public sealed record Rect(int X, int Y, int Width, int Height);
 
 public sealed record ElementLocator(
     [property: JsonPropertyName("automationId")] string? AutomationId = null,
+    [property: JsonPropertyName("automationIdContains")] string? AutomationIdContains = null,
     [property: JsonPropertyName("name")] string? Name = null,
+    [property: JsonPropertyName("nameContains")] string? NameContains = null,
     [property: JsonPropertyName("className")] string? ClassName = null,
+    [property: JsonPropertyName("classNameContains")] string? ClassNameContains = null,
+    [property: JsonPropertyName("typeEquals")] string? TypeEquals = null,
     [property: JsonPropertyName("xpath")] string? XPath = null,
-    [property: JsonPropertyName("index")] int? Index = null);
+    [property: JsonPropertyName("index")] int? Index = null,
+    [property: JsonPropertyName("preferVisible")] bool PreferVisible = true,
+    [property: JsonPropertyName("strict")] bool Strict = true);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum InspectionBackend
@@ -213,14 +219,22 @@ public sealed record ClickElementRequest(
     [property: JsonPropertyName("elementId")] string? ElementId = null,
     long? WindowHandle = null,
     ClickType ClickType = ClickType.Single,
-    ClickMode ClickMode = ClickMode.Auto);
+    ClickMode ClickMode = ClickMode.Auto,
+    int TimeoutMs = 5000,
+    bool AutoWait = true,
+    int PollIntervalMs = 100,
+    int StableMs = 150);
 
 public sealed record ClickElementResponse(bool Clicked, string MethodUsed);
 
 public sealed record InvokeRequest(
     ElementLocator? Locator = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
-    long? WindowHandle = null);
+    long? WindowHandle = null,
+    int TimeoutMs = 5000,
+    bool AutoWait = true,
+    int PollIntervalMs = 100,
+    int StableMs = 150);
 
 public sealed record InvokeResponse(bool Invoked);
 
@@ -228,7 +242,11 @@ public sealed record TypeTextRequest(
     ElementLocator? Locator = null,
     string Text = "",
     [property: JsonPropertyName("elementId")] string? ElementId = null,
-    long? WindowHandle = null);
+    long? WindowHandle = null,
+    int TimeoutMs = 5000,
+    bool AutoWait = true,
+    int PollIntervalMs = 100,
+    int StableMs = 150);
 
 public sealed record TypeTextResponse(bool Typed, string MethodUsed);
 
@@ -236,7 +254,11 @@ public sealed record SetValueRequest(
     ElementLocator? Locator = null,
     double Value = 0,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
-    long? WindowHandle = null);
+    long? WindowHandle = null,
+    int TimeoutMs = 5000,
+    bool AutoWait = true,
+    int PollIntervalMs = 100,
+    int StableMs = 150);
 
 public sealed record SetValueResponse(bool Set, string MethodUsed);
 
@@ -247,7 +269,11 @@ public sealed record SelectItemRequest(
     long? WindowHandle = null,
     ElementLocator? ItemLocator = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
-    [property: JsonPropertyName("itemElementId")] string? ItemElementId = null);
+    [property: JsonPropertyName("itemElementId")] string? ItemElementId = null,
+    int TimeoutMs = 5000,
+    bool AutoWait = true,
+    int PollIntervalMs = 100,
+    int StableMs = 150);
 
 public sealed record SelectItemResponse(bool Selected);
 
@@ -256,7 +282,11 @@ public sealed record ScrollToElementRequest(
     long? WindowHandle = null,
     ElementLocator? ContainerLocator = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
-    [property: JsonPropertyName("containerElementId")] string? ContainerElementId = null);
+    [property: JsonPropertyName("containerElementId")] string? ContainerElementId = null,
+    int TimeoutMs = 5000,
+    bool AutoWait = true,
+    int PollIntervalMs = 100,
+    int StableMs = 150);
 
 public sealed record ScrollToElementResponse(bool Scrolled, string MethodUsed);
 
@@ -269,7 +299,40 @@ public sealed record DragRequest(
     int Steps = 20,
     string? Button = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
-    [property: JsonPropertyName("targetElementId")] string? TargetElementId = null);
+    [property: JsonPropertyName("targetElementId")] string? TargetElementId = null,
+    int TimeoutMs = 5000,
+    bool AutoWait = true,
+    int PollIntervalMs = 100,
+    int StableMs = 150);
+
+public sealed record WaitForRequest(
+    ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    long? WindowHandle = null,
+    string State = "visible",
+    int TimeoutMs = 5000,
+    int PollIntervalMs = 100,
+    int StableMs = 250,
+    double? ExpectedValue = null,
+    string? ExpectedText = null,
+    bool ThrowOnTimeout = true);
+
+public sealed record WaitForObservation(
+    string Type,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AutomationId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Name = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? XPath = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? Bounds = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsEnabled = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsOffscreen = null);
+
+public sealed record WaitForResponse(
+    bool Succeeded,
+    string State,
+    int ElapsedMs,
+    int Attempts,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WaitForObservation? LastObservation = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FailureReason = null);
 
 public sealed record DragResponse(bool Dragged, string MethodUsed);
 

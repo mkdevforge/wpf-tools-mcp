@@ -137,6 +137,123 @@ public sealed class MinimalInteractionSnapshots
     }
 
     [Test]
+    public async Task ClickElement_name_strict_false_picks_first_match_snapshot()
+    {
+        await LaunchMinimalAppAsync();
+        try
+        {
+            var click = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["name"] = "OK",
+                    ["strict"] = false
+                }
+            });
+
+            var status = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["nameContains"] = "Clicks:"
+                }
+            });
+
+            await Verifier.Verify(new
+            {
+                Click = click,
+                Status = status.Element.Name
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task WaitFor_visible_succeeds_snapshot()
+    {
+        await LaunchMinimalAppAsync();
+        try
+        {
+            var result = await _mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["nameContains"] = "Clicks:"
+                },
+                ["state"] = "visible",
+                ["timeoutMs"] = 0,
+            });
+
+            var stable = result with
+            {
+                ElapsedMs = -1,
+                Attempts = -1,
+                LastObservation = result.LastObservation is null
+                    ? null
+                    : result.LastObservation with
+                    {
+                        Bounds = result.LastObservation.Bounds is null
+                            ? null
+                            : result.LastObservation.Bounds with { X = 0, Y = 0 }
+                    }
+            };
+
+            await Verifier.Verify(stable);
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task WaitFor_name_contains_timeout_returns_response_snapshot()
+    {
+        await LaunchMinimalAppAsync();
+        try
+        {
+            var result = await _mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["nameContains"] = "Clicks:"
+                },
+                ["state"] = "name_contains",
+                ["expectedText"] = "Clicks: 999",
+                ["timeoutMs"] = 0,
+                ["throwOnTimeout"] = false,
+            });
+
+            var stable = result with
+            {
+                ElapsedMs = -1,
+                Attempts = -1,
+                LastObservation = result.LastObservation is null
+                    ? null
+                    : result.LastObservation with
+                    {
+                        Bounds = result.LastObservation.Bounds is null
+                            ? null
+                            : result.LastObservation.Bounds with { X = 0, Y = 0 }
+                    }
+            };
+
+            await Verifier.Verify(stable);
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
     public async Task SelectItem_listbox_by_text_updates_status_snapshot()
     {
         await LaunchMinimalAppAsync();

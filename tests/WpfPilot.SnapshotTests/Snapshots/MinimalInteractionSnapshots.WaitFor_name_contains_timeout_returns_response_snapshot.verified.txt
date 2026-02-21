@@ -1,0 +1,19 @@
+﻿{
+  Succeeded: false,
+  State: name_contains,
+  ElapsedMs: -1,
+  Attempts: -1,
+  LastObservation: {
+    Type: TextBlock,
+    AutomationId: ClickStatus,
+    Name: Clicks: 0,
+    XPath: /Window/TextBlock[3],
+    Bounds: {
+      Width: 420,
+      Height: 16
+    },
+    IsEnabled: true,
+    IsOffscreen: false
+  },
+  FailureReason: name_mismatch
+}
