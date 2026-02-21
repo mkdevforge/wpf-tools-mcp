@@ -139,6 +139,7 @@ public sealed record TakeScreenshotRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
+    InspectionBackend Backend = InspectionBackend.Auto,
     ScreenshotCaptureMode CaptureMode = ScreenshotCaptureMode.Screen,
     ScreenshotImageFormat Format = ScreenshotImageFormat.Png,
     int JpegQuality = 90,
@@ -151,6 +152,8 @@ public sealed record TakeScreenshotResponse(
     int Height,
     string Format,
     Rect CapturedBounds,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? RequestedBounds,
+    bool WasClipped,
     long WindowHandleUsed,
     ScreenshotCaptureMode CaptureModeUsed,
     string? Base64 = null);
@@ -425,6 +428,18 @@ public sealed record ResolveWpfElementRequest(
     InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     int MaxNodes = 2000,
     FindReturnFields ReturnFields = FindReturnFields.Minimal);
+
+public sealed record HighlightWpfElementRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    string? RootXPath = null,
+    int DurationMs = 1500,
+    string Color = "#3B82F6",
+    int Thickness = 3);
+
+public sealed record HighlightWpfElementResponse(
+    bool Highlighted,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null);
 
 public sealed record GetBindingInfoRequest(
     long? WindowHandle = null,

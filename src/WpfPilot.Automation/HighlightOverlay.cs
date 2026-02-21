@@ -14,7 +14,7 @@ internal static class HighlightOverlay
     private static readonly object Sync = new();
     private static OverlayHost? _host;
 
-    public static Task<bool> ShowAsync(
+    public static async Task<bool> ShowAsync(
         ContractRect bounds,
         string color,
         int thickness,
@@ -23,12 +23,12 @@ internal static class HighlightOverlay
     {
         if (!OperatingSystem.IsWindows())
         {
-            return Task.FromResult(false);
+            return false;
         }
 
         if (bounds.Width <= 0 || bounds.Height <= 0)
         {
-            return Task.FromResult(false);
+            return false;
         }
 
         thickness = Math.Clamp(thickness, 1, 20);
@@ -41,7 +41,22 @@ internal static class HighlightOverlay
             host = _host;
         }
 
-        return host.ShowAsync(bounds, color, thickness, durationMs, cancellationToken);
+        try
+        {
+            return await host.ShowAsync(bounds, color, thickness, durationMs, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            lock (Sync)
+            {
+                if (ReferenceEquals(_host, host))
+                {
+                    _host = null;
+                }
+            }
+
+            return false;
+        }
     }
 
     private sealed class OverlayHost
@@ -64,6 +79,11 @@ internal static class HighlightOverlay
         {
             try
             {
+                if (Application.Current is null)
+                {
+                    _ = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                }
+
                 var dispatcher = Dispatcher.CurrentDispatcher;
                 var window = new OverlayWindow();
                 window.Show();
@@ -84,14 +104,22 @@ internal static class HighlightOverlay
             int durationMs,
             CancellationToken cancellationToken)
         {
-            var (dispatcher, window) = await _ready.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            (Dispatcher Dispatcher, OverlayWindow Window) state;
+            try
+            {
+                state = await _ready.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                return false;
+            }
 
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            await dispatcher.InvokeAsync(() =>
+            await state.Dispatcher.InvokeAsync(() =>
             {
                 try
                 {
-                    window.ShowHighlight(bounds, color, thickness, durationMs);
+                    state.Window.ShowHighlight(bounds, color, thickness, durationMs);
                     tcs.TrySetResult(true);
                 }
                 catch

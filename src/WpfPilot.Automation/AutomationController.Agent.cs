@@ -24,8 +24,11 @@ public sealed partial class AutomationController
 
     public async Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default)
     {
-        var application = EnsureAttached();
-        var automation = EnsureAutomation();
+        var trace = BeginTraceSpan("inject_agent");
+        try
+        {
+            var application = EnsureAttached();
+            var automation = EnsureAutomation();
 
         var pid = application.ProcessId;
         using var process = Process.GetProcessById(pid);
@@ -50,7 +53,9 @@ public sealed partial class AutomationController
             try
             {
                 _ = await existingClient.CallAsync<string>("ping", @params: null, cancellationToken);
-                return new InjectAgentResponse(Injected: false, PipeName: existingPipeName);
+                var response = new InjectAgentResponse(Injected: false, PipeName: existingPipeName);
+                trace?.SetSummary($"injected={response.Injected} pipe={response.PipeName}");
+                return response;
             }
             catch
             {
@@ -93,7 +98,9 @@ public sealed partial class AutomationController
                 _agentPid = pid;
             }
 
-            return new InjectAgentResponse(Injected: false, PipeName: pipeName);
+            var response = new InjectAgentResponse(Injected: false, PipeName: pipeName);
+            trace?.SetSummary($"injected={response.Injected} pipe={response.PipeName}");
+            return response;
         }
 
         var assets = Phase2Assets.ResolveFromAppBase();
@@ -143,14 +150,41 @@ public sealed partial class AutomationController
             _agentPid = pid;
         }
 
-        return new InjectAgentResponse(Injected: true, PipeName: pipeName);
+        var finalResponse = new InjectAgentResponse(Injected: true, PipeName: pipeName);
+        trace?.SetSummary($"injected={finalResponse.Injected} pipe={finalResponse.PipeName}");
+        return finalResponse;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     public async Task<AgentPingResponse> AgentPingAsync(CancellationToken cancellationToken = default)
     {
-        var client = await EnsureAgentConnectedAsync(cancellationToken);
-        var pong = await client.CallAsync<string>("ping", @params: null, cancellationToken);
-        return new AgentPingResponse(pong);
+        var trace = BeginTraceSpan("agent_ping");
+        try
+        {
+            var client = await EnsureAgentConnectedAsync(cancellationToken);
+            var pong = await client.CallAsync<string>("ping", @params: null, cancellationToken);
+            var response = new AgentPingResponse(pong);
+            trace?.SetSummary($"message={response.Message}");
+            return response;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     public async Task<PerformanceStartResponse> PerformanceStartAsync(
@@ -159,9 +193,24 @@ public sealed partial class AutomationController
         bool resetIfRunning = false,
         CancellationToken cancellationToken = default)
     {
-        var client = await EnsureAgentConnectedAsync(cancellationToken);
-        var request = new PerformanceStartRequest(probeIntervalMs, autoStopAfterMs, resetIfRunning);
-        return await client.CallAsync<PerformanceStartResponse>("wpf/performance_start", request, cancellationToken);
+        var trace = BeginTraceSpan("performance_start");
+        try
+        {
+            var client = await EnsureAgentConnectedAsync(cancellationToken);
+            var request = new PerformanceStartRequest(probeIntervalMs, autoStopAfterMs, resetIfRunning);
+            var response = await client.CallAsync<PerformanceStartResponse>("wpf/performance_start", request, cancellationToken);
+            trace?.SetSummary($"runId={response.RunId} startedAt={response.StartedAtUtc:O}");
+            return response;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     public async Task<PerformanceStopResponse> PerformanceStopAsync(
@@ -170,9 +219,24 @@ public sealed partial class AutomationController
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
 
-        var client = await EnsureAgentConnectedAsync(cancellationToken);
-        var request = new PerformanceStopRequest(runId.Trim());
-        return await client.CallAsync<PerformanceStopResponse>("wpf/performance_stop", request, cancellationToken);
+        var trace = BeginTraceSpan("performance_stop");
+        try
+        {
+            var client = await EnsureAgentConnectedAsync(cancellationToken);
+            var request = new PerformanceStopRequest(runId.Trim());
+            var response = await client.CallAsync<PerformanceStopResponse>("wpf/performance_stop", request, cancellationToken);
+            trace?.SetSummary($"runId={runId.Trim()}");
+            return response;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     public async Task<GetBindingInfoResponse> GetBindingInfoAsync(
@@ -184,6 +248,9 @@ public sealed partial class AutomationController
         string valueFormat = "string",
         CancellationToken cancellationToken = default)
     {
+        var trace = BeginTraceSpan("get_binding_info");
+        try
+        {
         var hasLocator = locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(elementId);
         if (hasLocator == hasElementId)
@@ -224,13 +291,25 @@ public sealed partial class AutomationController
 
         try
         {
-            return await client.CallAsync<GetBindingInfoResponse>("wpf/get_binding_info", request, cancellationToken);
+            var response = await client.CallAsync<GetBindingInfoResponse>("wpf/get_binding_info", request, cancellationToken);
+            trace?.SetSummary($"bindings={response.Bindings.Count} truncated={response.Truncated}");
+            return response;
         }
         catch (InvalidOperationException ex) when (hasElementId &&
                                                   resolvedElementId is not null &&
                                                   ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
         }
     }
 
@@ -242,15 +321,30 @@ public sealed partial class AutomationController
         int maxNodes = 2000,
         CancellationToken cancellationToken = default)
     {
-        var client = await EnsureAgentConnectedAsync(cancellationToken);
-        var request = new GetBindingErrorsRequest(
-            WindowHandle: windowHandle,
-            RootXPath: rootXPath,
-            Depth: depth,
-            MaxErrors: maxErrors,
-            MaxNodes: maxNodes);
+        var trace = BeginTraceSpan("get_binding_errors");
+        try
+        {
+            var client = await EnsureAgentConnectedAsync(cancellationToken);
+            var request = new GetBindingErrorsRequest(
+                WindowHandle: windowHandle,
+                RootXPath: rootXPath,
+                Depth: depth,
+                MaxErrors: maxErrors,
+                MaxNodes: maxNodes);
 
-        return await client.CallAsync<GetBindingErrorsResponse>("wpf/get_binding_errors", request, cancellationToken);
+            var response = await client.CallAsync<GetBindingErrorsResponse>("wpf/get_binding_errors", request, cancellationToken);
+            trace?.SetSummary($"errors={response.Errors.Count} truncated={response.Truncated}");
+            return response;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     public async Task<GetUiaCoverageReportResponse> GetUiaCoverageReportAsync(
@@ -263,17 +357,32 @@ public sealed partial class AutomationController
         int maxFindings = 200,
         CancellationToken cancellationToken = default)
     {
-        var client = await EnsureAgentConnectedAsync(cancellationToken);
-        var request = new GetUiaCoverageReportRequest(
-            WindowHandle: windowHandle,
-            RootXPath: rootXPath,
-            VisibleOnly: visibleOnly,
-            InteractiveOnly: interactiveOnly,
-            InteractiveMode: interactiveMode,
-            MaxNodes: maxNodes,
-            MaxFindings: maxFindings);
+        var trace = BeginTraceSpan("uia_coverage_report");
+        try
+        {
+            var client = await EnsureAgentConnectedAsync(cancellationToken);
+            var request = new GetUiaCoverageReportRequest(
+                WindowHandle: windowHandle,
+                RootXPath: rootXPath,
+                VisibleOnly: visibleOnly,
+                InteractiveOnly: interactiveOnly,
+                InteractiveMode: interactiveMode,
+                MaxNodes: maxNodes,
+                MaxFindings: maxFindings);
 
-        return await client.CallAsync<GetUiaCoverageReportResponse>("wpf/uia_coverage_report", request, cancellationToken);
+            var response = await client.CallAsync<GetUiaCoverageReportResponse>("wpf/uia_coverage_report", request, cancellationToken);
+            trace?.SetSummary($"findings={response.Summary.FindingsCount} truncated={response.Summary.Truncated}");
+            return response;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     public async Task<GetDataContextResponse> GetDataContextAsync(
@@ -286,6 +395,9 @@ public sealed partial class AutomationController
         bool includeNulls = false,
         CancellationToken cancellationToken = default)
     {
+        var trace = BeginTraceSpan("get_data_context");
+        try
+        {
         var hasLocator = locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(elementId);
         if (hasLocator == hasElementId)
@@ -327,13 +439,25 @@ public sealed partial class AutomationController
 
         try
         {
-            return await client.CallAsync<GetDataContextResponse>("wpf/get_data_context", request, cancellationToken);
+            var response = await client.CallAsync<GetDataContextResponse>("wpf/get_data_context", request, cancellationToken);
+            trace?.SetSummary($"type={response.DataContextType ?? "null"}");
+            return response;
         }
         catch (InvalidOperationException ex) when (hasElementId &&
                                                   resolvedElementId is not null &&
                                                   ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
         }
     }
 
@@ -349,6 +473,9 @@ public sealed partial class AutomationController
         string valueFormat = "string",
         CancellationToken cancellationToken = default)
     {
+        var trace = BeginTraceSpan("get_computed_properties");
+        try
+        {
         var hasLocator = locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(elementId);
         if (hasLocator == hasElementId)
@@ -392,13 +519,25 @@ public sealed partial class AutomationController
 
         try
         {
-            return await client.CallAsync<GetComputedPropertiesResponse>("wpf/get_computed_properties", request, cancellationToken);
+            var response = await client.CallAsync<GetComputedPropertiesResponse>("wpf/get_computed_properties", request, cancellationToken);
+            trace?.SetSummary($"props={response.Properties.Count} truncated={response.Truncated}");
+            return response;
         }
         catch (InvalidOperationException ex) when (hasElementId &&
-                                                   resolvedElementId is not null &&
-                                                   ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+                                                  resolvedElementId is not null &&
+                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
         }
     }
 
@@ -411,6 +550,9 @@ public sealed partial class AutomationController
         int maxBasedOnDepth = 10,
         CancellationToken cancellationToken = default)
     {
+        var trace = BeginTraceSpan("get_style_chain");
+        try
+        {
         var hasLocator = locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(elementId);
         if (hasLocator == hasElementId)
@@ -451,13 +593,25 @@ public sealed partial class AutomationController
 
         try
         {
-            return await client.CallAsync<GetStyleChainResponse>("wpf/get_style_chain", request, cancellationToken);
+            var response = await client.CallAsync<GetStyleChainResponse>("wpf/get_style_chain", request, cancellationToken);
+            trace?.SetSummary($"entries={response.Styles.Count}");
+            return response;
         }
         catch (InvalidOperationException ex) when (hasElementId &&
-                                                   resolvedElementId is not null &&
-                                                   ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+                                                  resolvedElementId is not null &&
+                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
         }
     }
 
@@ -471,6 +625,9 @@ public sealed partial class AutomationController
         bool includePartElementRefs = false,
         CancellationToken cancellationToken = default)
     {
+        var trace = BeginTraceSpan("get_template_info");
+        try
+        {
         var hasLocator = locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(elementId);
         if (hasLocator == hasElementId)
@@ -512,13 +669,26 @@ public sealed partial class AutomationController
 
         try
         {
-            return await client.CallAsync<GetTemplateInfoResponse>("wpf/get_template_info", request, cancellationToken);
+            var response = await client.CallAsync<GetTemplateInfoResponse>("wpf/get_template_info", request, cancellationToken);
+            var named = response.Template.NamedElements is null ? 0 : response.Template.NamedElements.Count;
+            trace?.SetSummary($"named={named}");
+            return response;
         }
         catch (InvalidOperationException ex) when (hasElementId &&
-                                                   resolvedElementId is not null &&
-                                                   ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+                                                  resolvedElementId is not null &&
+                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+        }
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
         }
     }
 

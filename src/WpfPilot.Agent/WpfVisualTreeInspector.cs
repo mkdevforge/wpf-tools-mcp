@@ -8,8 +8,10 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Snoop.Data.Tree;
 using Snoop.Infrastructure.Helpers;
+using Snoop.Infrastructure.SelectionHighlight;
 using WpfPilot.Contracts;
 using ContractRect = WpfPilot.Contracts.Rect;
 
@@ -17,6 +19,12 @@ namespace WpfPilot.Agent;
 
 internal static class WpfVisualTreeInspector
 {
+    private static IDisposable? _activeHighlight;
+    private static DispatcherTimer? _highlightTimer;
+    private static Brush? _savedHighlightBorderBrush;
+    private static double? _savedHighlightBorderThickness;
+    private static bool? _savedHighlightEnabled;
+
     private readonly record struct WpfTreeFieldSet(
         bool IncludeClassName,
         bool IncludeBounds,
@@ -1514,6 +1522,157 @@ internal static class WpfVisualTreeInspector
             cancellationToken);
 
         return BuildElementRefWpf(resolved.Element, resolved.XPath, request.ReturnFields);
+    }
+
+    public static HighlightWpfElementResponse HighlightElement(HighlightWpfElementRequest request, CancellationToken cancellationToken)
+    {
+        var locator = request.Locator ?? throw new ArgumentException("highlight_element requires a locator.");
+        var maxNodes = 2000;
+
+        var window = ResolveWindow(request.WindowHandle);
+        using var treeService = new VisualTreeService();
+
+        var rootObject = (DependencyObject)window;
+        var rootXPath = "/Window";
+
+        if (!string.IsNullOrWhiteSpace(request.RootXPath))
+        {
+            rootXPath = NormalizeXPath(request.RootXPath);
+            rootObject = ResolveByXPath(treeService, window, rootXPath, visibleOnly: true, cancellationToken);
+        }
+
+        var resolved = ResolveLocatorOrThrow(
+            window,
+            treeService,
+            rootObject,
+            rootXPath,
+            locator,
+            visibleOnly: true,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
+            maxNodes,
+            cancellationToken);
+
+        ClearHighlight();
+
+        var thickness = Math.Clamp(request.Thickness, 1, 20);
+        var durationMs = Math.Clamp(request.DurationMs, 1, 60_000);
+
+        if (!TryParseSolidColorBrush(request.Color, out var borderBrush))
+        {
+            return new HighlightWpfElementResponse(Highlighted: false, Reason: "invalid_color");
+        }
+
+        var options = SelectionHighlightOptions.Default;
+
+        _savedHighlightBorderBrush = options.BorderBrush;
+        _savedHighlightBorderThickness = options.BorderThickness;
+        _savedHighlightEnabled = options.HighlightSelectedItem;
+
+        options.HighlightSelectedItem = true;
+        options.BorderThickness = thickness;
+        options.BorderBrush = borderBrush;
+
+        var highlight = SelectionHighlightFactory.CreateAndAttachSelectionHighlight(resolved.Element);
+        if (highlight is null)
+        {
+            RestoreHighlightOptions();
+            return new HighlightWpfElementResponse(Highlighted: false, Reason: "not_supported");
+        }
+
+        _activeHighlight = highlight;
+
+        _highlightTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(durationMs)
+        };
+        _highlightTimer.Tick += (_, _) =>
+        {
+            ClearHighlight();
+        };
+        _highlightTimer.Start();
+
+        return new HighlightWpfElementResponse(Highlighted: true);
+    }
+
+    private static void ClearHighlight()
+    {
+        try
+        {
+            if (_highlightTimer is not null)
+            {
+                _highlightTimer.Stop();
+                _highlightTimer = null;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _activeHighlight?.Dispose();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _activeHighlight = null;
+        }
+
+        RestoreHighlightOptions();
+    }
+
+    private static void RestoreHighlightOptions()
+    {
+        if (_savedHighlightBorderBrush is null || _savedHighlightBorderThickness is null || _savedHighlightEnabled is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var options = SelectionHighlightOptions.Default;
+            options.BorderBrush = _savedHighlightBorderBrush;
+            options.BorderThickness = _savedHighlightBorderThickness.Value;
+            options.HighlightSelectedItem = _savedHighlightEnabled.Value;
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _savedHighlightBorderBrush = null;
+            _savedHighlightBorderThickness = null;
+            _savedHighlightEnabled = null;
+        }
+    }
+
+    private static bool TryParseSolidColorBrush(string? value, out SolidColorBrush brush)
+    {
+        brush = null!;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            var converted = ColorConverter.ConvertFromString(value.Trim());
+            if (converted is not Color color)
+            {
+                return false;
+            }
+
+            brush = new SolidColorBrush(color);
+            brush.Freeze();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static PickWpfElementAtPointResponse PickElementAtPoint(PickWpfElementAtPointRequest request, CancellationToken cancellationToken)

@@ -154,6 +154,18 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case "wpf/highlight_element":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<HighlightWpfElementRequest>(JsonOptions)
+                            ?? new HighlightWpfElementRequest();
+
+                        var response = WpfVisualTreeInspector.HighlightElement(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
                 case "wpf/pick_element_at_point":
                     return await RunOnUiAsync(() =>
                     {

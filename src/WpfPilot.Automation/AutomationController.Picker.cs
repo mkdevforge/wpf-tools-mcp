@@ -12,33 +12,49 @@ public sealed partial class AutomationController
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var application = EnsureAttached();
-        var automation = EnsureAutomation();
-
-        var window = request.WindowHandle is long requestedHandle
-            ? FindWindowByHandle(application, automation, requestedHandle)
-            : FindMainWindow(application, automation);
-
-        var windowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64();
-
-        if (!IsPointInWindowBounds(window, request.X, request.Y))
+        var trace = BeginTraceSpan("pick_element_at_point");
+        try
         {
-            throw new InvalidOperationException(
-                $"pick_point_outside_window: point=({request.X},{request.Y}) window={windowHandleUsed}.");
+            var application = EnsureAttached();
+            var automation = EnsureAutomation();
+
+            var window = request.WindowHandle is long requestedHandle
+                ? FindWindowByHandle(application, automation, requestedHandle)
+                : FindMainWindow(application, automation);
+
+            var windowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64();
+
+            if (!IsPointInWindowBounds(window, request.X, request.Y))
+            {
+                throw new InvalidOperationException(
+                    $"pick_point_outside_window: point=({request.X},{request.Y}) window={windowHandleUsed}.");
+            }
+
+            var backend = request.Backend;
+            if (backend == InspectionBackend.Auto)
+            {
+                backend = IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia;
+            }
+
+            var response = backend switch
+            {
+                InspectionBackend.Uia => PickElementAtPointUia(window, windowHandleUsed, request, cancellationToken),
+                InspectionBackend.Wpf => await PickElementAtPointWpfAsync(windowHandleUsed, request, cancellationToken).ConfigureAwait(false),
+                _ => throw new ArgumentOutOfRangeException(nameof(request.Backend), request.Backend, "Unsupported backend.")
+            };
+
+            trace?.SetSummary($"{response.BackendUsed} {response.Element.Type} {response.Element.XPath}");
+            return response;
         }
-
-        var backend = request.Backend;
-        if (backend == InspectionBackend.Auto)
+        catch (Exception ex)
         {
-            backend = IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia;
+            trace?.SetError(ex);
+            throw;
         }
-
-        return backend switch
+        finally
         {
-            InspectionBackend.Uia => PickElementAtPointUia(window, windowHandleUsed, request, cancellationToken),
-            InspectionBackend.Wpf => await PickElementAtPointWpfAsync(windowHandleUsed, request, cancellationToken).ConfigureAwait(false),
-            _ => throw new ArgumentOutOfRangeException(nameof(request.Backend), request.Backend, "Unsupported backend.")
-        };
+            trace?.Dispose();
+        }
     }
 
     private PickElementAtPointResponse PickElementAtPointUia(

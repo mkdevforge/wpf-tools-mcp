@@ -78,8 +78,22 @@ public sealed partial class AutomationController
     public Task<ReleaseElementResponse> ReleaseElementAsync(string elementId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(elementId);
-        var released = _elementHandles.Release(elementId.Trim());
-        return Task.FromResult(new ReleaseElementResponse(released));
+        var trace = BeginTraceSpan("release_element");
+        try
+        {
+            var released = _elementHandles.Release(elementId.Trim());
+            trace?.SetSummary($"released={released}");
+            return Task.FromResult(new ReleaseElementResponse(released));
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
     }
 
     private async Task<ResolveElementResponse> ResolveUiaElementAsync(
