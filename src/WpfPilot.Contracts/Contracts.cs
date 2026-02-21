@@ -584,3 +584,31 @@ public sealed record GetTemplateInfoResponse(
     ElementRef Element,
     TemplateInfo Template,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+
+public sealed record PerformanceStartRequest(
+    int ProbeIntervalMs = 50,
+    int AutoStopAfterMs = 30000,
+    bool ResetIfRunning = false);
+
+public sealed record PerformanceStartResponse(
+    string RunId,
+    DateTime StartedAtUtc,
+    int ProbeIntervalMs,
+    int AutoStopAfterMs);
+
+public sealed record PerformanceStopRequest(string RunId);
+
+public sealed record PerformanceSummary(
+    string RunId,
+    DateTime StartedAtUtc,
+    DateTime StoppedAtUtc,
+    int ProbeIntervalMs,
+    int SampleCount,
+    int DroppedProbeCount,
+    int MinLatencyMs,
+    int P50LatencyMs,
+    int P95LatencyMs,
+    int P99LatencyMs,
+    int MaxLatencyMs);
+
+public sealed record PerformanceStopResponse(PerformanceSummary Summary);

@@ -1,0 +1,16 @@
+﻿{
+  Start: {
+    HasRunId: true,
+    ProbeIntervalMs: 50,
+    AutoStopAfterMs: 2000
+  },
+  Summary: {
+    HasRunId: true,
+    ProbeIntervalMs: 50,
+    SampleCountPositive: true,
+    DroppedProbeCountNonNegative: true,
+    P95: <50,
+    Max: <50
+  },
+  SecondStopMatchesFirst: true
+}

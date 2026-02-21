@@ -15,6 +15,8 @@ internal static class AgentServer
         PropertyNameCaseInsensitive = true
     };
 
+    private static readonly UiThreadLatencyRecorder UiThreadLatency = new();
+
     public static async Task RunAsync(string pipeName, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -85,6 +87,37 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case "wpf/performance_start":
+                    {
+                        var typedRequest = request.Params?.Deserialize<PerformanceStartRequest>(JsonOptions)
+                            ?? new PerformanceStartRequest();
+
+                        var dispatcher = Application.Current?.Dispatcher;
+                        if (dispatcher is null)
+                        {
+                            return new AgentResponse(
+                                Id: request.Id,
+                                Ok: false,
+                                Error: new AgentError("Application.Current.Dispatcher is not available. Is the target a WPF app?"));
+                        }
+
+                        var response = UiThreadLatency.Start(dispatcher, typedRequest);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }
+                case "wpf/performance_stop":
+                    {
+                        var typedRequest = request.Params?.Deserialize<PerformanceStopRequest>(JsonOptions)
+                            ?? throw new InvalidOperationException("Missing request params.");
+
+                        var response = UiThreadLatency.Stop(typedRequest.RunId);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }
                 case "wpf/find_elements":
                     return await RunOnUiAsync(() =>
                     {

@@ -153,6 +153,28 @@ public sealed partial class AutomationController
         return new AgentPingResponse(pong);
     }
 
+    public async Task<PerformanceStartResponse> PerformanceStartAsync(
+        int probeIntervalMs = 50,
+        int autoStopAfterMs = 30000,
+        bool resetIfRunning = false,
+        CancellationToken cancellationToken = default)
+    {
+        var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var request = new PerformanceStartRequest(probeIntervalMs, autoStopAfterMs, resetIfRunning);
+        return await client.CallAsync<PerformanceStartResponse>("wpf/performance_start", request, cancellationToken);
+    }
+
+    public async Task<PerformanceStopResponse> PerformanceStopAsync(
+        string runId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var request = new PerformanceStopRequest(runId.Trim());
+        return await client.CallAsync<PerformanceStopResponse>("wpf/performance_stop", request, cancellationToken);
+    }
+
     public async Task<GetBindingInfoResponse> GetBindingInfoAsync(
         ElementLocator? locator = null,
         string? elementId = null,
