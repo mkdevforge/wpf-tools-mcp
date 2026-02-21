@@ -797,7 +797,7 @@ public sealed partial class AutomationController : IDisposable
 
     private static bool TryGetClientBoundsScreen(Window window, out Rect bounds)
     {
-        bounds = default;
+        bounds = new Rect(0, 0, 0, 0);
 
         if (!OperatingSystem.IsWindows())
         {
