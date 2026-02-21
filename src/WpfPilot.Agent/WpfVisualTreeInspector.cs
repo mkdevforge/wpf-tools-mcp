@@ -1033,12 +1033,11 @@ internal static class WpfVisualTreeInspector
 
     private static (DependencyObject Element, string XPath) SelectMatchForLocator(
         IReadOnlyList<(DependencyObject Element, string XPath)> matches,
-        ElementLocator locator,
-        string strategyName)
+        ElementLocator locator)
     {
         if (matches.Count == 0)
         {
-            throw new InvalidOperationException($"wpf_resolve:not_found: Locator strategy '{strategyName}' did not match any elements.");
+            throw new InvalidOperationException("wpf_resolve:not_found: Locator did not match any elements.");
         }
 
         if (matches.Count == 1)
@@ -1053,17 +1052,96 @@ internal static class WpfVisualTreeInspector
                 throw new ArgumentOutOfRangeException(nameof(locator), "index must be >= 0.");
             }
 
-            if (index >= matches.Count)
+            var ordered = OrderMatchesForLocator(matches, locator);
+            if (index >= ordered.Count)
             {
                 throw new InvalidOperationException(
-                    $"wpf_resolve:not_found: Locator strategy '{strategyName}' index {index} is out of range (found {matches.Count}).");
+                    $"wpf_resolve:not_found: Locator index {index} is out of range (found {ordered.Count}).");
             }
 
-            return matches[index];
+            return ordered[index];
         }
 
-        throw new InvalidOperationException(
-            $"wpf_resolve:ambiguous: Locator strategy '{strategyName}' is ambiguous (found {matches.Count}). Provide 'index' to disambiguate.");
+        if (locator.Strict)
+        {
+            throw new InvalidOperationException(
+                $"wpf_resolve:ambiguous: Locator is ambiguous (found {matches.Count}). Provide 'index' to disambiguate.");
+        }
+
+        var orderedDefault = OrderMatchesForLocator(matches, locator);
+        return orderedDefault.Count > 0 ? orderedDefault[0] : matches[0];
+    }
+
+    private static IReadOnlyList<(DependencyObject Element, string XPath)> OrderMatchesForLocator(
+        IReadOnlyList<(DependencyObject Element, string XPath)> matches,
+        ElementLocator locator)
+    {
+        if (matches.Count <= 1)
+        {
+            return matches;
+        }
+
+        var list = matches.ToList();
+        list.Sort((a, b) =>
+        {
+            var cmp = locator.PreferVisible ? GetVisibleRank(a.Element).CompareTo(GetVisibleRank(b.Element)) : 0;
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = GetEnabledRank(a.Element).CompareTo(GetEnabledRank(b.Element));
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            var ba = GetBoundsWpf(a.Element);
+            var bb = GetBoundsWpf(b.Element);
+            cmp = (ba?.Y ?? int.MaxValue).CompareTo(bb?.Y ?? int.MaxValue);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = (ba?.X ?? int.MaxValue).CompareTo(bb?.X ?? int.MaxValue);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = string.Compare(GetAutomationId(a.Element), GetAutomationId(b.Element), StringComparison.Ordinal);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            return string.Compare(GetName(a.Element), GetName(b.Element), StringComparison.Ordinal);
+        });
+        return list;
+    }
+
+    private static int GetVisibleRank(DependencyObject element)
+    {
+        try
+        {
+            return IsVisibleWpf(element) ? 0 : 1;
+        }
+        catch
+        {
+            return 2;
+        }
+    }
+
+    private static int GetEnabledRank(DependencyObject element)
+    {
+        var enabled = GetIsEnabledWpf(element);
+        return enabled switch
+        {
+            true => 0,
+            false => 1,
+            _ => 2
+        };
     }
 
     private static (DependencyObject Element, string XPath) ResolveLocatorOrThrow(
@@ -1076,12 +1154,28 @@ internal static class WpfVisualTreeInspector
         int maxNodes,
         CancellationToken cancellationToken)
     {
+        if (IsEmptyLocator(locator))
+        {
+            throw new ArgumentException(
+                "Locator must specify at least one of: xpath, automationId, automationIdContains, name, nameContains, className, classNameContains, typeEquals, controlTypeEquals, index.");
+        }
+
         if (!string.IsNullOrWhiteSpace(locator.XPath))
         {
+            if (locator.Index is not null)
+            {
+                throw new ArgumentException("index cannot be used with xpath.", nameof(locator));
+            }
+
             var normalized = NormalizeXPath(locator.XPath);
             try
             {
                 var element = ResolveByXPath(treeService, window, normalized, visibleOnly, cancellationToken);
+                var mismatch = DescribeXPathFilterMismatchWpf(element, locator);
+                if (mismatch is not null)
+                {
+                    throw new InvalidOperationException(mismatch);
+                }
                 return (element, normalized);
             }
             catch (InvalidOperationException ex)
@@ -1099,38 +1193,9 @@ internal static class WpfVisualTreeInspector
             .Skip(1)
             .ToArray();
 
-        if (!string.IsNullOrWhiteSpace(locator.AutomationId))
+        if (IsIndexOnlyLocator(locator))
         {
-            var matches = descendants
-                .Where(e => string.Equals(GetAutomationId(e.Element), locator.AutomationId, StringComparison.Ordinal))
-                .ToArray();
-
-            return SelectMatchForLocator(matches, locator, "automationId");
-        }
-
-        if (!string.IsNullOrWhiteSpace(locator.Name))
-        {
-            var matches = descendants
-                .Where(e => string.Equals(GetName(e.Element), locator.Name, StringComparison.Ordinal))
-                .ToArray();
-
-            return SelectMatchForLocator(matches, locator, "name");
-        }
-
-        if (!string.IsNullOrWhiteSpace(locator.ClassName))
-        {
-            var matches = descendants
-                .Where(e => string.Equals(e.Element.GetType().FullName, locator.ClassName, StringComparison.Ordinal))
-                .ToArray();
-
-            return SelectMatchForLocator(matches, locator, "className");
-        }
-
-        if (locator.Index is int index &&
-            string.IsNullOrWhiteSpace(locator.AutomationId) &&
-            string.IsNullOrWhiteSpace(locator.Name) &&
-            string.IsNullOrWhiteSpace(locator.ClassName))
-        {
+            var index = locator.Index!.Value;
             if (index < 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(locator), "index must be >= 0.");
@@ -1144,7 +1209,239 @@ internal static class WpfVisualTreeInspector
             return descendants[index];
         }
 
-        throw new ArgumentException("Locator must specify one of: xpath, automationId, name, className, or index.");
+        var matches = descendants
+            .Where(e => MatchesLocatorWpf(e.Element, locator))
+            .ToArray();
+
+        return SelectMatchForLocator(matches, locator);
+    }
+
+    private static bool IsIndexOnlyLocator(ElementLocator locator)
+    {
+        return locator.Index is not null
+               && string.IsNullOrWhiteSpace(locator.AutomationId)
+               && string.IsNullOrWhiteSpace(locator.AutomationIdContains)
+               && string.IsNullOrWhiteSpace(locator.Name)
+               && string.IsNullOrWhiteSpace(locator.NameContains)
+               && string.IsNullOrWhiteSpace(locator.ClassName)
+               && string.IsNullOrWhiteSpace(locator.ClassNameContains)
+               && string.IsNullOrWhiteSpace(locator.TypeEquals)
+               && string.IsNullOrWhiteSpace(locator.ControlTypeEquals)
+               && string.IsNullOrWhiteSpace(locator.XPath);
+    }
+
+    private static bool IsEmptyLocator(ElementLocator locator)
+    {
+        return string.IsNullOrWhiteSpace(locator.AutomationId)
+               && string.IsNullOrWhiteSpace(locator.AutomationIdContains)
+               && string.IsNullOrWhiteSpace(locator.Name)
+               && string.IsNullOrWhiteSpace(locator.NameContains)
+               && string.IsNullOrWhiteSpace(locator.ClassName)
+               && string.IsNullOrWhiteSpace(locator.ClassNameContains)
+               && string.IsNullOrWhiteSpace(locator.TypeEquals)
+               && string.IsNullOrWhiteSpace(locator.ControlTypeEquals)
+               && string.IsNullOrWhiteSpace(locator.XPath)
+               && locator.Index is null;
+    }
+
+    private static string? DescribeXPathFilterMismatchWpf(DependencyObject element, ElementLocator locator)
+    {
+        var errors = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(locator.AutomationId))
+        {
+            var actual = GetAutomationId(element);
+            if (!string.Equals(actual, locator.AutomationId, StringComparison.Ordinal))
+            {
+                errors.Add($"automationId expected '{locator.AutomationId}' actual '{actual ?? ""}'");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.AutomationIdContains))
+        {
+            var expected = locator.AutomationIdContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetAutomationId(element) ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    errors.Add($"automationIdContains expected '{expected}' actual '{actual}'");
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.Name))
+        {
+            var actual = GetName(element);
+            if (!string.Equals(actual, locator.Name, StringComparison.Ordinal))
+            {
+                errors.Add($"name expected '{locator.Name}' actual '{actual ?? ""}'");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.NameContains))
+        {
+            var expected = locator.NameContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetName(element) ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    errors.Add($"nameContains expected '{expected}' actual '{actual}'");
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ClassName))
+        {
+            var actual = element.GetType().FullName;
+            if (!string.Equals(actual, locator.ClassName, StringComparison.Ordinal))
+            {
+                errors.Add($"className expected '{locator.ClassName}' actual '{actual ?? ""}'");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ClassNameContains))
+        {
+            var expected = locator.ClassNameContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = element.GetType().FullName ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    errors.Add($"classNameContains expected '{expected}' actual '{actual}'");
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ControlTypeEquals))
+        {
+            var expected = locator.ControlTypeEquals.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = element.GetType().Name;
+                var fullName = element.GetType().FullName;
+                if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(fullName, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"controlTypeEquals expected '{expected}' actual '{actual}'");
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.TypeEquals))
+        {
+            var expected = locator.TypeEquals.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = element.GetType().Name;
+                var fullName = element.GetType().FullName;
+                if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(fullName, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"typeEquals expected '{expected}' actual '{actual}'");
+                }
+            }
+        }
+
+        if (errors.Count == 0)
+        {
+            return null;
+        }
+
+        return $"wpf_resolve:xpath_resolved_but_filters_mismatch: {string.Join("; ", errors)}";
+    }
+
+    private static bool MatchesLocatorWpf(DependencyObject element, ElementLocator locator)
+    {
+        if (!string.IsNullOrWhiteSpace(locator.AutomationId) &&
+            !string.Equals(GetAutomationId(element), locator.AutomationId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.AutomationIdContains))
+        {
+            var expected = locator.AutomationIdContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetAutomationId(element) ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.Name) &&
+            !string.Equals(GetName(element), locator.Name, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.NameContains))
+        {
+            var expected = locator.NameContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetName(element) ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ClassName) &&
+            !string.Equals(element.GetType().FullName, locator.ClassName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ClassNameContains))
+        {
+            var expected = locator.ClassNameContains.Trim();
+            if (expected.Length > 0)
+            {
+                var fullName = element.GetType().FullName ?? "";
+                if (fullName.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ControlTypeEquals))
+        {
+            var expected = locator.ControlTypeEquals.Trim();
+            if (expected.Length > 0)
+            {
+                var typeName = element.GetType().Name;
+                var fullName = element.GetType().FullName;
+                if (!string.Equals(typeName, expected, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(fullName, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.TypeEquals))
+        {
+            var expected = locator.TypeEquals.Trim();
+            if (expected.Length > 0)
+            {
+                var typeName = element.GetType().Name;
+                var fullName = element.GetType().FullName;
+                if (!string.Equals(typeName, expected, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(fullName, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     public static GetPathToElementResponse GetPath(GetWpfPathRequest request, CancellationToken cancellationToken)

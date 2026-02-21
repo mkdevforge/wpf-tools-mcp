@@ -1036,8 +1036,9 @@ public sealed partial class AutomationController : IDisposable
                     rawWalker,
                     timeoutMs,
                     pollIntervalMs,
+                    ActionKind.Click,
                     cancellationToken)
-                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.Click);
         }
 
         TryScrollIntoView(element);
@@ -1221,8 +1222,9 @@ public sealed partial class AutomationController : IDisposable
                     rawWalker,
                     timeoutMs,
                     pollIntervalMs,
+                    ActionKind.Invoke,
                     cancellationToken)
-                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.Invoke);
         }
 
         TryScrollIntoView(element);
@@ -1340,8 +1342,9 @@ public sealed partial class AutomationController : IDisposable
                     rawWalker,
                     timeoutMs,
                     pollIntervalMs,
+                    ActionKind.TypeText,
                     cancellationToken)
-                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.TypeText);
         }
 
         TryScrollIntoView(element);
@@ -1499,8 +1502,9 @@ public sealed partial class AutomationController : IDisposable
                     rawWalker,
                     timeoutMs,
                     pollIntervalMs,
+                    ActionKind.SetValue,
                     cancellationToken)
-                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.SetValue);
         }
 
         TryScrollIntoView(element);
@@ -1667,8 +1671,9 @@ public sealed partial class AutomationController : IDisposable
                     rawWalker,
                     timeoutMs,
                     pollIntervalMs,
+                    ActionKind.SelectItem,
                     cancellationToken)
-                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.SelectItem);
         }
 
         TryScrollIntoView(container);
@@ -1925,7 +1930,7 @@ public sealed partial class AutomationController : IDisposable
         }
         else if (request.ContainerLocator is not null)
         {
-            container = ResolveElement(window, request.ContainerLocator, controlWalker, rawWalker);
+            container = ResolveElement(window, request.ContainerLocator, controlWalker, rawWalker, ActionKind.ScrollToElement);
             TryScrollIntoView(container);
         }
 
@@ -1956,8 +1961,9 @@ public sealed partial class AutomationController : IDisposable
                     rawWalker,
                     timeoutMs,
                     pollIntervalMs,
+                    ActionKind.ScrollToElement,
                     cancellationToken)
-                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.ScrollToElement);
         }
 
         var elementToScroll = element;
@@ -2152,8 +2158,9 @@ public sealed partial class AutomationController : IDisposable
                     rawWalker,
                     timeoutMs,
                     pollIntervalMs,
+                    ActionKind.Drag,
                     cancellationToken)
-                : ResolveElement(window, request.Locator!, controlWalker, rawWalker);
+                : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.Drag);
         TryScrollIntoView(source);
 
         if (request.AutoWait)
@@ -2226,8 +2233,9 @@ public sealed partial class AutomationController : IDisposable
                     rawWalker,
                     timeoutMs,
                     pollIntervalMs,
+                    ActionKind.Drag,
                     cancellationToken)
-                : ResolveElement(window, request.TargetLocator, controlWalker, rawWalker);
+                : ResolveElement(window, request.TargetLocator, controlWalker, rawWalker, ActionKind.Drag);
             TryScrollIntoView(target);
             if (request.AutoWait)
             {
@@ -2396,7 +2404,7 @@ public sealed partial class AutomationController : IDisposable
                 }
                 else
                 {
-                    element = TryResolveWithMissingAsNull(window, request.Locator!, controlWalker, rawWalker);
+                    element = TryResolveWithMissingAsNull(window, request.Locator!, controlWalker, rawWalker, ActionKind.Inspect);
                 }
             }
             catch
@@ -2531,11 +2539,12 @@ public sealed partial class AutomationController : IDisposable
         Window window,
         ElementLocator locator,
         ITreeWalker controlWalker,
-        ITreeWalker rawWalker)
+        ITreeWalker rawWalker,
+        ActionKind actionKind)
     {
         try
         {
-            return ResolveElement(window, locator, controlWalker, rawWalker);
+            return ResolveElement(window, locator, controlWalker, rawWalker, actionKind);
         }
         catch (InvalidOperationException ex) when (IsWaitableNotFound(ex))
         {
@@ -2792,13 +2801,34 @@ public sealed partial class AutomationController : IDisposable
         int pollIntervalMs,
         CancellationToken cancellationToken)
     {
+        return await ResolveUiaElementWithWaitAsync(
+            window,
+            locator,
+            controlWalker,
+            rawWalker,
+            timeoutMs,
+            pollIntervalMs,
+            ActionKind.Inspect,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<AutomationElement> ResolveUiaElementWithWaitAsync(
+        Window window,
+        ElementLocator locator,
+        ITreeWalker controlWalker,
+        ITreeWalker rawWalker,
+        int timeoutMs,
+        int pollIntervalMs,
+        ActionKind actionKind,
+        CancellationToken cancellationToken)
+    {
         var start = Stopwatch.GetTimestamp();
 
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var element = TryResolveWithMissingAsNull(window, locator, controlWalker, rawWalker);
+            var element = TryResolveWithMissingAsNull(window, locator, controlWalker, rawWalker, actionKind);
             if (element is not null)
             {
                 return element;
@@ -5123,36 +5153,279 @@ public sealed partial class AutomationController : IDisposable
             IsEnabled: window.IsEnabled);
     }
 
-    private static AutomationElement ResolveElement(Window window, ElementLocator locator, ITreeWalker controlWalker, ITreeWalker rawWalker)
+    private enum ActionKind
+    {
+        Inspect,
+        Click,
+        Invoke,
+        TypeText,
+        SetValue,
+        SelectItem,
+        ScrollToElement,
+        Drag
+    }
+
+    private static AutomationElement ResolveElement(
+        Window window,
+        ElementLocator locator,
+        ITreeWalker controlWalker,
+        ITreeWalker rawWalker,
+        ActionKind actionKind = ActionKind.Inspect)
     {
         if (locator is null)
         {
             throw new ArgumentNullException(nameof(locator));
         }
 
-        var strategies = new List<Func<AutomationElement?>>()
+        if (IsEmptyLocator(locator))
         {
-            () => TryResolveByXPath(window, locator, rawWalker),
-            () => TryResolveByAutomationId(window, locator, controlWalker),
-            () => TryResolveByAutomationIdContains(window, locator, controlWalker),
-            () => TryResolveByName(window, locator, controlWalker),
-            () => TryResolveByNameContains(window, locator, controlWalker),
-            () => TryResolveByClassName(window, locator, controlWalker),
-            () => TryResolveByClassNameContains(window, locator, controlWalker),
-            () => TryResolveByTypeEquals(window, locator, controlWalker),
-            () => TryResolveByIndexOnly(window, locator, controlWalker),
-        };
+            throw new ArgumentException(
+                "Locator must specify at least one of: xpath, automationId, automationIdContains, name, nameContains, className, classNameContains, typeEquals, controlTypeEquals, index.",
+                nameof(locator));
+        }
 
-        foreach (var strategy in strategies)
+        if (!string.IsNullOrWhiteSpace(locator.XPath))
         {
-            var resolved = strategy();
-            if (resolved is not null)
+            if (locator.Index is not null)
             {
-                return resolved;
+                throw new ArgumentException("index cannot be used with xpath.", nameof(locator));
+            }
+
+            var resolved = TryResolveByXPath(window, locator, rawWalker)
+                ?? throw new InvalidOperationException("Locator did not match any element.");
+
+            var mismatch = DescribeXPathFilterMismatchUia(resolved, locator);
+            if (mismatch is not null)
+            {
+                throw new InvalidOperationException(mismatch);
+            }
+
+            return resolved;
+        }
+
+        var indexOnly = TryResolveByIndexOnly(window, locator, controlWalker);
+        if (indexOnly is not null)
+        {
+            return indexOnly;
+        }
+
+        var matches = EnumerateSelfAndDescendantsDepthFirst(window, controlWalker)
+            .Where(e => MatchesLocatorUia(e, locator))
+            .ToArray();
+
+        if (matches.Length == 0)
+        {
+            throw new InvalidOperationException("Locator did not match any element.");
+        }
+
+        return SelectMatch(matches, locator, actionKind)
+            ?? throw new InvalidOperationException("Locator did not match any element.");
+    }
+
+    private static bool IsEmptyLocator(ElementLocator locator)
+    {
+        return string.IsNullOrWhiteSpace(locator.AutomationId)
+               && string.IsNullOrWhiteSpace(locator.AutomationIdContains)
+               && string.IsNullOrWhiteSpace(locator.Name)
+               && string.IsNullOrWhiteSpace(locator.NameContains)
+               && string.IsNullOrWhiteSpace(locator.ClassName)
+               && string.IsNullOrWhiteSpace(locator.ClassNameContains)
+               && string.IsNullOrWhiteSpace(locator.TypeEquals)
+               && string.IsNullOrWhiteSpace(locator.ControlTypeEquals)
+               && string.IsNullOrWhiteSpace(locator.XPath)
+               && locator.Index is null;
+    }
+
+    private static string? DescribeXPathFilterMismatchUia(AutomationElement element, ElementLocator locator)
+    {
+        var errors = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(locator.AutomationId))
+        {
+            var actual = GetAutomationId(element);
+            if (!string.Equals(actual, locator.AutomationId, StringComparison.Ordinal))
+            {
+                errors.Add($"automationId expected '{locator.AutomationId}' actual '{actual ?? ""}'");
             }
         }
 
-        throw new InvalidOperationException("Locator did not match any element.");
+        if (!string.IsNullOrWhiteSpace(locator.AutomationIdContains))
+        {
+            var expected = locator.AutomationIdContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetAutomationId(element) ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    errors.Add($"automationIdContains expected '{expected}' actual '{actual}'");
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.Name))
+        {
+            var actual = GetName(element);
+            if (!string.Equals(actual, locator.Name, StringComparison.Ordinal))
+            {
+                errors.Add($"name expected '{locator.Name}' actual '{actual ?? ""}'");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.NameContains))
+        {
+            var expected = locator.NameContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetName(element) ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    errors.Add($"nameContains expected '{expected}' actual '{actual}'");
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ClassName))
+        {
+            var actual = GetClassName(element);
+            if (!string.Equals(actual, locator.ClassName, StringComparison.Ordinal))
+            {
+                errors.Add($"className expected '{locator.ClassName}' actual '{actual ?? ""}'");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ClassNameContains))
+        {
+            var expected = locator.ClassNameContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetClassName(element) ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    errors.Add($"classNameContains expected '{expected}' actual '{actual}'");
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ControlTypeEquals))
+        {
+            var expected = locator.ControlTypeEquals.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = element.ControlType.ToString();
+                if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"controlTypeEquals expected '{expected}' actual '{actual}'");
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.TypeEquals))
+        {
+            var expected = locator.TypeEquals.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetXPathLabel(element);
+                if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"typeEquals expected '{expected}' actual '{actual}'");
+                }
+            }
+        }
+
+        if (errors.Count == 0)
+        {
+            return null;
+        }
+
+        return $"xpath_resolved_but_filters_mismatch: {string.Join("; ", errors)}";
+    }
+
+    private static bool MatchesLocatorUia(AutomationElement element, ElementLocator locator)
+    {
+        if (!string.IsNullOrWhiteSpace(locator.AutomationId) &&
+            !string.Equals(GetAutomationId(element), locator.AutomationId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.AutomationIdContains))
+        {
+            var expected = locator.AutomationIdContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetAutomationId(element) ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.Name) &&
+            !string.Equals(GetName(element), locator.Name, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.NameContains))
+        {
+            var expected = locator.NameContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetName(element) ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ClassName) &&
+            !string.Equals(GetClassName(element), locator.ClassName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ClassNameContains))
+        {
+            var expected = locator.ClassNameContains.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetClassName(element) ?? "";
+                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.ControlTypeEquals))
+        {
+            var expected = locator.ControlTypeEquals.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = element.ControlType.ToString();
+                if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(locator.TypeEquals))
+        {
+            var expected = locator.TypeEquals.Trim();
+            if (expected.Length > 0)
+            {
+                var actual = GetXPathLabel(element);
+                if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private static AutomationElement? TryResolveByAutomationId(Window window, ElementLocator locator, ITreeWalker walker)
@@ -5166,7 +5439,7 @@ public sealed partial class AutomationController : IDisposable
             .Where(e => string.Equals(GetAutomationId(e), locator.AutomationId, StringComparison.Ordinal))
             .ToArray();
 
-        return SelectMatch(matches, locator, "automationId");
+        return SelectMatch(matches, locator, ActionKind.Inspect);
     }
 
     private static AutomationElement? TryResolveByAutomationIdContains(Window window, ElementLocator locator, ITreeWalker walker)
@@ -5186,7 +5459,7 @@ public sealed partial class AutomationController : IDisposable
             .Where(e => (GetAutomationId(e) ?? "").Contains(value, StringComparison.Ordinal))
             .ToArray();
 
-        return SelectMatch(matches, locator, "automationIdContains");
+        return SelectMatch(matches, locator, ActionKind.Inspect);
     }
 
     private static AutomationElement? TryResolveByName(Window window, ElementLocator locator, ITreeWalker walker)
@@ -5200,7 +5473,7 @@ public sealed partial class AutomationController : IDisposable
             .Where(e => string.Equals(GetName(e), locator.Name, StringComparison.Ordinal))
             .ToArray();
 
-        return SelectMatch(matches, locator, "name");
+        return SelectMatch(matches, locator, ActionKind.Inspect);
     }
 
     private static AutomationElement? TryResolveByNameContains(Window window, ElementLocator locator, ITreeWalker walker)
@@ -5220,7 +5493,7 @@ public sealed partial class AutomationController : IDisposable
             .Where(e => (GetName(e) ?? "").Contains(value, StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
-        return SelectMatch(matches, locator, "nameContains");
+        return SelectMatch(matches, locator, ActionKind.Inspect);
     }
 
     private static AutomationElement? TryResolveByClassName(Window window, ElementLocator locator, ITreeWalker walker)
@@ -5234,7 +5507,7 @@ public sealed partial class AutomationController : IDisposable
             .Where(e => string.Equals(GetClassName(e), locator.ClassName, StringComparison.Ordinal))
             .ToArray();
 
-        return SelectMatch(matches, locator, "className");
+        return SelectMatch(matches, locator, ActionKind.Inspect);
     }
 
     private static AutomationElement? TryResolveByClassNameContains(Window window, ElementLocator locator, ITreeWalker walker)
@@ -5254,7 +5527,7 @@ public sealed partial class AutomationController : IDisposable
             .Where(e => (GetClassName(e) ?? "").Contains(value, StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
-        return SelectMatch(matches, locator, "classNameContains");
+        return SelectMatch(matches, locator, ActionKind.Inspect);
     }
 
     private static AutomationElement? TryResolveByTypeEquals(Window window, ElementLocator locator, ITreeWalker walker)
@@ -5274,7 +5547,7 @@ public sealed partial class AutomationController : IDisposable
             .Where(e => string.Equals(GetXPathLabel(e), value, StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
-        return SelectMatch(matches, locator, "typeEquals");
+        return SelectMatch(matches, locator, ActionKind.Inspect);
     }
 
     private static AutomationElement? TryResolveByXPath(Window window, ElementLocator locator, ITreeWalker walker)
@@ -5357,6 +5630,7 @@ public sealed partial class AutomationController : IDisposable
             !string.IsNullOrWhiteSpace(locator.ClassName) ||
             !string.IsNullOrWhiteSpace(locator.ClassNameContains) ||
             !string.IsNullOrWhiteSpace(locator.TypeEquals) ||
+            !string.IsNullOrWhiteSpace(locator.ControlTypeEquals) ||
             !string.IsNullOrWhiteSpace(locator.XPath))
         {
             return null;
@@ -5377,7 +5651,7 @@ public sealed partial class AutomationController : IDisposable
         return descendants[index];
     }
 
-    private static AutomationElement? SelectMatch(IReadOnlyList<AutomationElement> matches, ElementLocator locator, string strategyName)
+    private static AutomationElement? SelectMatch(IReadOnlyList<AutomationElement> matches, ElementLocator locator, ActionKind actionKind)
     {
         if (matches.Count == 0)
         {
@@ -5391,29 +5665,35 @@ public sealed partial class AutomationController : IDisposable
                 return matches[0];
             }
 
+            var orderedForAction = OrderMatchesForAction(matches, locator, actionKind);
             if (locator.Strict)
             {
-                var details = BuildAmbiguousCandidatesDetails(matches, maxCandidates: 5);
+                var details = BuildAmbiguousCandidatesDetails(orderedForAction, maxCandidates: 5);
                 throw new InvalidOperationException(
-                    $"Locator strategy '{strategyName}' is ambiguous (found {matches.Count}). Provide 'index' to disambiguate."
+                    $"Locator is ambiguous (found {matches.Count}). Provide 'index' to disambiguate."
                     + details);
             }
 
-            var ordered = OrderMatches(matches, locator);
-            return ordered.Count > 0 ? ordered[0] : matches[0];
+            return orderedForAction.Count > 0 ? orderedForAction[0] : matches[0];
         }
 
         var index = locator.Index.Value;
-        if (index < 0 || index >= matches.Count)
+        if (index < 0)
         {
-            throw new InvalidOperationException(
-                $"Locator strategy '{strategyName}' found {matches.Count} matches but index {index} is out of range.");
+            throw new InvalidOperationException("index must be >= 0.");
         }
 
-        return matches[index];
+        var ordered = OrderMatchesDeterministic(matches, locator);
+        if (index >= ordered.Count)
+        {
+            throw new InvalidOperationException(
+                $"Locator matched {ordered.Count} elements but index {index} is out of range.");
+        }
+
+        return ordered[index];
     }
 
-    private static IReadOnlyList<AutomationElement> OrderMatches(IReadOnlyList<AutomationElement> matches, ElementLocator locator)
+    private static IReadOnlyList<AutomationElement> OrderMatchesDeterministic(IReadOnlyList<AutomationElement> matches, ElementLocator locator)
     {
         if (matches.Count <= 1)
         {
@@ -5461,6 +5741,274 @@ public sealed partial class AutomationController : IDisposable
             return cmp;
         });
         return list;
+    }
+
+    private static IReadOnlyList<AutomationElement> OrderMatchesForAction(IReadOnlyList<AutomationElement> matches, ElementLocator locator, ActionKind actionKind)
+    {
+        if (matches.Count <= 1)
+        {
+            return matches;
+        }
+
+        var list = matches.ToList();
+        list.Sort((a, b) =>
+        {
+            var offA = locator.PreferVisible ? GetOffscreenRank(a) : 0;
+            var offB = locator.PreferVisible ? GetOffscreenRank(b) : 0;
+            var cmp = offA.CompareTo(offB);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = GetEnabledRank(a).CompareTo(GetEnabledRank(b));
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = GetActionAffinityRank(a, actionKind).CompareTo(GetActionAffinityRank(b, actionKind));
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            var ba = TryGetBounds(a);
+            var bb = TryGetBounds(b);
+            cmp = (ba?.Top ?? int.MaxValue).CompareTo(bb?.Top ?? int.MaxValue);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = (ba?.Left ?? int.MaxValue).CompareTo(bb?.Left ?? int.MaxValue);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = string.Compare(GetAutomationId(a), GetAutomationId(b), StringComparison.Ordinal);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = string.Compare(GetName(a), GetName(b), StringComparison.Ordinal);
+            return cmp;
+        });
+        return list;
+    }
+
+    private static int GetActionAffinityRank(AutomationElement element, ActionKind actionKind)
+    {
+        switch (actionKind)
+        {
+            case ActionKind.Invoke:
+                return TryIsInvokeSupported(element) ? 0 : 1;
+            case ActionKind.Click:
+                {
+                    if (TryIsInvokeSupported(element))
+                    {
+                        return 0;
+                    }
+
+                    var clickable = TryIsClickableControlType(element);
+                    var hasClickPoint = TryHasClickablePoint(element);
+                    if (clickable && hasClickPoint)
+                    {
+                        return 1;
+                    }
+
+                    if (hasClickPoint)
+                    {
+                        return 2;
+                    }
+
+                    return 3;
+                }
+            case ActionKind.TypeText:
+                {
+                    if (TryHasWritableValuePattern(element))
+                    {
+                        return 0;
+                    }
+
+                    try
+                    {
+                        if (element.ControlType == ControlType.Edit)
+                        {
+                            return 1;
+                        }
+                    }
+                    catch
+                    {
+                    }
+
+                    return TryHasValuePattern(element) ? 2 : 3;
+                }
+            case ActionKind.SetValue:
+                {
+                    if (TryHasWritableRangeValuePattern(element))
+                    {
+                        return 0;
+                    }
+
+                    if (TryHasWritableValuePattern(element))
+                    {
+                        return 1;
+                    }
+
+                    return TryHasRangeValuePattern(element) || TryHasValuePattern(element) ? 2 : 3;
+                }
+            case ActionKind.SelectItem:
+                {
+                    try
+                    {
+                        if (element.ControlType == ControlType.ComboBox)
+                        {
+                            return 0;
+                        }
+                    }
+                    catch
+                    {
+                    }
+
+                    return TryHasSelectionPattern(element) ? 0 : 1;
+                }
+            case ActionKind.ScrollToElement:
+                return TryHasScrollItemPattern(element) ? 0 : 1;
+            case ActionKind.Drag:
+                return TryHasValidBounds(element) ? 0 : 1;
+            case ActionKind.Inspect:
+            default:
+                return 0;
+        }
+    }
+
+    private static bool TryHasValidBounds(AutomationElement element)
+    {
+        try
+        {
+            var bounds = element.BoundingRectangle;
+            return bounds.Width > 0 && bounds.Height > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryHasClickablePoint(AutomationElement element)
+    {
+        try
+        {
+            return element.TryGetClickablePoint(out _);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryIsInvokeSupported(AutomationElement element)
+    {
+        try
+        {
+            return element.Patterns.Invoke.IsSupported;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryHasSelectionPattern(AutomationElement element)
+    {
+        try
+        {
+            return element.Patterns.Selection.IsSupported;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryHasScrollItemPattern(AutomationElement element)
+    {
+        try
+        {
+            return element.Patterns.ScrollItem.IsSupported;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryHasRangeValuePattern(AutomationElement element)
+    {
+        try
+        {
+            return element.Patterns.RangeValue.IsSupported;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryHasWritableRangeValuePattern(AutomationElement element)
+    {
+        try
+        {
+            var pattern = element.Patterns.RangeValue.PatternOrDefault;
+            return pattern is not null && pattern.IsReadOnly == false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryHasValuePattern(AutomationElement element)
+    {
+        try
+        {
+            return element.Patterns.Value.IsSupported;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryHasWritableValuePattern(AutomationElement element)
+    {
+        try
+        {
+            var pattern = element.Patterns.Value.PatternOrDefault;
+            return pattern is not null && pattern.IsReadOnly == false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryIsClickableControlType(AutomationElement element)
+    {
+        try
+        {
+            return element.ControlType == ControlType.Button
+                   || element.ControlType == ControlType.Hyperlink
+                   || element.ControlType == ControlType.MenuItem
+                   || element.ControlType == ControlType.SplitButton;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static int GetOffscreenRank(AutomationElement element)

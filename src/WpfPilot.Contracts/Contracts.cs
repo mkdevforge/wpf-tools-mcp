@@ -52,6 +52,7 @@ public sealed record ElementLocator(
     [property: JsonPropertyName("className")] string? ClassName = null,
     [property: JsonPropertyName("classNameContains")] string? ClassNameContains = null,
     [property: JsonPropertyName("typeEquals")] string? TypeEquals = null,
+    [property: JsonPropertyName("controlTypeEquals")] string? ControlTypeEquals = null,
     [property: JsonPropertyName("xpath")] string? XPath = null,
     [property: JsonPropertyName("index")] int? Index = null,
     [property: JsonPropertyName("preferVisible")] bool PreferVisible = true,
