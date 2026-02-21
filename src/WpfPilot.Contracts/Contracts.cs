@@ -435,8 +435,7 @@ public sealed record GetUiaCoverageReportRequest(
     bool InteractiveOnly = true,
     InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     int MaxNodes = 5000,
-    int MaxFindings = 200,
-    bool IncludePassing = false);
+    int MaxFindings = 200);
 
 public sealed record UiaCoverageSummary(
     int ScannedNodes,

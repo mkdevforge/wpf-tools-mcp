@@ -2154,13 +2154,46 @@ internal static class WpfVisualTreeInspector
             return findings;
         }
 
+        var peerName = "";
+        try
+        {
+            peerName = peer.GetName() ?? "";
+        }
+        catch
+        {
+        }
+
+        var hasPeerName = !string.IsNullOrWhiteSpace(peerName);
+
+        var automationName = "";
+        try
+        {
+            automationName = AutomationProperties.GetName(element) ?? "";
+        }
+        catch
+        {
+        }
+
+        var hasAutomationPropertiesName = !string.IsNullOrWhiteSpace(automationName);
+        var hasAutomationId = !string.IsNullOrWhiteSpace(elementRef.AutomationId);
+
         if (isInteractive && !HasAnyActionablePattern(peer))
         {
             findings.Add(new UiaCoverageFinding(
                 IssueCode: "no_actionable_patterns",
                 Severity: "warning",
                 Element: elementRef,
-                Details: ["AutomationPeer exists but exposes no common interaction patterns (Invoke/Value/RangeValue/Toggle/Selection/Scroll)."],
+                Details: hasPeerName
+                    ?
+                    [
+                        "AutomationPeer exists but exposes no common interaction patterns (Invoke/Value/RangeValue/Toggle/Selection/Scroll).",
+                        "peer_name_present"
+                    ]
+                    :
+                    [
+                        "AutomationPeer exists but exposes no common interaction patterns (Invoke/Value/RangeValue/Toggle/Selection/Scroll).",
+                        "peer_name_empty"
+                    ],
                 Suggestions:
                 [
                     "If this control is interactive, implement UIA patterns by overriding AutomationPeer.GetPattern().",
@@ -2169,15 +2202,19 @@ internal static class WpfVisualTreeInspector
                 ]));
         }
 
-        var hasName = !string.IsNullOrWhiteSpace(elementRef.Name);
-        var hasAutomationId = !string.IsNullOrWhiteSpace(elementRef.AutomationId);
-        if (isInteractive && !hasName && !hasAutomationId)
+        if (isInteractive && !hasPeerName && !hasAutomationPropertiesName && !hasAutomationId)
         {
             findings.Add(new UiaCoverageFinding(
                 IssueCode: "missing_accessible_name",
                 Severity: "warning",
                 Element: elementRef,
-                Details: ["Element has no accessible name (AutomationProperties.Name) and no AutomationId."],
+                Details:
+                [
+                    "Element has no accessible name (UIA Name / AutomationProperties.Name) and no AutomationId.",
+                    "peer_name_empty",
+                    "automation_properties_name_empty",
+                    "automation_id_empty"
+                ],
                 Suggestions:
                 [
                     "Set AutomationProperties.Name to an accessible, user-facing label.",

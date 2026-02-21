@@ -2,22 +2,6 @@
   Truncated: false,
   Findings: [
     {
-      IssueCode: missing_accessible_name,
-      Severity: warning,
-      Element: {
-        Type: Button
-      },
-      SuggestionsCount: 2
-    },
-    {
-      IssueCode: missing_accessible_name,
-      Severity: warning,
-      Element: {
-        Type: MainWindow
-      },
-      SuggestionsCount: 2
-    },
-    {
       IssueCode: no_actionable_patterns,
       Severity: warning,
       Element: {

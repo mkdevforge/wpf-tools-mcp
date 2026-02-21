@@ -16,9 +16,9 @@ public static class SubscriptionTools
         [Description("Session ID")] string sessionId,
         [Description("Native window handle")] long? windowHandle = null,
         [Description("Optional WPF XPath root for subtree")] string? rootXPath = null,
-        [Description("Maximum depth (1 = root only)")] int depth = 6,
+        [Description("Maximum depth (1 = root only)")] int depth = 12,
         [Description("Maximum errors returned per scan")] int maxErrors = 200,
-        [Description("Maximum nodes scanned per scan")] int maxNodes = 2000,
+        [Description("Maximum nodes scanned per scan")] int maxNodes = 5000,
         [Description("Polling interval (ms)")] int pollIntervalMs = 1000,
         [Description("Max queued events (drops oldest when full)")] int maxQueue = 200,
         CancellationToken cancellationToken = default) =>
@@ -69,4 +69,3 @@ public static class SubscriptionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() => Task.FromResult(subscriptions.Unsubscribe(sessionId, subscriptionId)));
 }
-

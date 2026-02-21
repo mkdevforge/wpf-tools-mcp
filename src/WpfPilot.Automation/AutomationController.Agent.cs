@@ -239,7 +239,6 @@ public sealed partial class AutomationController
         InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         int maxNodes = 5000,
         int maxFindings = 200,
-        bool includePassing = false,
         CancellationToken cancellationToken = default)
     {
         var client = await EnsureAgentConnectedAsync(cancellationToken);
@@ -250,8 +249,7 @@ public sealed partial class AutomationController
             InteractiveOnly: interactiveOnly,
             InteractiveMode: interactiveMode,
             MaxNodes: maxNodes,
-            MaxFindings: maxFindings,
-            IncludePassing: includePassing);
+            MaxFindings: maxFindings);
 
         return await client.CallAsync<GetUiaCoverageReportResponse>("wpf/uia_coverage_report", request, cancellationToken);
     }

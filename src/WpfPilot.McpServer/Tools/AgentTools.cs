@@ -79,7 +79,6 @@ public static class AgentTools
         [Description("Interactive detection mode")] InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         [Description("Maximum nodes scanned")] int maxNodes = 5000,
         [Description("Maximum findings returned")] int maxFindings = 200,
-        [Description("Include passing elements (diagnostic; verbose)")] bool includePassing = false,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -93,7 +92,6 @@ public static class AgentTools
                     interactiveMode,
                     maxNodes,
                     maxFindings,
-                    includePassing,
                     cancellationToken),
                 cancellationToken);
         });

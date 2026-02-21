@@ -75,9 +75,7 @@ public sealed class BindingSubscriptionSnapshots
         {
             ["sessionId"] = _sessionId,
             ["pollIntervalMs"] = 200,
-            ["maxQueue"] = 100,
-            ["depth"] = 12,
-            ["maxNodes"] = 5000
+            ["maxQueue"] = 100
         });
 
         var poll = await _mcp.CallToolAsync<PollSubscriptionResponse>("poll_subscription", new Dictionary<string, object?>
