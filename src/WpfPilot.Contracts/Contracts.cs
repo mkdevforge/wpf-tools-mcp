@@ -196,7 +196,9 @@ public sealed record HighlightElementRequest(
 public sealed record HighlightElementResponse(
     bool Highlighted,
     Rect Bounds,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MethodUsed = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null);
 
 public sealed record FocusWindowRequest(long? WindowHandle = null, string? Title = null);
 
@@ -541,14 +543,27 @@ public sealed record GetUiaCoverageReportResponse(
 public sealed record GetDataContextRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
+    DataContextMode Mode = DataContextMode.Summary,
     int MaxDepth = 2,
     int MaxPropertiesPerObject = 50,
     int MaxStringLength = 2000,
-    bool IncludeNulls = false);
+    bool IncludeNulls = false,
+    bool IncludeFrameworkProperties = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? PropertyAllowList = null);
 
 public sealed record GetDataContextResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DataContextType,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonNode? Data);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonNode? Data,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Summary = null,
+    bool Truncated = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum DataContextMode
+{
+    Summary,
+    Full
+}
 
 // Milestone 4 (computed properties / style / template)
 

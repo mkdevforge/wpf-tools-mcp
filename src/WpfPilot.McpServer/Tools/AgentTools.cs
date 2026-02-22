@@ -103,17 +103,31 @@ public static class AgentTools
         [Description("Element locator (WPF XPath recommended)")] ElementLocator? locator = null,
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Native window handle")] long? windowHandle = null,
+        [Description("Serialization mode (summary|full)")] DataContextMode mode = DataContextMode.Summary,
         [Description("Maximum object graph depth")] int maxDepth = 2,
         [Description("Maximum properties per object")] int maxPropertiesPerObject = 50,
         [Description("Maximum string length")] int maxStringLength = 2000,
         [Description("Include null values")] bool includeNulls = false,
+        [Description("Include framework object properties (WPF/Dispatcher/etc) in summary mode")] bool includeFrameworkProperties = false,
+        [Description("Optional root property allowlist (summary mode)")] string[]? propertyAllowList = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
             var hasElementId = !string.IsNullOrWhiteSpace(elementId);
             return automation.RunExclusiveAsync(
-                () => automation.GetDataContextAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, maxDepth, maxPropertiesPerObject, maxStringLength, includeNulls, cancellationToken),
+                () => automation.GetDataContextAsync(
+                    locator: locator,
+                    elementId: elementId,
+                    windowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                    mode: mode,
+                    maxDepth: maxDepth,
+                    maxPropertiesPerObject: maxPropertiesPerObject,
+                    maxStringLength: maxStringLength,
+                    includeNulls: includeNulls,
+                    includeFrameworkProperties: includeFrameworkProperties,
+                    propertyAllowList: propertyAllowList,
+                    cancellationToken: cancellationToken),
                 cancellationToken);
         });
 

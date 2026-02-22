@@ -81,6 +81,8 @@ public sealed partial class AutomationController
             }
 
             var shown = false;
+            string? methodUsed = null;
+            string? error = null;
 
             if (backend == InspectionBackend.Wpf)
             {
@@ -103,22 +105,30 @@ public sealed partial class AutomationController
                         cancellationToken).ConfigureAwait(false);
 
                     shown = agentResult.Highlighted;
+                    if (shown)
+                    {
+                        methodUsed = "wpf_agent";
+                    }
                 }
             }
 
             if (!shown)
             {
-                shown = await HighlightOverlay.ShowAsync(
+                var overlayResult = await HighlightOverlay.ShowAsync(
                     bounds,
                     request.Color,
                     request.Thickness,
                     request.DurationMs,
                     cancellationToken).ConfigureAwait(false);
+
+                shown = overlayResult.Shown;
+                methodUsed = "win32_overlay";
+                error = overlayResult.Error;
             }
 
             var response = shown
-                ? new HighlightElementResponse(Highlighted: true, Bounds: bounds)
-                : new HighlightElementResponse(Highlighted: false, Bounds: bounds, Reason: "overlay_failed");
+                ? new HighlightElementResponse(Highlighted: true, Bounds: bounds, MethodUsed: methodUsed)
+                : new HighlightElementResponse(Highlighted: false, Bounds: bounds, Reason: "overlay_failed", MethodUsed: methodUsed, Error: error);
 
             trace?.SetSummary($"{backend} highlighted={response.Highlighted} bounds={bounds.Width}x{bounds.Height}");
             return response;

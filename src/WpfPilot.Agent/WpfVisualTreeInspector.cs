@@ -2757,13 +2757,16 @@ internal static class WpfVisualTreeInspector
         int MaxDepth,
         int MaxPropertiesPerObject,
         int MaxStringLength,
-        bool IncludeNulls);
+        bool IncludeNulls,
+        bool IncludeFrameworkProperties,
+        HashSet<string>? PropertyAllowList);
 
-    private static JsonNode? SerializeDataContextValue(
+    private static JsonNode? SerializeDataContextValueFull(
         object? value,
         DataContextSerializationOptions options,
         int remainingDepth,
         HashSet<object> visited,
+        ref bool truncated,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -2832,6 +2835,188 @@ internal static class WpfVisualTreeInspector
         if (value is IDictionary dictionary)
         {
             var obj = new JsonObject();
+            var dictCount = 0;
+
+            foreach (DictionaryEntry entry in dictionary)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (dictCount >= options.MaxPropertiesPerObject)
+                {
+                    truncated = true;
+                    break;
+                }
+
+                var key = entry.Key?.ToString() ?? "null";
+                var node = SerializeDataContextValueFull(entry.Value, options, remainingDepth - 1, visited, ref truncated, cancellationToken);
+                if (node is null && !options.IncludeNulls)
+                {
+                    continue;
+                }
+
+                obj[key] = node;
+                dictCount++;
+            }
+
+            return obj;
+        }
+
+        if (value is IEnumerable enumerable)
+        {
+            var array = new JsonArray();
+            var itemCount = 0;
+
+            foreach (var item in enumerable)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (itemCount >= options.MaxPropertiesPerObject)
+                {
+                    array.Add(JsonValue.Create("<truncated>"));
+                    truncated = true;
+                    break;
+                }
+
+                var node = SerializeDataContextValueFull(item, options, remainingDepth - 1, visited, ref truncated, cancellationToken);
+                if (node is null && !options.IncludeNulls)
+                {
+                    array.Add(null);
+                }
+                else
+                {
+                    array.Add(node);
+                }
+
+                itemCount++;
+            }
+
+            return array;
+        }
+
+        var valueType = value.GetType();
+        var allProperties = valueType
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
+            .OrderBy(p => p.Name, StringComparer.Ordinal)
+            .ToArray();
+
+        if (allProperties.Length > options.MaxPropertiesPerObject)
+        {
+            truncated = true;
+        }
+
+        var properties = allProperties.Take(options.MaxPropertiesPerObject).ToArray();
+
+        var json = new JsonObject();
+
+        foreach (var property in properties)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            object? propertyValue;
+            try
+            {
+                propertyValue = property.GetValue(value);
+            }
+            catch
+            {
+                json[property.Name] = JsonValue.Create("<error>");
+                continue;
+            }
+
+            var node = SerializeDataContextValueFull(propertyValue, options, remainingDepth - 1, visited, ref truncated, cancellationToken);
+            if (node is null && !options.IncludeNulls)
+            {
+                continue;
+            }
+
+            json[property.Name] = node;
+        }
+
+        return json;
+    }
+
+    private static JsonNode? SerializeDataContextValueSummary(
+        object? value,
+        DataContextSerializationOptions options,
+        int remainingDepth,
+        HashSet<object> visited,
+        ref bool truncated,
+        List<string> warnings,
+        bool applyAllowList,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (value is null)
+        {
+            return null;
+        }
+
+        if (ReferenceEquals(value, DependencyProperty.UnsetValue))
+        {
+            return JsonValue.Create("{UnsetValue}");
+        }
+
+        if (value is string s)
+        {
+            return JsonValue.Create(TruncateString(s, options.MaxStringLength));
+        }
+
+        if (value is bool or byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal)
+        {
+            return JsonValue.Create(value);
+        }
+
+        if (value is char ch)
+        {
+            return JsonValue.Create(ch.ToString());
+        }
+
+        if (value is Guid guid)
+        {
+            return JsonValue.Create(guid.ToString());
+        }
+
+        if (value is DateTime dt)
+        {
+            return JsonValue.Create(dt.ToString("O"));
+        }
+
+        if (value is DateTimeOffset dto)
+        {
+            return JsonValue.Create(dto.ToString("O"));
+        }
+
+        if (value is TimeSpan ts)
+        {
+            return JsonValue.Create(ts.ToString());
+        }
+
+        if (value is Enum en)
+        {
+            return JsonValue.Create(en.ToString());
+        }
+
+        var valueType = value.GetType();
+        if (!options.IncludeFrameworkProperties && IsFrameworkType(valueType))
+        {
+            return JsonValue.Create(valueType.FullName ?? valueType.Name);
+        }
+
+        if (remainingDepth <= 0)
+        {
+            return JsonValue.Create(valueType.FullName ?? valueType.Name);
+        }
+
+        if (!visited.Add(value))
+        {
+            return JsonValue.Create("<cycle>");
+        }
+
+        if (value is IDictionary dictionary)
+        {
+            var obj = new JsonObject();
             var count = 0;
 
             foreach (DictionaryEntry entry in dictionary)
@@ -2840,11 +3025,12 @@ internal static class WpfVisualTreeInspector
 
                 if (count >= options.MaxPropertiesPerObject)
                 {
+                    truncated = true;
                     break;
                 }
 
                 var key = entry.Key?.ToString() ?? "null";
-                var node = SerializeDataContextValue(entry.Value, options, remainingDepth - 1, visited, cancellationToken);
+                var node = SerializeDataContextValueSummary(entry.Value, options, remainingDepth - 1, visited, ref truncated, warnings, applyAllowList: false, cancellationToken);
                 if (node is null && !options.IncludeNulls)
                 {
                     continue;
@@ -2869,10 +3055,11 @@ internal static class WpfVisualTreeInspector
                 if (count >= options.MaxPropertiesPerObject)
                 {
                     array.Add(JsonValue.Create("<truncated>"));
+                    truncated = true;
                     break;
                 }
 
-                var node = SerializeDataContextValue(item, options, remainingDepth - 1, visited, cancellationToken);
+                var node = SerializeDataContextValueSummary(item, options, remainingDepth - 1, visited, ref truncated, warnings, applyAllowList: false, cancellationToken);
                 if (node is null && !options.IncludeNulls)
                 {
                     array.Add(null);
@@ -2888,41 +3075,109 @@ internal static class WpfVisualTreeInspector
             return array;
         }
 
-        var valueType = value.GetType();
+        HashSet<string>? allowList = applyAllowList ? options.PropertyAllowList : null;
         var properties = valueType
             .GetProperties(BindingFlags.Instance | BindingFlags.Public)
             .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
+            .Where(p => allowList is null || allowList.Contains(p.Name))
+            .Where(p => allowList is not null || IsScalarType(p.PropertyType))
             .OrderBy(p => p.Name, StringComparer.Ordinal)
-            .Take(options.MaxPropertiesPerObject)
             .ToArray();
 
+        if (allowList is null && properties.Length == 0)
+        {
+            return JsonValue.Create(valueType.FullName ?? valueType.Name);
+        }
+
         var json = new JsonObject();
+        var propCount = 0;
 
         foreach (var property in properties)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (propCount >= options.MaxPropertiesPerObject)
+            {
+                truncated = true;
+                break;
+            }
 
             object? propertyValue;
             try
             {
                 propertyValue = property.GetValue(value);
             }
-            catch
+            catch (Exception ex)
             {
+                warnings.Add($"{valueType.Name}.{property.Name}: {ex.GetType().Name}");
                 json[property.Name] = JsonValue.Create("<error>");
+                propCount++;
                 continue;
             }
 
-            var node = SerializeDataContextValue(propertyValue, options, remainingDepth - 1, visited, cancellationToken);
-            if (node is null && !options.IncludeNulls)
+            if (propertyValue is null)
             {
+                if (options.IncludeNulls)
+                {
+                    json[property.Name] = null;
+                    propCount++;
+                }
+
                 continue;
             }
 
-            json[property.Name] = node;
+            if (IsScalarType(propertyValue.GetType()))
+            {
+                json[property.Name] = SerializeDataContextValueSummary(propertyValue, options, remainingDepth - 1, visited, ref truncated, warnings, applyAllowList: false, cancellationToken);
+                propCount++;
+                continue;
+            }
+
+            // Summary mode: don't explode object graphs. Represent complex values by type name unless explicitly allowed by recursion depth.
+            json[property.Name] = JsonValue.Create(propertyValue.GetType().FullName ?? propertyValue.GetType().Name);
+            propCount++;
         }
 
         return json;
+    }
+
+    private static bool IsScalarType(Type type)
+    {
+        if (type.IsEnum || type.IsPrimitive)
+        {
+            return true;
+        }
+
+        if (type == typeof(string) ||
+            type == typeof(Guid) ||
+            type == typeof(DateTime) ||
+            type == typeof(DateTimeOffset) ||
+            type == typeof(TimeSpan) ||
+            type == typeof(decimal))
+        {
+            return true;
+        }
+
+        var underlying = Nullable.GetUnderlyingType(type);
+        return underlying is not null && IsScalarType(underlying);
+    }
+
+    private static bool IsFrameworkType(Type type)
+    {
+        if (typeof(DependencyObject).IsAssignableFrom(type))
+        {
+            return true;
+        }
+
+        var fullName = type.FullName;
+        if (string.IsNullOrWhiteSpace(fullName))
+        {
+            return false;
+        }
+
+        return fullName.StartsWith("System.Windows.", StringComparison.Ordinal) ||
+               fullName.StartsWith("System.Windows.Threading.", StringComparison.Ordinal) ||
+               fullName.StartsWith("System.Windows.Media.", StringComparison.Ordinal);
     }
 
     public static GetDataContextResponse GetDataContext(GetDataContextRequest request, CancellationToken cancellationToken)
@@ -2967,18 +3222,73 @@ internal static class WpfVisualTreeInspector
         }
 
         var dataContextType = dataContext.GetType().FullName ?? dataContext.GetType().Name;
-        var options = new DataContextSerializationOptions(
+        var summary = TruncateString(dataContext.ToString() ?? "", maxStringLength);
+
+        if (request.Mode == DataContextMode.Full)
+        {
+            var options = new DataContextSerializationOptions(
+                MaxDepth: maxDepth,
+                MaxPropertiesPerObject: maxPropertiesPerObject,
+                MaxStringLength: maxStringLength,
+                IncludeNulls: request.IncludeNulls,
+                IncludeFrameworkProperties: true,
+                PropertyAllowList: null);
+
+            var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+            var truncated = false;
+            var data = SerializeDataContextValueFull(dataContext, options, maxDepth, visited, ref truncated, cancellationToken);
+
+            return new GetDataContextResponse(
+                DataContextType: dataContextType,
+                Data: data,
+                Summary: summary,
+                Truncated: truncated);
+        }
+
+        var allowList = request.PropertyAllowList is { Count: > 0 }
+            ? request.PropertyAllowList
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .ToHashSet(StringComparer.Ordinal)
+            : null;
+
+        var summaryOptions = new DataContextSerializationOptions(
             MaxDepth: maxDepth,
             MaxPropertiesPerObject: maxPropertiesPerObject,
             MaxStringLength: maxStringLength,
-            IncludeNulls: request.IncludeNulls);
+            IncludeNulls: request.IncludeNulls,
+            IncludeFrameworkProperties: request.IncludeFrameworkProperties,
+            PropertyAllowList: allowList);
 
-        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
-        var data = SerializeDataContextValue(dataContext, options, maxDepth, visited, cancellationToken);
+        var summaryVisited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var summaryTruncated = false;
+        var warnings = new List<string>();
+        var summaryData = SerializeDataContextValueSummary(
+            dataContext,
+            summaryOptions,
+            maxDepth,
+            summaryVisited,
+            ref summaryTruncated,
+            warnings,
+            applyAllowList: allowList is not null,
+            cancellationToken);
+
+        if (summaryData is JsonValue valueNode &&
+            valueNode.TryGetValue<string>(out var typeName) &&
+            string.Equals(typeName, dataContextType, StringComparison.Ordinal) &&
+            allowList is null)
+        {
+            // Reduce noise for framework objects and opaque types: if we ended up with just the type name,
+            // return null for Data and rely on DataContextType/Summary.
+            summaryData = null;
+        }
 
         return new GetDataContextResponse(
             DataContextType: dataContextType,
-            Data: data);
+            Data: summaryData,
+            Summary: summary,
+            Truncated: summaryTruncated,
+            Warnings: warnings.Count > 0 ? warnings : null);
     }
 
     public static GetComputedPropertiesResponse GetComputedProperties(GetComputedPropertiesRequest request, CancellationToken cancellationToken)

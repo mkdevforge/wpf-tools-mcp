@@ -389,10 +389,13 @@ public sealed partial class AutomationController
         ElementLocator? locator = null,
         string? elementId = null,
         long? windowHandle = null,
+        DataContextMode mode = DataContextMode.Summary,
         int maxDepth = 2,
         int maxPropertiesPerObject = 50,
         int maxStringLength = 2000,
         bool includeNulls = false,
+        bool includeFrameworkProperties = false,
+        IReadOnlyList<string>? propertyAllowList = null,
         CancellationToken cancellationToken = default)
     {
         var trace = BeginTraceSpan("get_data_context");
@@ -432,10 +435,13 @@ public sealed partial class AutomationController
         var request = new GetDataContextRequest(
             WindowHandle: effectiveWindowHandle,
             Locator: effectiveLocator,
+            Mode: mode,
             MaxDepth: maxDepth,
             MaxPropertiesPerObject: maxPropertiesPerObject,
             MaxStringLength: maxStringLength,
-            IncludeNulls: includeNulls);
+            IncludeNulls: includeNulls,
+            IncludeFrameworkProperties: includeFrameworkProperties,
+            PropertyAllowList: propertyAllowList);
 
         try
         {

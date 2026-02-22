@@ -419,7 +419,9 @@ public sealed partial class AutomationController
                 var actual = TryGetRuntimeId(resolved);
                 if (actual is not null && !actual.SequenceEqual(storedRuntimeId))
                 {
-                    throw new InvalidOperationException($"stale_element: runtimeId_mismatch for '{elementId}'. Call resolve_element again.");
+                    // UIA runtime ids can legitimately change for templated/virtualized elements.
+                    // Prefer "healing" the handle by updating the stored runtime id as long as the XPath still resolves.
+                    _elementHandles.TryUpdateUiaRuntimeId(elementId, actual);
                 }
             }
 
@@ -483,6 +485,29 @@ public sealed partial class AutomationController
                     _lru.Remove(node);
                 }
 
+                return true;
+            }
+        }
+
+        public bool TryUpdateUiaRuntimeId(string elementId, int[] runtimeId)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(elementId);
+            ArgumentNullException.ThrowIfNull(runtimeId);
+
+            lock (_sync)
+            {
+                if (!_entries.TryGetValue(elementId, out var existing))
+                {
+                    return false;
+                }
+
+                if (existing.Backend != InspectionBackend.Uia)
+                {
+                    return false;
+                }
+
+                _entries[elementId] = existing with { UiaRuntimeId = runtimeId };
+                Touch(elementId);
                 return true;
             }
         }

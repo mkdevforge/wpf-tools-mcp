@@ -3,5 +3,6 @@
   Bounds: {
     Width: 160,
     Height: 20
-  }
+  },
+  MethodUsed: win32_overlay
 }

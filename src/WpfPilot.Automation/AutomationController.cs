@@ -1442,6 +1442,28 @@ public sealed partial class AutomationController : IDisposable
                 trace?.SetSummary("method=invoke");
                 return new ClickElementResponse(Clicked: true, MethodUsed: "invoke");
             }
+
+            if (element.Patterns.Toggle.PatternOrDefault is { } toggle)
+            {
+                toggle.Toggle();
+                if (UiDelayMs > 0)
+                {
+                    await Task.Delay(UiDelayMs, cancellationToken);
+                }
+                trace?.SetSummary("method=toggle");
+                return new ClickElementResponse(Clicked: true, MethodUsed: "toggle");
+            }
+
+            if (element.Patterns.SelectionItem.PatternOrDefault is { } selectionItem)
+            {
+                selectionItem.Select();
+                if (UiDelayMs > 0)
+                {
+                    await Task.Delay(UiDelayMs, cancellationToken);
+                }
+                trace?.SetSummary("method=selectionItem");
+                return new ClickElementResponse(Clicked: true, MethodUsed: "selectionItem");
+            }
         }
 
         var point = GetClickPoint(element);
