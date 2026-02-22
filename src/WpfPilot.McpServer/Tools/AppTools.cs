@@ -84,6 +84,8 @@ public static class AppTools
         [Description("Optional elementId for element-only screenshot")] string? elementId = null,
         [Description("Inspection backend selection")] InspectionBackend backend = InspectionBackend.Auto,
         [Description("Capture mode: screen | printWindow | auto")] string? captureMode = null,
+        [Description("Capture area: client | window")] string? area = null,
+        [Description("When taking element screenshots, clip to area: none | intersect")] string? clip = null,
         [Description("Image format: png | jpeg")] string? format = null,
         [Description("JPEG quality 1-100 (only used when format=jpeg)")] int? jpegQuality = null,
         [Description("Optional output file path (auto-generated when omitted)")] string? outputPath = null,
@@ -101,6 +103,8 @@ public static class AppTools
                         ElementId: elementId,
                         Backend: backend,
                         CaptureMode: ParseCaptureMode(captureMode),
+                        Area: ParseCaptureArea(area),
+                        Clip: ParseClipMode(clip),
                         Format: ParseImageFormat(format),
                         JpegQuality: jpegQuality ?? 90,
                         OutputPath: outputPath,
@@ -113,7 +117,7 @@ public static class AppTools
     {
         if (string.IsNullOrWhiteSpace(captureMode))
         {
-            return ScreenshotCaptureMode.Auto;
+            return ScreenshotCaptureMode.Screen;
         }
 
         var value = captureMode.Trim();
@@ -138,6 +142,53 @@ public static class AppTools
         }
 
         throw new ArgumentException($"Unknown captureMode '{captureMode}'. Valid values: screen, printWindow, auto.");
+    }
+
+    private static ScreenshotCaptureArea ParseCaptureArea(string? area)
+    {
+        if (string.IsNullOrWhiteSpace(area))
+        {
+            return ScreenshotCaptureArea.Client;
+        }
+
+        var value = area.Trim();
+        if (value.Equals("client", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("content", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScreenshotCaptureArea.Client;
+        }
+
+        if (value.Equals("window", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("full", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScreenshotCaptureArea.Window;
+        }
+
+        throw new ArgumentException($"Unknown area '{area}'. Valid values: client, window.");
+    }
+
+    private static ScreenshotClipMode ParseClipMode(string? clip)
+    {
+        if (string.IsNullOrWhiteSpace(clip))
+        {
+            return ScreenshotClipMode.Intersect;
+        }
+
+        var value = clip.Trim();
+        if (value.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("no", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("off", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScreenshotClipMode.None;
+        }
+
+        if (value.Equals("intersect", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("clip", StringComparison.OrdinalIgnoreCase))
+        {
+            return ScreenshotClipMode.Intersect;
+        }
+
+        throw new ArgumentException($"Unknown clip '{clip}'. Valid values: none, intersect.");
     }
 
     private static ScreenshotImageFormat ParseImageFormat(string? format)

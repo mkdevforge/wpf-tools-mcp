@@ -135,12 +135,28 @@ public enum ScreenshotImageFormat
     Jpeg
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ScreenshotCaptureArea
+{
+    Client,
+    Window
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ScreenshotClipMode
+{
+    None,
+    Intersect
+}
+
 public sealed record TakeScreenshotRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
     InspectionBackend Backend = InspectionBackend.Auto,
     ScreenshotCaptureMode CaptureMode = ScreenshotCaptureMode.Screen,
+    ScreenshotCaptureArea Area = ScreenshotCaptureArea.Client,
+    ScreenshotClipMode Clip = ScreenshotClipMode.Intersect,
     ScreenshotImageFormat Format = ScreenshotImageFormat.Png,
     int JpegQuality = 90,
     string? OutputPath = null,

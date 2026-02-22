@@ -18,28 +18,33 @@ public sealed partial class AutomationController
             var application = EnsureAttached();
             var automation = EnsureAutomation();
 
-            var window = request.WindowHandle is long requestedHandle
-                ? FindWindowByHandle(application, automation, requestedHandle)
-                : FindMainWindow(application, automation);
-
-            var windowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64();
-
-            if (!IsPointInWindowBounds(window, request.X, request.Y))
-            {
-                throw new InvalidOperationException(
-                    $"pick_point_outside_window: point=({request.X},{request.Y}) window={windowHandleUsed}.");
-            }
-
             var backend = request.Backend;
             if (backend == InspectionBackend.Auto)
             {
                 backend = IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia;
             }
 
+            long windowHandleForWpf;
+            if (backend == InspectionBackend.Wpf)
+            {
+                var resolvedWindowHandle = ResolveWindowHandleAtPointUia(request.X, request.Y, cancellationToken);
+                if (request.WindowHandle is long expectedHandle && expectedHandle != resolvedWindowHandle)
+                {
+                    throw new InvalidOperationException(
+                        $"pick_point_in_different_window: expected_window={expectedHandle} actual_window={resolvedWindowHandle}.");
+                }
+
+                windowHandleForWpf = request.WindowHandle ?? resolvedWindowHandle;
+            }
+            else
+            {
+                windowHandleForWpf = 0;
+            }
+
             var response = backend switch
             {
-                InspectionBackend.Uia => PickElementAtPointUia(window, windowHandleUsed, request, cancellationToken),
-                InspectionBackend.Wpf => await PickElementAtPointWpfAsync(windowHandleUsed, request, cancellationToken).ConfigureAwait(false),
+                InspectionBackend.Uia => PickElementAtPointUia(request, cancellationToken),
+                InspectionBackend.Wpf => await PickElementAtPointWpfAsync(windowHandleForWpf, request, cancellationToken).ConfigureAwait(false),
                 _ => throw new ArgumentOutOfRangeException(nameof(request.Backend), request.Backend, "Unsupported backend.")
             };
 
@@ -58,13 +63,13 @@ public sealed partial class AutomationController
     }
 
     private PickElementAtPointResponse PickElementAtPointUia(
-        Window window,
-        long windowHandleUsed,
         PickElementAtPointRequest request,
         CancellationToken cancellationToken)
     {
         var application = EnsureAttached();
         var automation = EnsureAutomation();
+
+        var requestedWindowHandle = request.WindowHandle;
 
         var point = new System.Drawing.Point(request.X, request.Y);
         var element = automation.FromPoint(point)
@@ -89,55 +94,23 @@ public sealed partial class AutomationController
 
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
 
-        // Ensure we don't compute XPaths against the wrong window (e.g., overlapping dialogs in the same process).
-        var inRequestedWindow = false;
-        long? actualWindowHandle = null;
-        AutomationElement? current = element;
-        var safety = 0;
+        var resolved = ResolveContainingWindowUia(element, rawWalker);
+        var windowHandleUsed = resolved.WindowHandle;
 
-        while (current is not null && safety++ < 512)
+        if (requestedWindowHandle is long expectedHandle && expectedHandle != windowHandleUsed)
         {
-            if (AreSameElement(current, window))
-            {
-                inRequestedWindow = true;
-                break;
-            }
-
-            if (current.ControlType == FlaUI.Core.Definitions.ControlType.Window)
-            {
-                try
-                {
-                    actualWindowHandle = current.Properties.NativeWindowHandle.Value.ToInt64();
-                    if (actualWindowHandle == windowHandleUsed)
-                    {
-                        inRequestedWindow = true;
-                        break;
-                    }
-                }
-                catch
-                {
-                    actualWindowHandle = null;
-                }
-            }
-
-            AutomationElement? parent;
-            try
-            {
-                parent = rawWalker.GetParent(current);
-            }
-            catch
-            {
-                parent = null;
-            }
-
-            current = parent;
+            throw new InvalidOperationException(
+                $"pick_point_in_different_window: expected_window={expectedHandle} actual_window={windowHandleUsed}.");
         }
 
-        if (!inRequestedWindow)
+        Window window;
+        try
         {
-            var actual = actualWindowHandle?.ToString() ?? "unknown";
-            throw new InvalidOperationException(
-                $"pick_point_in_different_window: expected_window={windowHandleUsed} actual_window={actual}.");
+            window = FindWindowByHandle(application, automation, windowHandleUsed);
+        }
+        catch
+        {
+            throw new InvalidOperationException($"Failed to resolve picked element window handle {windowHandleUsed}.");
         }
 
         var xpath = ComputeXPath(window, element, rawWalker);
@@ -160,6 +133,77 @@ public sealed partial class AutomationController
         }
 
         return new PickElementAtPointResponse(InspectionBackend.Uia, elementRef, windowHandleUsed, ancestors);
+    }
+
+    private long ResolveWindowHandleAtPointUia(int x, int y, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var application = EnsureAttached();
+        var automation = EnsureAutomation();
+
+        var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+
+        var point = new System.Drawing.Point(x, y);
+        var element = automation.FromPoint(point)
+            ?? throw new InvalidOperationException("No UIA element found at point.");
+
+        try
+        {
+            var pid = element.Properties.ProcessId.Value;
+            if (pid != application.ProcessId)
+            {
+                throw new InvalidOperationException("Point resolved to a different process.");
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Failed to validate picked element: {ex.Message}");
+        }
+
+        return ResolveContainingWindowUia(element, rawWalker).WindowHandle;
+    }
+
+    private static (long WindowHandle, AutomationElement WindowElement) ResolveContainingWindowUia(AutomationElement element, ITreeWalker rawWalker)
+    {
+        AutomationElement? current = element;
+        var safety = 0;
+
+        while (current is not null && safety++ < 512)
+        {
+            if (current.ControlType == FlaUI.Core.Definitions.ControlType.Window)
+            {
+                try
+                {
+                    var handle = current.Properties.NativeWindowHandle.Value.ToInt64();
+                    if (handle != 0)
+                    {
+                        return (handle, current);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            AutomationElement? parent;
+            try
+            {
+                parent = rawWalker.GetParent(current);
+            }
+            catch
+            {
+                parent = null;
+            }
+
+            current = parent;
+        }
+
+        throw new InvalidOperationException("Failed to resolve containing window for picked element.");
     }
 
     private async Task<PickElementAtPointResponse> PickElementAtPointWpfAsync(
@@ -216,12 +260,6 @@ public sealed partial class AutomationController
         }
 
         return new PickElementAtPointResponse(InspectionBackend.Wpf, picked, windowHandleUsed, ancestors);
-    }
-
-    private static bool IsPointInWindowBounds(Window window, int x, int y)
-    {
-        var bounds = window.BoundingRectangle;
-        return x >= bounds.Left && x <= bounds.Right && y >= bounds.Top && y <= bounds.Bottom;
     }
 
     private IReadOnlyList<ElementRef> BuildUiaAncestorRefs(

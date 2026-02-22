@@ -7,7 +7,7 @@ Snapshot tests were green at the time this was written (`dotnet test -c Debug`).
 Updates since this review:
 - Tool calls are now serialized via `AutomationController.RunExclusiveAsync` to mitigate concurrency races.
 - `click_element` now differentiates `clickMode=auto` vs `clickMode=invokePreferred` (auto only prefers invoke for common invokables like buttons).
-- `take_screenshot` defaults to `captureMode=auto`.
+- `take_screenshot` defaults to `captureMode=screen` (CopyFromScreen of the client area; `auto` remains available for PrintWindow-first capture).
 
 ## Summary
 
