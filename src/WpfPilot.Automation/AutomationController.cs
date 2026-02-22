@@ -688,9 +688,10 @@ public sealed partial class AutomationController : IDisposable
                             new ElementLocator(XPath: handle.XPath),
                             handle.WindowHandle,
                             visibleOnly: true,
+                            includeOffViewport: false,
                             interactiveOnly: false,
                             interactiveMode: InteractiveMode.Heuristic,
-                            cancellationToken).ConfigureAwait(false);
+                            cancellationToken: cancellationToken).ConfigureAwait(false);
 
                         wpfElementBounds = resolved.Bounds;
                     }
@@ -707,9 +708,10 @@ public sealed partial class AutomationController : IDisposable
                             request.Locator,
                             windowHandleUsed,
                             visibleOnly: true,
+                            includeOffViewport: false,
                             interactiveOnly: false,
                             interactiveMode: InteractiveMode.Heuristic,
-                            cancellationToken).ConfigureAwait(false);
+                            cancellationToken: cancellationToken).ConfigureAwait(false);
 
                         wpfElementBounds = resolved.Bounds;
                     }
@@ -753,9 +755,10 @@ public sealed partial class AutomationController : IDisposable
                             request.Locator,
                             windowHandleUsed,
                             visibleOnly: true,
+                            includeOffViewport: false,
                             interactiveOnly: false,
                             interactiveMode: InteractiveMode.Heuristic,
-                            cancellationToken).ConfigureAwait(false);
+                            cancellationToken: cancellationToken).ConfigureAwait(false);
 
                         wpfElementBounds = resolved.Bounds;
                         backendUsed = InspectionBackend.Wpf;
@@ -3079,9 +3082,10 @@ public sealed partial class AutomationController : IDisposable
                             locator!,
                             windowHandle,
                             visibleOnly: false,
+                            includeOffViewport: true,
                             interactiveOnly: false,
                             interactiveMode: InteractiveMode.Heuristic,
-                            cancellationToken).ConfigureAwait(false);
+                            cancellationToken: cancellationToken).ConfigureAwait(false);
                         currentXPath = NormalizeWpfXPath(resolved.XPath);
                     }
                     catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
@@ -3136,9 +3140,10 @@ public sealed partial class AutomationController : IDisposable
                             locator!,
                             windowHandle,
                             visibleOnly: false,
+                            includeOffViewport: true,
                             interactiveOnly: false,
                             interactiveMode: InteractiveMode.Heuristic,
-                            cancellationToken).ConfigureAwait(false);
+                            cancellationToken: cancellationToken).ConfigureAwait(false);
 
                         currentXPath = NormalizeWpfXPath(resolved.XPath);
 
@@ -3420,12 +3425,13 @@ public sealed partial class AutomationController : IDisposable
         ITreeWalker rawWalker,
         ActionKind actionKind,
         bool visibleOnly = false,
+        bool includeOffViewport = false,
         bool interactiveOnly = false,
         InteractiveMode interactiveMode = InteractiveMode.Heuristic)
     {
         try
         {
-            return ResolveElement(window, locator, controlWalker, rawWalker, actionKind, visibleOnly, interactiveOnly, interactiveMode);
+            return ResolveElement(window, locator, controlWalker, rawWalker, actionKind, visibleOnly, includeOffViewport, interactiveOnly, interactiveMode);
         }
         catch (InvalidOperationException ex) when (IsWaitableNotFound(ex))
         {
@@ -3712,6 +3718,7 @@ public sealed partial class AutomationController : IDisposable
             pollIntervalMs,
             actionKind,
             visibleOnly: false,
+            includeOffViewport: false,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
             cancellationToken).ConfigureAwait(false);
@@ -3726,6 +3733,7 @@ public sealed partial class AutomationController : IDisposable
         int pollIntervalMs,
         ActionKind actionKind,
         bool visibleOnly,
+        bool includeOffViewport,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
         CancellationToken cancellationToken)
@@ -3743,6 +3751,7 @@ public sealed partial class AutomationController : IDisposable
                 rawWalker,
                 actionKind,
                 visibleOnly,
+                includeOffViewport,
                 interactiveOnly,
                 interactiveMode);
             if (element is not null)
@@ -5753,6 +5762,7 @@ public sealed partial class AutomationController : IDisposable
         int depth = 4,
         int maxNodes = 500,
         bool visibleOnly = true,
+        bool includeOffViewport = false,
         bool interactiveOnly = false,
         InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         TreePreset preset = TreePreset.Minimal,
@@ -5781,6 +5791,7 @@ public sealed partial class AutomationController : IDisposable
                     Depth: depth,
                     MaxNodes: maxNodes,
                     VisibleOnly: visibleOnly,
+                    IncludeOffViewport: includeOffViewport,
                     InteractiveOnly: interactiveOnly,
                     InteractiveMode: interactiveMode,
                     Preset: preset,
@@ -5799,6 +5810,7 @@ public sealed partial class AutomationController : IDisposable
                     Depth: depth,
                     MaxNodes: maxNodes,
                     VisibleOnly: visibleOnly,
+                    IncludeOffViewport: includeOffViewport,
                     InteractiveOnly: interactiveOnly,
                     InteractiveMode: interactiveMode,
                     Preset: preset,
@@ -5829,8 +5841,10 @@ public sealed partial class AutomationController : IDisposable
                 fieldSet,
                 maxNodes,
                 visibleOnly,
+                includeOffViewport,
                 interactiveOnly,
                 interactiveMode,
+                TryGetClientBoundsScreen(window, out var clientBounds) ? clientBounds : null,
                 cancellationToken);
 
             var rootNode = BuildUiaTreeNode(rootElement, rootXPath, depth, isRoot: true, context)
@@ -5865,6 +5879,7 @@ public sealed partial class AutomationController : IDisposable
         ElementLocator? root = null,
         FindElementsQuery? query = null,
         bool visibleOnly = true,
+        bool includeOffViewport = false,
         bool interactiveOnly = false,
         InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         int maxResults = 25,
@@ -5891,6 +5906,7 @@ public sealed partial class AutomationController : IDisposable
                     RootXPath: root?.XPath,
                     Query: query,
                     VisibleOnly: visibleOnly,
+                    IncludeOffViewport: includeOffViewport,
                     InteractiveOnly: interactiveOnly,
                     InteractiveMode: interactiveMode,
                     MaxResults: maxResults,
@@ -5911,6 +5927,7 @@ public sealed partial class AutomationController : IDisposable
                     RootXPath: root?.XPath,
                     Query: query,
                     VisibleOnly: visibleOnly,
+                    IncludeOffViewport: includeOffViewport,
                     InteractiveOnly: interactiveOnly,
                     InteractiveMode: interactiveMode,
                     MaxResults: maxResults,
@@ -5938,12 +5955,15 @@ public sealed partial class AutomationController : IDisposable
             var rootXPath = ComputeXPath(window, rootElement, rawWalker);
 
             var windowHwnd = window.Properties.NativeWindowHandle.Value.ToInt64();
+            var viewportBounds = visibleOnly && !includeOffViewport && TryGetClientBoundsScreen(window, out var clientBounds) ? clientBounds : null;
             var response = FindElementsUia(
                 rootElement,
                 rootXPath,
                 rawWalker,
                 query,
                 visibleOnly,
+                includeOffViewport,
+                viewportBounds,
                 interactiveOnly,
                 interactiveMode,
                 maxResults,
@@ -6367,6 +6387,7 @@ public sealed partial class AutomationController : IDisposable
         ITreeWalker rawWalker,
         ActionKind actionKind = ActionKind.Inspect,
         bool visibleOnly = false,
+        bool includeOffViewport = false,
         bool interactiveOnly = false,
         InteractiveMode interactiveMode = InteractiveMode.Heuristic)
     {
@@ -6398,7 +6419,7 @@ public sealed partial class AutomationController : IDisposable
                 throw new InvalidOperationException(mismatch);
             }
 
-            if (visibleOnly && !IsVisibleUia(resolved))
+            if (visibleOnly && !IsVisibleUia(window, resolved, includeOffViewport))
             {
                 throw new InvalidOperationException("Locator did not match any element (visibleOnly=true).");
             }
@@ -6411,7 +6432,7 @@ public sealed partial class AutomationController : IDisposable
             return resolved;
         }
 
-        var indexOnly = TryResolveByIndexOnly(window, locator, controlWalker, visibleOnly, interactiveOnly, interactiveMode);
+        var indexOnly = TryResolveByIndexOnly(window, locator, controlWalker, visibleOnly, includeOffViewport, interactiveOnly, interactiveMode);
         if (indexOnly is not null)
         {
             return indexOnly;
@@ -6419,7 +6440,7 @@ public sealed partial class AutomationController : IDisposable
 
         var matches = EnumerateSelfAndDescendantsDepthFirst(window, controlWalker)
             .Where(e => MatchesLocatorUia(e, locator))
-            .Where(e => !visibleOnly || IsVisibleUia(e))
+            .Where(e => !visibleOnly || IsVisibleUia(window, e, includeOffViewport))
             .Where(e => !interactiveOnly || IsInteractiveUia(e, interactiveMode))
             .ToArray();
 
@@ -6432,16 +6453,39 @@ public sealed partial class AutomationController : IDisposable
             ?? throw new InvalidOperationException("Locator did not match any element.");
     }
 
-    private static bool IsVisibleUia(AutomationElement element)
+    private static bool IsVisibleUia(Window window, AutomationElement element, bool includeOffViewport)
     {
         if (!HasValidBounds(element))
         {
             return false;
         }
 
+        if (includeOffViewport)
+        {
+            return true;
+        }
+
         try
         {
-            return !element.Properties.IsOffscreen.Value;
+            if (element.Properties.IsOffscreen.Value)
+            {
+                return false;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (!TryGetClientBoundsScreen(window, out var clientBounds))
+        {
+            return true;
+        }
+
+        try
+        {
+            var bounds = ToRect(element.BoundingRectangle);
+            return RectIntersects(bounds, clientBounds);
         }
         catch
         {
@@ -6848,6 +6892,7 @@ public sealed partial class AutomationController : IDisposable
         ElementLocator locator,
         ITreeWalker walker,
         bool visibleOnly,
+        bool includeOffViewport,
         bool interactiveOnly,
         InteractiveMode interactiveMode)
     {
@@ -6878,7 +6923,7 @@ public sealed partial class AutomationController : IDisposable
         var query = EnumerateSelfAndDescendantsDepthFirst(window, walker).Skip(1);
         if (visibleOnly)
         {
-            query = query.Where(IsVisibleUia);
+            query = query.Where(e => IsVisibleUia(window, e, includeOffViewport));
         }
 
         if (interactiveOnly)
@@ -7631,16 +7676,20 @@ public sealed partial class AutomationController : IDisposable
         TreeFieldSet fieldSet,
         int maxNodes,
         bool visibleOnly,
+        bool includeOffViewport,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
+        Rect? viewportBounds,
         CancellationToken cancellationToken)
     {
         public ITreeWalker Walker { get; } = walker;
         public TreeFieldSet FieldSet { get; } = fieldSet;
         public int MaxNodes { get; } = maxNodes;
         public bool VisibleOnly { get; } = visibleOnly;
+        public bool IncludeOffViewport { get; } = includeOffViewport;
         public bool InteractiveOnly { get; } = interactiveOnly;
         public InteractiveMode InteractiveMode { get; } = interactiveMode;
+        public Rect? ViewportBounds { get; } = viewportBounds;
         public CancellationToken CancellationToken { get; } = cancellationToken;
 
         public int ReturnedNodes { get; set; }
@@ -7670,7 +7719,7 @@ public sealed partial class AutomationController : IDisposable
         context.CancellationToken.ThrowIfCancellationRequested();
         context.ScannedNodes++;
 
-        if (!isRoot && context.VisibleOnly && element.IsOffscreen)
+        if (!isRoot && context.VisibleOnly && !IsVisibleInTree(element, context))
         {
             return null;
         }
@@ -7687,7 +7736,7 @@ public sealed partial class AutomationController : IDisposable
         var rawChildren = GetChildren(element, context.Walker).ToArray();
         if (context.VisibleOnly)
         {
-            rawChildren = rawChildren.Where(c => !c.IsOffscreen).ToArray();
+            rawChildren = rawChildren.Where(c => IsVisibleInTree(c, context)).ToArray();
         }
 
         var childrenCount = rawChildren.Length;
@@ -7748,6 +7797,41 @@ public sealed partial class AutomationController : IDisposable
             Bounds: bounds,
             IsEnabled: isEnabled,
             IsOffscreen: isOffscreen);
+    }
+
+    private static bool IsVisibleInTree(AutomationElement element, UiaTreeBuildContext context)
+    {
+        if (!HasValidBounds(element))
+        {
+            return false;
+        }
+
+        if (context.IncludeOffViewport || context.ViewportBounds is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            if (element.IsOffscreen)
+            {
+                return false;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        try
+        {
+            var bounds = ToRect(element.BoundingRectangle);
+            return RectIntersects(bounds, context.ViewportBounds!);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static TreeNode[] BuildUiaChildren(
@@ -7920,6 +8004,8 @@ public sealed partial class AutomationController : IDisposable
         ITreeWalker walker,
         FindElementsQuery? query,
         bool visibleOnly,
+        bool includeOffViewport,
+        Rect? viewportBounds,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
         int maxResults,
@@ -7961,7 +8047,7 @@ public sealed partial class AutomationController : IDisposable
             var (current, currentXPath) = stack.Pop();
             scannedNodes++;
 
-            if (!AreSameElement(current, rootElement) && visibleOnly && current.IsOffscreen)
+            if (!AreSameElement(current, rootElement) && visibleOnly && !IsVisibleInSearch(current, includeOffViewport, viewportBounds))
             {
                 continue;
             }
@@ -8035,6 +8121,44 @@ public sealed partial class AutomationController : IDisposable
             Truncated: truncated,
             TruncatedReason: truncatedReason,
             Warnings: null);
+    }
+
+    private static bool IsVisibleInSearch(AutomationElement element, bool includeOffViewport, Rect? viewportBounds)
+    {
+        if (!HasValidBounds(element))
+        {
+            return false;
+        }
+
+        if (!includeOffViewport)
+        {
+            try
+            {
+                if (element.IsOffscreen)
+                {
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (viewportBounds is not null)
+            {
+                try
+                {
+                    var bounds = ToRect(element.BoundingRectangle);
+                    return RectIntersects(bounds, viewportBounds);
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private static bool IsQueryMatchUia(AutomationElement element, FindElementsQuery query)
@@ -8402,6 +8526,21 @@ public sealed partial class AutomationController : IDisposable
     private static Rect ToRect(Rectangle rectangle) =>
         new(X: rectangle.Left, Y: rectangle.Top, Width: rectangle.Width, Height: rectangle.Height);
 
+    private static bool RectIntersects(Rect a, Rect b)
+    {
+        if (a.Width <= 0 || a.Height <= 0 || b.Width <= 0 || b.Height <= 0)
+        {
+            return false;
+        }
+
+        var ax2 = (long)a.X + a.Width;
+        var ay2 = (long)a.Y + a.Height;
+        var bx2 = (long)b.X + b.Width;
+        var by2 = (long)b.Y + b.Height;
+
+        return a.X < bx2 && ax2 > b.X && a.Y < by2 && ay2 > b.Y;
+    }
+
     private static JsonNode? ToJsonNode(object? value)
     {
         if (value is null)
@@ -8431,11 +8570,41 @@ public sealed partial class AutomationController : IDisposable
 
         if (value is double d)
         {
+            if (double.IsNaN(d))
+            {
+                return JsonValue.Create("{NaN}");
+            }
+
+            if (double.IsPositiveInfinity(d))
+            {
+                return JsonValue.Create("{Infinity}");
+            }
+
+            if (double.IsNegativeInfinity(d))
+            {
+                return JsonValue.Create("{-Infinity}");
+            }
+
             return JsonValue.Create(d);
         }
 
         if (value is float f)
         {
+            if (float.IsNaN(f))
+            {
+                return JsonValue.Create("{NaN}");
+            }
+
+            if (float.IsPositiveInfinity(f))
+            {
+                return JsonValue.Create("{Infinity}");
+            }
+
+            if (float.IsNegativeInfinity(f))
+            {
+                return JsonValue.Create("{-Infinity}");
+            }
+
             return JsonValue.Create(f);
         }
 

@@ -236,6 +236,28 @@ public enum ClickMode
     InvokePreferred
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum MouseCoordinateSpace
+{
+    Screen,
+    Client
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum MouseButtonKind
+{
+    Left,
+    Right,
+    Middle
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum MouseClickType
+{
+    Single,
+    Double
+}
+
 public sealed record ClickElementRequest(
     ElementLocator? Locator = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
@@ -248,6 +270,22 @@ public sealed record ClickElementRequest(
     int StableMs = 150);
 
 public sealed record ClickElementResponse(bool Clicked, string MethodUsed);
+
+public sealed record MouseClickRequest(
+    int X,
+    int Y,
+    MouseCoordinateSpace CoordSpace = MouseCoordinateSpace.Screen,
+    MouseButtonKind Button = MouseButtonKind.Left,
+    MouseClickType ClickType = MouseClickType.Single,
+    long? WindowHandle = null,
+    bool EnsureForeground = true);
+
+public sealed record MouseClickResponse(
+    bool Clicked,
+    int XScreen,
+    int YScreen,
+    MouseCoordinateSpace CoordSpaceUsed,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null);
 
 public sealed record InvokeRequest(
     ElementLocator? Locator = null,
@@ -414,6 +452,7 @@ public sealed record GetWpfVisualTreeRequestV2(
     int Depth = 4,
     int MaxNodes = 500,
     bool VisibleOnly = true,
+    bool IncludeOffViewport = false,
     bool InteractiveOnly = false,
     InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     TreePreset Preset = TreePreset.Minimal,
@@ -424,6 +463,7 @@ public sealed record FindElementsWpfRequest(
     string? RootXPath = null,
     FindElementsQuery? Query = null,
     bool VisibleOnly = true,
+    bool IncludeOffViewport = false,
     bool InteractiveOnly = false,
     InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     int MaxResults = 25,
@@ -435,6 +475,7 @@ public sealed record GetWpfPathRequest(
     ElementLocator? Locator = null,
     string? RootXPath = null,
     bool VisibleOnly = true,
+    bool IncludeOffViewport = false,
     int MaxNodes = 2000);
 
 public sealed record ResolveWpfElementRequest(
@@ -442,6 +483,7 @@ public sealed record ResolveWpfElementRequest(
     ElementLocator? Locator = null,
     string? RootXPath = null,
     bool VisibleOnly = true,
+    bool IncludeOffViewport = false,
     bool InteractiveOnly = false,
     InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     int MaxNodes = 2000,
@@ -532,15 +574,19 @@ public sealed record GetUiaCoverageReportRequest(
     long? WindowHandle = null,
     string? RootXPath = null,
     bool VisibleOnly = true,
+    bool IncludeOffViewport = false,
     bool InteractiveOnly = true,
     InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     int MaxNodes = 5000,
     int MaxFindings = 200);
 
+public sealed record UiaCoverageIssueCount(string IssueCode, int Count);
+
 public sealed record UiaCoverageSummary(
     int ScannedNodes,
     int ConsideredNodes,
     int FindingsCount,
+    IReadOnlyList<UiaCoverageIssueCount> IssueCounts,
     bool Truncated,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
 

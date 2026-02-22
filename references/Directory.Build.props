@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <!-- The Snoop submodule uses GitVersion.MsBuild, which can fail in CI when the submodule HEAD is detached.
+         Disable GitVersion tasks for all projects under /references (Snoop/FlaUI source trees). -->
+    <DisableGitVersionTask>true</DisableGitVersionTask>
+    <GitVersion_NoFetchEnabled>true</GitVersion_NoFetchEnabled>
+    <GitVersion_NoNormalizeEnabled>true</GitVersion_NoNormalizeEnabled>
+    <GitVersion_AllowShallowEnabled>true</GitVersion_AllowShallowEnabled>
+  </PropertyGroup>
+</Project>
+

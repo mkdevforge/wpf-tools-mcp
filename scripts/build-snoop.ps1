@@ -25,7 +25,12 @@ $gitVersionProps = @(
 Write-Host "Building Snoop.InjectorLauncher ($Configuration)..." -ForegroundColor Cyan
 foreach ($platformTarget in @("x86", "x64")) {
     Write-Host "  -> $platformTarget" -ForegroundColor DarkCyan
-    dotnet build $injectorLauncherProj -c $Configuration -p:RootBuild=False -p:PlatformTarget=$platformTarget @gitVersionProps
+    dotnet restore $injectorLauncherProj -p:RootBuild=False -p:PlatformTarget=$platformTarget @gitVersionProps
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
+    dotnet build $injectorLauncherProj -c $Configuration --no-restore -p:RootBuild=False -p:PlatformTarget=$platformTarget @gitVersionProps
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }

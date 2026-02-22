@@ -1,39 +1,11 @@
-﻿{
+{
   BackendUsed: Uia,
   Root: {
     Type: Window,
     Name: WpfPilot TestApp,
     XPath: /Window,
-    ChildrenCount: 22,
+    ChildrenCount: 20,
     Children: [
-      {
-        Type: TitleBar,
-        AutomationId: TitleBar,
-        XPath: /Window/TitleBar,
-        ChildrenCount: 2,
-        Children: [
-          {
-            Type: MenuBar,
-            AutomationId: SystemMenuBar,
-            Name: System,
-            XPath: /Window/TitleBar/MenuBar,
-            ChildrenCount: 1,
-            Children: [
-              {
-                Type: MenuItem,
-                Name: System,
-                XPath: /Window/TitleBar/MenuBar/MenuItem
-              }
-            ]
-          },
-          {
-            Type: Button,
-            AutomationId: Close,
-            Name: Close,
-            XPath: /Window/TitleBar/Button
-          }
-        ]
-      },
       {
         Type: Text,
         AutomationId: Basic_Header,
@@ -285,20 +257,6 @@
         ]
       },
       {
-        Type: Button,
-        AutomationId: XPathDemo_Left_Button2,
-        Name: Alpha,
-        XPath: /Window/Button[3],
-        ChildrenCount: 1,
-        Children: [
-          {
-            Type: Text,
-            Name: Alpha,
-            XPath: /Window/Button[3]/TextBlock
-          }
-        ]
-      },
-      {
         Type: Text,
         Name: Right Panel,
         XPath: /Window/TextBlock[12]
@@ -307,19 +265,19 @@
         Type: Button,
         AutomationId: XPathDemo_Right_Button1,
         Name: Beta,
-        XPath: /Window/Button[4],
+        XPath: /Window/Button[3],
         ChildrenCount: 1,
         Children: [
           {
             Type: Text,
             Name: Beta,
-            XPath: /Window/Button[4]/TextBlock
+            XPath: /Window/Button[3]/TextBlock
           }
         ]
       }
     ]
   },
-  ReturnedNodes: 50,
-  ScannedNodes: 50,
+  ReturnedNodes: 44,
+  ScannedNodes: 44,
   Truncated: false
 }

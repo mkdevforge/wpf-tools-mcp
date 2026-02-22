@@ -487,5 +487,6 @@ tests/WpfPilot.SnapshotTests/_Artifacts/
 
 # local refs
 references/*
+!references/Directory.Build.props
 !references/snoopwpf/
 references/FlaUI/

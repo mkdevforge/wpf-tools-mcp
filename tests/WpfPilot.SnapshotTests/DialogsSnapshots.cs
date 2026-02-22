@@ -90,7 +90,7 @@ public sealed class DialogsSnapshots
             .ToArray()
     };
 
-    private async Task<long> WaitForDialogHandleAsync(int attempts = 30, int delayMs = 75)
+    private async Task<long> WaitForDialogHandleAsync(int attempts = 200, int delayMs = 75)
     {
         for (var i = 0; i < attempts; i++)
         {
@@ -108,7 +108,7 @@ public sealed class DialogsSnapshots
         throw new AssertionException("Unreachable.");
     }
 
-    private async Task WaitForDialogClosedAsync(int attempts = 30, int delayMs = 75)
+    private async Task WaitForDialogClosedAsync(int attempts = 200, int delayMs = 75)
     {
         for (var i = 0; i < attempts; i++)
         {

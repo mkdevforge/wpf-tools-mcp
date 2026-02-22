@@ -66,6 +66,35 @@ public static class InteractionTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "mouse_click"), Description("Click at a coordinate (Playwright-style).")]
+    public static Task<MouseClickResponse> MouseClick(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("X coordinate (pixels)")] int x,
+        [Description("Y coordinate (pixels)")] int y,
+        [Description("Coordinate space: screen | client")] MouseCoordinateSpace coordSpace = MouseCoordinateSpace.Screen,
+        [Description("Mouse button: left | right | middle")] MouseButtonKind button = MouseButtonKind.Left,
+        [Description("Click type: single | double")] MouseClickType clickType = MouseClickType.Single,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Bring window to foreground first")] bool ensureForeground = true,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.MouseClickAsync(
+                    new MouseClickRequest(
+                        X: x,
+                        Y: y,
+                        CoordSpace: coordSpace,
+                        Button: button,
+                        ClickType: clickType,
+                        WindowHandle: effectiveWindowHandle,
+                        EnsureForeground: ensureForeground),
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "invoke"), Description("Invoke an element via InvokePattern (locator or elementId).")]
     public static Task<InvokeResponse> Invoke(
         SessionManager sessions,

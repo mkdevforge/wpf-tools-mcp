@@ -108,7 +108,12 @@ The MCP server manages both channels in Phase 2. Inspection tools route through 
 |---|---|---|
 | `list_windows` | Enumerate all windows of the target process | Window titles, handles, dimensions, process info |
 | `take_screenshot` | Capture the target window or a specific element | File path + image metadata (`width`, `height`, `format`), optional Base64 payload |
-| `get_visual_tree` | Return the UIA automation tree of a window or subtree | Structured JSON: element type, AutomationId, Name, ClassName, BoundingRectangle, IsEnabled, IsOffscreen. Configurable depth. |
+| `get_visual_tree` | Return an inspection tree (UIA or WPF) for the main window or a subtree | Structured JSON. Configurable depth. `visibleOnly=true` means **in-viewport**; use `includeOffViewport=true` to include offscreen elements. |
+| `find_elements` | Find elements without dumping the full tree | Matches with element summaries and optional `elementId`s |
+| `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef (includes `elementId`, XPath, bounds, etc.) |
+| `get_path_to_element` | Get the XPath for a resolved element | XPath string |
+| `pick_element_at_point` | Pick an element at a screen coordinate | ElementRef + optional ancestor chain |
+| `highlight_element` | Highlight an element on-screen | Highlight result + bounds + method used |
 | `get_element_properties` | Inspect a single element via UIA | All UIA automation properties, supported patterns, current values |
 
 ### Phase 1 — Interaction (FlaUI)
@@ -116,11 +121,15 @@ The MCP server manages both channels in Phase 2. Inspection tools route through 
 | Tool | Description | Parameters |
 |---|---|---|
 | `click_element` | Click an element | Locator strategy + optional click type (single/double/right) |
+| `mouse_click` | Click at a coordinate (Playwright-style) | `x`, `y`, `coordSpace` (screen/client), button, clickType |
 | `type_text` | Type text into a focused or specified element | Locator + text. Supports ValuePattern or keyboard input fallback. |
 | `set_value` | Set value directly via ValuePattern | Locator + value |
 | `select_item` | Select item in combo box, list box, tab control | Locator + item identifier (`text`, `index`, or `itemLocator`) |
 | `invoke` | Invoke a button or menu item via InvokePattern | Locator |
 | `scroll_to_element` | Scroll a container to bring an element into view | Locator of the target element |
+| `drag` | Drag from an element to another element or to screen coordinates | Source locator/elementId + target locator/elementId or `toX/toY` |
+| `wait_for` | Wait for an element to satisfy a state | Locator/elementId + state + timeout |
+| `get_active_window` | Get the active window for this session | `sessionId` |
 | `set_active_window` | Bring a window to the foreground and set it as the session’s active window | `sessionId` + window handle or title |
 
 ### Phase 1 — App Lifecycle
@@ -146,11 +155,22 @@ Phase 2 enriches existing tools and adds new ones. When the Snoop agent is injec
 
 | Tool | Description | Returns |
 |---|---|---|
-| `get_logical_tree` | Return the WPF logical tree | Structured JSON: lighter than visual tree, shows content structure without chrome/template internals |
+| `inject_agent` | Inject the in-process (Snoop-based) agent | Injection status |
+| `agent_ping` | Ping the injected agent | Ping result |
 | `get_binding_info` | Inspect bindings on an element | For each binding: path, source, mode, converter, current value, status (Active/Error/Detached), and error message if broken |
 | `get_binding_errors` | List all broken bindings in the current visual tree | Binding path, target element, target property, error description. On .NET 6+, uses `System.Windows.Diagnostics.BindingDiagnostics` (non-invasive). On .NET Framework, reports binding status only (Active/Error/Detached) without full error messages to avoid invasive re-binding. |
+| `subscribe_binding_errors` | Subscribe to binding errors (poll-based) | Subscription ID |
+| `poll_subscription` | Poll queued subscription events | Batch of events |
+| `unsubscribe` | Unsubscribe a subscription | Unsubscribe result |
 | `get_data_context` | Serialize the DataContext of an element | JSON representation of the DataContext object, its type, and property values. Configurable depth to avoid serializing the entire object graph. |
-| `get_styles` | Inspect applied styles and templates on an element | Style setters, triggers, template structure |
+| `get_computed_properties` | Inspect computed dependency property values | Effective values + optional value-source details |
+| `get_style_chain` | Inspect the applied style chain | Style/ThemeStyle and BasedOn chain summary |
+| `get_template_info` | Inspect the applied template | Template summary + optional named parts |
+| `uia_coverage_report` | Report UIA automation coverage gaps | Findings + suggestions (e.g., missing AutomationPeers/patterns) |
+| `performance_start` | Start lightweight UI-thread latency sampling | Run ID |
+| `performance_stop` | Stop a performance run | Summary |
+| `trace_start` | Start MCP tool tracing | Trace ID |
+| `trace_stop` | Stop tool tracing and write a JSON trace | Trace summary + output path |
 
 ### Element Locator Strategies
 

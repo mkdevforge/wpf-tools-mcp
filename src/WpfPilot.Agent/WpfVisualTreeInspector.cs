@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Automation;
@@ -90,6 +91,8 @@ internal static class WpfVisualTreeInspector
         WpfTreeFieldSet fieldSet,
         int maxNodes,
         bool visibleOnly,
+        bool includeOffViewport,
+        ContractRect? viewportBounds,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
         CancellationToken cancellationToken)
@@ -98,6 +101,8 @@ internal static class WpfVisualTreeInspector
         public WpfTreeFieldSet FieldSet { get; } = fieldSet;
         public int MaxNodes { get; } = maxNodes;
         public bool VisibleOnly { get; } = visibleOnly;
+        public bool IncludeOffViewport { get; } = includeOffViewport;
+        public ContractRect? ViewportBounds { get; } = viewportBounds;
         public bool InteractiveOnly { get; } = interactiveOnly;
         public InteractiveMode InteractiveMode { get; } = interactiveMode;
         public CancellationToken CancellationToken { get; } = cancellationToken;
@@ -178,7 +183,7 @@ internal static class WpfVisualTreeInspector
         context.CancellationToken.ThrowIfCancellationRequested();
         context.ScannedNodes++;
 
-        if (!isRoot && context.VisibleOnly && !IsVisibleWpf(element))
+        if (!isRoot && !ShouldIncludeWpfElement(element, context.VisibleOnly, context.IncludeOffViewport, context.ViewportBounds))
         {
             return null;
         }
@@ -192,7 +197,7 @@ internal static class WpfVisualTreeInspector
         // Reserve a slot so maxNodes is enforced during recursion.
         context.ReturnedNodes++;
 
-        var rawChildren = GetChildrenWpf(element, context.TreeService, context.VisibleOnly);
+        var rawChildren = GetChildrenWpf(element, context.TreeService, context.VisibleOnly, context.IncludeOffViewport, context.ViewportBounds);
         var childrenCount = rawChildren.Length;
 
         var children = Array.Empty<TreeNode>();
@@ -318,7 +323,12 @@ internal static class WpfVisualTreeInspector
         return nodes.ToArray();
     }
 
-    private static DependencyObject[] GetChildrenWpf(DependencyObject parent, VisualTreeService treeService, bool visibleOnly)
+    private static DependencyObject[] GetChildrenWpf(
+        DependencyObject parent,
+        VisualTreeService treeService,
+        bool visibleOnly,
+        bool includeOffViewport,
+        ContractRect? viewportBounds)
     {
         var children = treeService.GetChildren(parent)
             .OfType<DependencyObject>()
@@ -326,7 +336,7 @@ internal static class WpfVisualTreeInspector
 
         if (visibleOnly)
         {
-            children = children.Where(IsVisibleWpf).ToArray();
+            children = children.Where(c => ShouldIncludeWpfElement(c, visibleOnly: true, includeOffViewport, viewportBounds)).ToArray();
         }
 
         return children;
@@ -406,7 +416,7 @@ internal static class WpfVisualTreeInspector
             cancellationToken.ThrowIfCancellationRequested();
 
             var segment = segments[i];
-            var rawChildren = GetChildrenWpf(current, treeService, visibleOnly);
+            var rawChildren = GetChildrenWpf(current, treeService, visibleOnly, includeOffViewport: true, viewportBounds: null);
             var matching = rawChildren
                 .Where(c => string.Equals(GetXPathLabel(c), segment.TypeName, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
@@ -604,6 +614,121 @@ internal static class WpfVisualTreeInspector
         catch
         {
             return null;
+        }
+    }
+
+    private static ContractRect? TryGetClientBoundsScreen(Window window)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        try
+        {
+            var hwnd = new WindowInteropHelper(window).Handle;
+            if (hwnd == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            if (!GetClientRect(hwnd, out var rect))
+            {
+                return null;
+            }
+
+            var clientTopLeft = new POINT(0, 0);
+            if (!ClientToScreen(hwnd, ref clientTopLeft))
+            {
+                return null;
+            }
+
+            if (rect.Width <= 0 || rect.Height <= 0)
+            {
+                return null;
+            }
+
+            return new ContractRect(clientTopLeft.X, clientTopLeft.Y, rect.Width, rect.Height);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool RectIntersects(ContractRect a, ContractRect b)
+    {
+        if (a.Width <= 0 || a.Height <= 0 || b.Width <= 0 || b.Height <= 0)
+        {
+            return false;
+        }
+
+        var ax2 = (long)a.X + a.Width;
+        var ay2 = (long)a.Y + a.Height;
+        var bx2 = (long)b.X + b.Width;
+        var by2 = (long)b.Y + b.Height;
+
+        return a.X < bx2 && ax2 > b.X && a.Y < by2 && ay2 > b.Y;
+    }
+
+    private static bool IsInViewportWpf(DependencyObject element, ContractRect viewportBounds)
+    {
+        var bounds = GetBoundsWpf(element);
+        return bounds is not null && RectIntersects(bounds, viewportBounds);
+    }
+
+    private static bool ShouldIncludeWpfElement(
+        DependencyObject element,
+        bool visibleOnly,
+        bool includeOffViewport,
+        ContractRect? viewportBounds)
+    {
+        if (!visibleOnly)
+        {
+            return true;
+        }
+
+        if (!IsVisibleWpf(element))
+        {
+            return false;
+        }
+
+        if (includeOffViewport || viewportBounds is null)
+        {
+            return true;
+        }
+
+        return IsInViewportWpf(element, viewportBounds);
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct RECT
+    {
+        public int Left { get; init; }
+        public int Top { get; init; }
+        public int Right { get; init; }
+        public int Bottom { get; init; }
+
+        public int Width => Right - Left;
+        public int Height => Bottom - Top;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+
+        public POINT(int x, int y)
+        {
+            X = x;
+            Y = y;
         }
     }
 
@@ -821,6 +946,7 @@ internal static class WpfVisualTreeInspector
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 5000);
 
         var window = ResolveWindow(request.WindowHandle);
+        var viewportBounds = request.VisibleOnly && !request.IncludeOffViewport ? TryGetClientBoundsScreen(window) : null;
         using var treeService = new VisualTreeService();
 
         var rootObject = (DependencyObject)window;
@@ -838,6 +964,8 @@ internal static class WpfVisualTreeInspector
             fieldSet,
             maxNodes,
             request.VisibleOnly,
+            request.IncludeOffViewport,
+            viewportBounds,
             request.InteractiveOnly,
             request.InteractiveMode,
             cancellationToken);
@@ -872,6 +1000,7 @@ internal static class WpfVisualTreeInspector
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
 
         var window = ResolveWindow(request.WindowHandle);
+        var viewportBounds = request.VisibleOnly && !request.IncludeOffViewport ? TryGetClientBoundsScreen(window) : null;
         using var treeService = new VisualTreeService();
 
         var rootObject = (DependencyObject)window;
@@ -905,7 +1034,7 @@ internal static class WpfVisualTreeInspector
             var (current, currentXPath) = stack.Pop();
             scannedNodes++;
 
-            if (!ReferenceEquals(current, rootObject) && request.VisibleOnly && !IsVisibleWpf(current))
+            if (!ReferenceEquals(current, rootObject) && !ShouldIncludeWpfElement(current, request.VisibleOnly, request.IncludeOffViewport, viewportBounds))
             {
                 continue;
             }
@@ -922,7 +1051,7 @@ internal static class WpfVisualTreeInspector
                 }
             }
 
-            var rawChildren = GetChildrenWpf(current, treeService, request.VisibleOnly);
+            var rawChildren = GetChildrenWpf(current, treeService, request.VisibleOnly, request.IncludeOffViewport, viewportBounds);
             if (rawChildren.Length == 0)
             {
                 continue;
@@ -974,6 +1103,8 @@ internal static class WpfVisualTreeInspector
         string rootXPath,
         VisualTreeService treeService,
         bool visibleOnly,
+        bool includeOffViewport,
+        ContractRect? viewportBounds,
         int maxNodes,
         CancellationToken cancellationToken)
     {
@@ -994,14 +1125,14 @@ internal static class WpfVisualTreeInspector
             var (current, currentXPath) = stack.Pop();
             scannedNodes++;
 
-            if (!ReferenceEquals(current, root) && visibleOnly && !IsVisibleWpf(current))
+            if (!ReferenceEquals(current, root) && !ShouldIncludeWpfElement(current, visibleOnly, includeOffViewport, viewportBounds))
             {
                 continue;
             }
 
             yield return (current, currentXPath);
 
-            var rawChildren = GetChildrenWpf(current, treeService, visibleOnly);
+            var rawChildren = GetChildrenWpf(current, treeService, visibleOnly, includeOffViewport, viewportBounds);
             if (rawChildren.Length == 0)
             {
                 continue;
@@ -1159,6 +1290,7 @@ internal static class WpfVisualTreeInspector
         string rootXPath,
         ElementLocator locator,
         bool visibleOnly,
+        bool includeOffViewport,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
         int maxNodes,
@@ -1191,6 +1323,15 @@ internal static class WpfVisualTreeInspector
                 {
                     throw new InvalidOperationException("Locator did not match any element.");
                 }
+
+                if (visibleOnly && !includeOffViewport)
+                {
+                    var viewportBounds = TryGetClientBoundsScreen(window);
+                    if (viewportBounds is not null && !IsInViewportWpf(element, viewportBounds))
+                    {
+                        throw new InvalidOperationException("Element is outside the current viewport (visibleOnly=true).");
+                    }
+                }
                 return (element, normalized);
             }
             catch (InvalidOperationException ex)
@@ -1204,7 +1345,8 @@ internal static class WpfVisualTreeInspector
             }
         }
 
-        var descendants = EnumerateDescendantsWithXPath(rootObject, rootXPath, treeService, visibleOnly, maxNodes, cancellationToken)
+        var viewport = visibleOnly && !includeOffViewport ? TryGetClientBoundsScreen(window) : null;
+        var descendants = EnumerateDescendantsWithXPath(rootObject, rootXPath, treeService, visibleOnly, includeOffViewport, viewport, maxNodes, cancellationToken)
             .Skip(1)
             .Where(e => !interactiveOnly || IsInteractiveWpf(e.Element, interactiveMode))
             .ToArray();
@@ -1484,6 +1626,7 @@ internal static class WpfVisualTreeInspector
             rootXPath,
             locator,
             request.VisibleOnly,
+            request.IncludeOffViewport,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
             maxNodes,
@@ -1516,6 +1659,7 @@ internal static class WpfVisualTreeInspector
             rootXPath,
             locator,
             request.VisibleOnly,
+            request.IncludeOffViewport,
             request.InteractiveOnly,
             request.InteractiveMode,
             maxNodes,
@@ -1548,6 +1692,7 @@ internal static class WpfVisualTreeInspector
             rootXPath,
             locator,
             visibleOnly: true,
+            includeOffViewport: false,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
             maxNodes,
@@ -1854,7 +1999,7 @@ internal static class WpfVisualTreeInspector
         var rootXPath = "/Window";
 
         string? xpath = null;
-        foreach (var item in EnumerateDescendantsWithXPath(root, rootXPath, treeService, visibleOnly, maxNodes, cancellationToken))
+        foreach (var item in EnumerateDescendantsWithXPath(root, rootXPath, treeService, visibleOnly, includeOffViewport: true, viewportBounds: null, maxNodes, cancellationToken))
         {
             if (ReferenceEquals(item.Element, element))
             {
@@ -1913,7 +2058,7 @@ internal static class WpfVisualTreeInspector
                 return false;
             }
 
-            var rawChildren = GetChildrenWpf(parent, treeService, visibleOnly);
+            var rawChildren = GetChildrenWpf(parent, treeService, visibleOnly, includeOffViewport: true, viewportBounds: null);
             var label = GetXPathLabel(current);
 
             var matching = 0;
@@ -2123,6 +2268,7 @@ internal static class WpfVisualTreeInspector
             rootXPath: "/Window",
             locator,
             visibleOnly: true,
+            includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
             maxNodes: 200_000,
@@ -2452,7 +2598,7 @@ internal static class WpfVisualTreeInspector
                 continue;
             }
 
-            var rawChildren = GetChildrenWpf(current, treeService, visibleOnly);
+            var rawChildren = GetChildrenWpf(current, treeService, visibleOnly, includeOffViewport: true, viewportBounds: null);
             if (rawChildren.Length == 0)
             {
                 continue;
@@ -2501,10 +2647,12 @@ internal static class WpfVisualTreeInspector
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
         var maxFindings = Math.Clamp(request.MaxFindings, 1, 5000);
         var visibleOnly = request.VisibleOnly;
+        var includeOffViewport = request.IncludeOffViewport;
         var interactiveOnly = request.InteractiveOnly;
         var interactiveMode = request.InteractiveMode;
 
         var window = ResolveWindow(request.WindowHandle);
+        var viewportBounds = visibleOnly && !includeOffViewport ? TryGetClientBoundsScreen(window) : null;
         using var treeService = new VisualTreeService();
 
         var rootObject = (DependencyObject)window;
@@ -2531,6 +2679,8 @@ internal static class WpfVisualTreeInspector
                          rootXPath: rootXPath,
                          treeService: treeService,
                          visibleOnly: visibleOnly,
+                         includeOffViewport: includeOffViewport,
+                         viewportBounds: viewportBounds,
                          maxNodes: maxNodes,
                          cancellationToken: cancellationToken))
             {
@@ -2586,10 +2736,18 @@ internal static class WpfVisualTreeInspector
             .ThenBy(f => f.Element.XPath, StringComparer.Ordinal)
             .ToArray();
 
+        var issueCounts = ordered
+            .GroupBy(f => f.IssueCode, StringComparer.Ordinal)
+            .Select(g => new UiaCoverageIssueCount(g.Key, g.Count()))
+            .OrderByDescending(i => i.Count)
+            .ThenBy(i => i.IssueCode, StringComparer.Ordinal)
+            .ToArray();
+
         var summary = new UiaCoverageSummary(
             ScannedNodes: scannedNodes,
             ConsideredNodes: consideredNodes,
             FindingsCount: ordered.Length,
+            IssueCounts: issueCounts,
             Truncated: truncated,
             TruncatedReason: truncatedReason);
 
@@ -2761,6 +2919,46 @@ internal static class WpfVisualTreeInspector
         bool IncludeFrameworkProperties,
         HashSet<string>? PropertyAllowList);
 
+    private static JsonValue SerializeDoubleJson(double value)
+    {
+        if (double.IsNaN(value))
+        {
+            return JsonValue.Create("{NaN}")!;
+        }
+
+        if (double.IsPositiveInfinity(value))
+        {
+            return JsonValue.Create("{Infinity}")!;
+        }
+
+        if (double.IsNegativeInfinity(value))
+        {
+            return JsonValue.Create("{-Infinity}")!;
+        }
+
+        return JsonValue.Create(value)!;
+    }
+
+    private static JsonValue SerializeFloatJson(float value)
+    {
+        if (float.IsNaN(value))
+        {
+            return JsonValue.Create("{NaN}")!;
+        }
+
+        if (float.IsPositiveInfinity(value))
+        {
+            return JsonValue.Create("{Infinity}")!;
+        }
+
+        if (float.IsNegativeInfinity(value))
+        {
+            return JsonValue.Create("{-Infinity}")!;
+        }
+
+        return JsonValue.Create(value)!;
+    }
+
     private static JsonNode? SerializeDataContextValueFull(
         object? value,
         DataContextSerializationOptions options,
@@ -2786,9 +2984,19 @@ internal static class WpfVisualTreeInspector
             return JsonValue.Create(TruncateString(s, options.MaxStringLength));
         }
 
-        if (value is bool or byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal)
+        if (value is bool or byte or sbyte or short or ushort or int or uint or long or ulong or decimal)
         {
             return JsonValue.Create(value);
+        }
+
+        if (value is double d)
+        {
+            return SerializeDoubleJson(d);
+        }
+
+        if (value is float f)
+        {
+            return SerializeFloatJson(f);
         }
 
         if (value is char ch)
@@ -2963,9 +3171,19 @@ internal static class WpfVisualTreeInspector
             return JsonValue.Create(TruncateString(s, options.MaxStringLength));
         }
 
-        if (value is bool or byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal)
+        if (value is bool or byte or sbyte or short or ushort or int or uint or long or ulong or decimal)
         {
             return JsonValue.Create(value);
+        }
+
+        if (value is double d)
+        {
+            return SerializeDoubleJson(d);
+        }
+
+        if (value is float f)
+        {
+            return SerializeFloatJson(f);
         }
 
         if (value is char ch)
@@ -3197,6 +3415,7 @@ internal static class WpfVisualTreeInspector
             rootXPath: "/Window",
             locator,
             visibleOnly: true,
+            includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
             maxNodes: 200_000,
@@ -3310,6 +3529,7 @@ internal static class WpfVisualTreeInspector
             rootXPath: "/Window",
             locator,
             visibleOnly: true,
+            includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
             maxNodes: 200_000,
@@ -3467,6 +3687,7 @@ internal static class WpfVisualTreeInspector
             rootXPath: "/Window",
             locator,
             visibleOnly: true,
+            includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
             maxNodes: 200_000,
@@ -3584,6 +3805,7 @@ internal static class WpfVisualTreeInspector
             rootXPath: "/Window",
             locator,
             visibleOnly: true,
+            includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
             maxNodes: 200_000,
@@ -4126,6 +4348,8 @@ internal static class WpfVisualTreeInspector
                                  rootXPath: "/Window",
                                  treeService: treeService,
                                  visibleOnly: true,
+                                 includeOffViewport: true,
+                                 viewportBounds: null,
                                  maxNodes: 200_000,
                                  cancellationToken: cancellationToken))
                     {

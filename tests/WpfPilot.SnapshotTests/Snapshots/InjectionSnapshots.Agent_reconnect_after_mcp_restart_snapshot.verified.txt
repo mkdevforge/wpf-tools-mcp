@@ -1,4 +1,4 @@
-﻿{
+{
   Pid: -1,
   PipeName: <scrubbed>,
   FirstInjected: true,
@@ -18,15 +18,11 @@
     Basic_ListBoxStatus,
     Basic_Slider,
     Basic_TextBox,
-    Close,
     DecreaseLarge,
     IncreaseLarge,
     PART_ContentHost,
-    SystemMenuBar,
     Thumb,
-    TitleBar,
     XPathDemo_Left_Button1,
-    XPathDemo_Left_Button2,
     XPathDemo_Right_Button1
   ],
   WpfAutomationIds1: [
@@ -42,7 +38,6 @@
     Basic_TextBox,
     VerticalScrollBar,
     XPathDemo_Left_Button1,
-    XPathDemo_Left_Button2,
     XPathDemo_Right_Button1
   ],
   WpfAutomationIds2: [
@@ -58,7 +53,6 @@
     Basic_TextBox,
     VerticalScrollBar,
     XPathDemo_Left_Button1,
-    XPathDemo_Left_Button2,
     XPathDemo_Right_Button1
   ]
 }

@@ -19,6 +19,7 @@ public sealed partial class AutomationController
         int pollIntervalMs = 100,
         int stableMs = 0,
         bool visibleOnly = true,
+        bool includeOffViewport = false,
         bool interactiveOnly = false,
         InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         CancellationToken cancellationToken = default)
@@ -45,6 +46,7 @@ public sealed partial class AutomationController
                     pollIntervalMs,
                     stableMs,
                     visibleOnly,
+                    includeOffViewport,
                     interactiveOnly,
                     interactiveMode,
                     cancellationToken),
@@ -55,6 +57,7 @@ public sealed partial class AutomationController
                     pollIntervalMs,
                     stableMs,
                     visibleOnly,
+                    includeOffViewport,
                     interactiveOnly,
                     interactiveMode,
                     cancellationToken),
@@ -103,6 +106,7 @@ public sealed partial class AutomationController
         int pollIntervalMs,
         int stableMs,
         bool visibleOnly,
+        bool includeOffViewport,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
         CancellationToken cancellationToken)
@@ -131,10 +135,11 @@ public sealed partial class AutomationController
                 pollIntervalMs,
                 ActionKind.Inspect,
                 visibleOnly,
+                includeOffViewport,
                 interactiveOnly,
                 interactiveMode,
                 cancellationToken).ConfigureAwait(false)
-            : ResolveElement(window, locator, controlWalker, rawWalker, ActionKind.Inspect, visibleOnly, interactiveOnly, interactiveMode);
+            : ResolveElement(window, locator, controlWalker, rawWalker, ActionKind.Inspect, visibleOnly, includeOffViewport, interactiveOnly, interactiveMode);
 
         if (stableMs > 0 && timeoutMs > 0)
         {
@@ -186,6 +191,7 @@ public sealed partial class AutomationController
         int pollIntervalMs,
         int stableMs,
         bool visibleOnly,
+        bool includeOffViewport,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
         CancellationToken cancellationToken)
@@ -207,6 +213,7 @@ public sealed partial class AutomationController
                 pollIntervalMs,
                 stableMs,
                 visibleOnly,
+                includeOffViewport,
                 interactiveOnly,
                 interactiveMode,
                 cancellationToken).ConfigureAwait(false)
@@ -214,6 +221,7 @@ public sealed partial class AutomationController
                 locator,
                 hwnd,
                 visibleOnly,
+                includeOffViewport,
                 interactiveOnly,
                 interactiveMode,
                 cancellationToken).ConfigureAwait(false);
@@ -237,6 +245,7 @@ public sealed partial class AutomationController
         int pollIntervalMs,
         int stableMs,
         bool visibleOnly,
+        bool includeOffViewport,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
         CancellationToken cancellationToken)
@@ -257,6 +266,7 @@ public sealed partial class AutomationController
                     currentLocator,
                     windowHandle,
                     visibleOnly,
+                    includeOffViewport,
                     interactiveOnly,
                     interactiveMode,
                     cancellationToken).ConfigureAwait(false);
@@ -303,6 +313,7 @@ public sealed partial class AutomationController
         ElementLocator locator,
         long windowHandle,
         bool visibleOnly,
+        bool includeOffViewport,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
         CancellationToken cancellationToken)
@@ -312,6 +323,7 @@ public sealed partial class AutomationController
             Locator: locator,
             RootXPath: null,
             VisibleOnly: visibleOnly,
+            IncludeOffViewport: includeOffViewport,
             InteractiveOnly: interactiveOnly,
             InteractiveMode: interactiveMode,
             MaxNodes: 2000,
