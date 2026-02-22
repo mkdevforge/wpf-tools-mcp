@@ -10,8 +10,9 @@
   <ItemGroup>
     <ProjectReference Include="..\WpfPilot.AgentProtocol\WpfPilot.AgentProtocol.csproj" />
     <ProjectReference Include="..\WpfPilot.Contracts\WpfPilot.Contracts.csproj" />
-    <ProjectReference Include="..\..\references\snoopwpf\Snoop.Core\Snoop.Core.csproj" />
+    <ProjectReference Include="..\..\references\snoopwpf\Snoop.Core\Snoop.Core.csproj">
+      <AdditionalProperties>DisableGitVersionTask=true</AdditionalProperties>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>
-

@@ -15,10 +15,20 @@ if (-not (Test-Path $snoopRoot)) {
 $injectorLauncherProj = Join-Path $snoopRoot "Snoop.InjectorLauncher\\Snoop.InjectorLauncher.csproj"
 $genericInjectorProj = Join-Path $snoopRoot "Snoop.GenericInjector\\Snoop.GenericInjector.vcxproj"
 
+$gitVersionProps = @(
+    "-p:DisableGitVersionTask=true",
+    "-p:GitVersion_NoFetchEnabled=true",
+    "-p:GitVersion_NoNormalizeEnabled=true",
+    "-p:GitVersion_AllowShallowEnabled=true"
+)
+
 Write-Host "Building Snoop.InjectorLauncher ($Configuration)..." -ForegroundColor Cyan
-dotnet build $injectorLauncherProj -c $Configuration
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+foreach ($platformTarget in @("x86", "x64")) {
+    Write-Host "  -> $platformTarget" -ForegroundColor DarkCyan
+    dotnet build $injectorLauncherProj -c $Configuration -p:RootBuild=False -p:PlatformTarget=$platformTarget @gitVersionProps
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
 }
 
 Write-Host "Building Snoop.GenericInjector ($Configuration)..." -ForegroundColor Cyan
