@@ -662,6 +662,15 @@ public sealed partial class AutomationController : IDisposable
             var area = request.Area;
             var clip = request.Clip;
             var windowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64();
+            var includeOverlay = request.IncludeOverlay;
+            var autoScroll = request.AutoScroll;
+
+            // PrintWindow capture cannot include external overlays (like our Win32 highlight overlay).
+            // If the caller explicitly asked to include overlays, prefer screen capture when mode=auto.
+            if (includeOverlay && mode == ScreenshotCaptureMode.Auto)
+            {
+                mode = ScreenshotCaptureMode.Screen;
+            }
 
             AutomationElement element = window;
             Rect? wpfElementBounds = null;
@@ -680,20 +689,31 @@ public sealed partial class AutomationController : IDisposable
                     if (elementBackend == InspectionBackend.Uia)
                     {
                         element = ResolveUiaElementById(window, rawWalker, elementId, out _);
+
+                        if (autoScroll)
+                        {
+                            try
+                            {
+                                TryScrollIntoView(element);
+                            }
+                            catch
+                            {
+                            }
+
+                            if (UiDelayScrollMs > 0)
+                            {
+                                await Task.Delay(UiDelayScrollMs, cancellationToken);
+                            }
+                        }
                     }
                     else if (elementBackend == InspectionBackend.Wpf)
                     {
                         var handle = elementHandle ?? RequireHandle(elementId);
-                        var resolved = await ResolveWpfElementRefAsync(
-                            new ElementLocator(XPath: handle.XPath),
-                            handle.WindowHandle,
-                            visibleOnly: true,
-                            includeOffViewport: false,
-                            interactiveOnly: false,
-                            interactiveMode: InteractiveMode.Heuristic,
-                            cancellationToken: cancellationToken).ConfigureAwait(false);
-
-                        wpfElementBounds = resolved.Bounds;
+                        wpfElementBounds = await ResolveWpfBoundsForHandleAsync(
+                            window,
+                            handle,
+                            autoScroll: autoScroll,
+                            cancellationToken).ConfigureAwait(false);
                     }
                     else
                     {
@@ -708,16 +728,58 @@ public sealed partial class AutomationController : IDisposable
                             request.Locator,
                             windowHandleUsed,
                             visibleOnly: true,
-                            includeOffViewport: false,
+                            includeOffViewport: autoScroll,
                             interactiveOnly: false,
                             interactiveMode: InteractiveMode.Heuristic,
                             cancellationToken: cancellationToken).ConfigureAwait(false);
 
                         wpfElementBounds = resolved.Bounds;
+
+                        if (autoScroll && wpfElementBounds is { } wpfBounds)
+                        {
+                            if (TryGetClientBoundsScreen(window, out var clientBounds) && !RectIntersects(wpfBounds, clientBounds))
+                            {
+                                var bring = await BringIntoViewWpfAsync(windowHandleUsed, resolved.XPath, cancellationToken).ConfigureAwait(false);
+                                if (bring.BroughtIntoView)
+                                {
+                                    if (UiDelayScrollMs > 0)
+                                    {
+                                        await Task.Delay(UiDelayScrollMs, cancellationToken);
+                                    }
+
+                                    var after = await ResolveWpfElementRefAsync(
+                                        request.Locator,
+                                        windowHandleUsed,
+                                        visibleOnly: true,
+                                        includeOffViewport: false,
+                                        interactiveOnly: false,
+                                        interactiveMode: InteractiveMode.Heuristic,
+                                        cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                                    wpfElementBounds = after.Bounds;
+                                }
+                            }
+                        }
                     }
                     else if (elementBackend == InspectionBackend.Uia)
                     {
                         element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
+
+                        if (autoScroll)
+                        {
+                            try
+                            {
+                                TryScrollIntoView(element);
+                            }
+                            catch
+                            {
+                            }
+
+                            if (UiDelayScrollMs > 0)
+                            {
+                                await Task.Delay(UiDelayScrollMs, cancellationToken);
+                            }
+                        }
                     }
                     else
                     {
@@ -738,7 +800,7 @@ public sealed partial class AutomationController : IDisposable
                     }
                 }
 
-                capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip);
+                capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay);
             }
             catch (Exception ex)
             {
@@ -755,7 +817,7 @@ public sealed partial class AutomationController : IDisposable
                             request.Locator,
                             windowHandleUsed,
                             visibleOnly: true,
-                            includeOffViewport: false,
+                            includeOffViewport: autoScroll,
                             interactiveOnly: false,
                             interactiveMode: InteractiveMode.Heuristic,
                             cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -764,7 +826,33 @@ public sealed partial class AutomationController : IDisposable
                         backendUsed = InspectionBackend.Wpf;
                         fallbackUsed = true;
 
-                        capture = CaptureScreenshotWithMetadata(window, wpfElementBounds, mode, area, clip);
+                        if (autoScroll && wpfElementBounds is { } fallbackBounds)
+                        {
+                            if (TryGetClientBoundsScreen(window, out var clientBounds) && !RectIntersects(fallbackBounds, clientBounds))
+                            {
+                                var bring = await BringIntoViewWpfAsync(windowHandleUsed, resolved.XPath, cancellationToken).ConfigureAwait(false);
+                                if (bring.BroughtIntoView)
+                                {
+                                    if (UiDelayScrollMs > 0)
+                                    {
+                                        await Task.Delay(UiDelayScrollMs, cancellationToken);
+                                    }
+
+                                    var after = await ResolveWpfElementRefAsync(
+                                        request.Locator,
+                                        windowHandleUsed,
+                                        visibleOnly: true,
+                                        includeOffViewport: false,
+                                        interactiveOnly: false,
+                                        interactiveMode: InteractiveMode.Heuristic,
+                                        cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                                    wpfElementBounds = after.Bounds;
+                                }
+                            }
+                        }
+
+                        capture = CaptureScreenshotWithMetadata(window, wpfElementBounds, mode, area, clip, includeOverlay);
                         recovered = true;
                     }
                     catch (Exception fallbackEx)
@@ -861,7 +949,8 @@ public sealed partial class AutomationController : IDisposable
             Rect? requestedBounds,
             ScreenshotCaptureMode requestedMode,
             ScreenshotCaptureArea area,
-            ScreenshotClipMode clip)
+            ScreenshotClipMode clip,
+            bool includeOverlay)
     {
         static Rect Intersect(Rect a, Rect b)
         {
@@ -870,6 +959,18 @@ public sealed partial class AutomationController : IDisposable
             var right = Math.Min(a.X + a.Width, b.X + b.Width);
             var bottom = Math.Min(a.Y + a.Height, b.Y + b.Height);
             return new Rect(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
+        }
+
+        static Rect ClampToVirtualScreen(Rect bounds, Rect virtualScreen, ref bool clipped)
+        {
+            if (virtualScreen.Width <= 0 || virtualScreen.Height <= 0)
+            {
+                return bounds;
+            }
+
+            var clamped = Intersect(bounds, virtualScreen);
+            clipped |= clamped != bounds;
+            return clamped;
         }
 
         static bool IsEmpty(Rect bounds) => bounds.Width <= 0 || bounds.Height <= 0;
@@ -892,6 +993,8 @@ public sealed partial class AutomationController : IDisposable
         Rect printWindowBoundsToCapture;
         var printWindowWasClipped = false;
 
+        var virtualScreen = DisplayDiagnostics.GetVirtualScreenBounds();
+
         if (requestedBounds is null)
         {
             screenBoundsToCapture = containerBounds;
@@ -912,11 +1015,18 @@ public sealed partial class AutomationController : IDisposable
             printWindowBoundsToCapture = clippedPrintWindow;
         }
 
+        screenBoundsToCapture = ClampToVirtualScreen(screenBoundsToCapture, virtualScreen, ref screenWasClipped);
+
         if (requestedMode == ScreenshotCaptureMode.Screen)
         {
             if (IsEmpty(screenBoundsToCapture))
             {
                 throw new InvalidOperationException("Requested bounds are outside the capture area.");
+            }
+
+            if (!includeOverlay)
+            {
+                HighlightOverlay.Hide();
             }
 
             var bitmap = CaptureScreenRegion(screenBoundsToCapture);
@@ -1015,6 +1125,11 @@ public sealed partial class AutomationController : IDisposable
                 throw new InvalidOperationException("Requested bounds are outside the capture area.");
             }
 
+            if (!includeOverlay)
+            {
+                HighlightOverlay.Hide();
+            }
+
             var screen = CaptureScreenRegion(screenBoundsToCapture);
             return (screen, screenBoundsToCapture, requestedBounds, screenWasClipped, ScreenshotCaptureMode.Screen);
         }
@@ -1050,6 +1165,11 @@ public sealed partial class AutomationController : IDisposable
         if (IsEmpty(screenBoundsToCapture))
         {
             throw new InvalidOperationException("Requested bounds are outside the capture area.");
+        }
+
+        if (!includeOverlay)
+        {
+            HighlightOverlay.Hide();
         }
 
         var screenBitmap = CaptureScreenRegion(screenBoundsToCapture);
@@ -1348,10 +1468,6 @@ public sealed partial class AutomationController : IDisposable
         {
             var elementId = request.ElementId!.Trim();
             var handle = RequireHandle(elementId);
-            if (handle.Backend != InspectionBackend.Uia)
-            {
-                throw new InvalidOperationException($"elementId '{elementId}' is not a UIA handle.");
-            }
 
             if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
             {
@@ -1368,6 +1484,45 @@ public sealed partial class AutomationController : IDisposable
             }
 
             await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
+
+            if (handle.Backend == InspectionBackend.Wpf)
+            {
+                var bounds = await ResolveWpfBoundsForHandleAsync(
+                    window,
+                    handle,
+                    autoScroll: request.AutoWait,
+                    cancellationToken).ConfigureAwait(false);
+
+                var clickPoint = GetRectCenterPoint(bounds);
+                switch (request.ClickType)
+                {
+                    case ClickType.Single:
+                        Mouse.LeftClick(clickPoint);
+                        break;
+                    case ClickType.Double:
+                        Mouse.LeftDoubleClick(clickPoint);
+                        break;
+                    case ClickType.Right:
+                        Mouse.RightClick(clickPoint);
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(request), $"Unknown clickType '{request.ClickType}'.");
+                }
+
+                if (UiDelayMs > 0)
+                {
+                    await Task.Delay(UiDelayMs, cancellationToken);
+                }
+
+                trace?.SetSummary("method=mouse_wpf");
+                return new ClickElementResponse(Clicked: true, MethodUsed: "mouse");
+            }
+
+            if (handle.Backend != InspectionBackend.Uia)
+            {
+                throw new InvalidOperationException($"elementId '{elementId}' has unsupported backend '{handle.Backend}'.");
+            }
+
             element = ResolveUiaElementById(window, rawWalker, elementId, out _);
         }
         else
@@ -1571,10 +1726,6 @@ public sealed partial class AutomationController : IDisposable
             {
                 var elementId = request.ElementId!.Trim();
                 var handle = RequireHandle(elementId);
-                if (handle.Backend != InspectionBackend.Uia)
-                {
-                    throw new InvalidOperationException($"elementId '{elementId}' is not a UIA handle.");
-                }
 
                 if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
                 {
@@ -1591,7 +1742,43 @@ public sealed partial class AutomationController : IDisposable
                 }
 
                 await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
-                element = ResolveUiaElementById(window, rawWalker, elementId, out _);
+
+                if (handle.Backend == InspectionBackend.Wpf)
+                {
+                    var bounds = await ResolveWpfBoundsForHandleAsync(
+                        window,
+                        handle,
+                        autoScroll: request.AutoWait,
+                        cancellationToken).ConfigureAwait(false);
+
+                    var point = GetRectCenterPoint(bounds);
+                    element = automation.FromPoint(point)
+                        ?? throw new InvalidOperationException("No UIA element found at point.");
+
+                    try
+                    {
+                        if (element.Properties.ProcessId.Value != application.ProcessId)
+                        {
+                            throw new InvalidOperationException("Point resolved to a different process.");
+                        }
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new InvalidOperationException($"Failed to validate picked element: {ex.Message}");
+                    }
+                }
+                else if (handle.Backend == InspectionBackend.Uia)
+                {
+                    element = ResolveUiaElementById(window, rawWalker, elementId, out _);
+                }
+                else
+                {
+                    throw new InvalidOperationException($"elementId '{elementId}' has unsupported backend '{handle.Backend}'.");
+                }
             }
             else
             {
@@ -1707,10 +1894,6 @@ public sealed partial class AutomationController : IDisposable
         {
             var elementId = request.ElementId!.Trim();
             var handle = RequireHandle(elementId);
-            if (handle.Backend != InspectionBackend.Uia)
-            {
-                throw new InvalidOperationException($"elementId '{elementId}' is not a UIA handle.");
-            }
 
             if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
             {
@@ -1727,6 +1910,40 @@ public sealed partial class AutomationController : IDisposable
             }
 
             await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
+
+            if (handle.Backend == InspectionBackend.Wpf)
+            {
+                var bounds = await ResolveWpfBoundsForHandleAsync(
+                    window,
+                    handle,
+                    autoScroll: request.AutoWait,
+                    cancellationToken).ConfigureAwait(false);
+
+                var point = GetRectCenterPoint(bounds);
+                Mouse.LeftClick(point);
+                if (UiDelayMs > 0)
+                {
+                    await Task.Delay(UiDelayMs, cancellationToken);
+                }
+
+                Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
+                Keyboard.Type(VirtualKeyShort.DELETE);
+                Keyboard.Type(request.Text);
+
+                if (UiDelayMs > 0)
+                {
+                    await Task.Delay(UiDelayMs, cancellationToken);
+                }
+
+                trace?.SetSummary("method=keyboard_wpf");
+                return new TypeTextResponse(Typed: true, MethodUsed: "keyboard");
+            }
+
+            if (handle.Backend != InspectionBackend.Uia)
+            {
+                throw new InvalidOperationException($"elementId '{elementId}' has unsupported backend '{handle.Backend}'.");
+            }
+
             element = ResolveUiaElementById(window, rawWalker, elementId, out _);
         }
         else
@@ -2070,10 +2287,6 @@ public sealed partial class AutomationController : IDisposable
         {
             var elementId = request.ElementId!.Trim();
             var handle = RequireHandle(elementId);
-            if (handle.Backend != InspectionBackend.Uia)
-            {
-                throw new InvalidOperationException($"elementId '{elementId}' is not a UIA handle.");
-            }
 
             if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
             {
@@ -2090,7 +2303,43 @@ public sealed partial class AutomationController : IDisposable
             }
 
             await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
-            container = ResolveUiaElementById(window, rawWalker, elementId, out _);
+
+            if (handle.Backend == InspectionBackend.Wpf)
+            {
+                var bounds = await ResolveWpfBoundsForHandleAsync(
+                    window,
+                    handle,
+                    autoScroll: request.AutoWait,
+                    cancellationToken).ConfigureAwait(false);
+
+                var point = GetRectCenterPoint(bounds);
+                container = automation.FromPoint(point)
+                    ?? throw new InvalidOperationException("No UIA element found at point.");
+
+                try
+                {
+                    if (container.Properties.ProcessId.Value != application.ProcessId)
+                    {
+                        throw new InvalidOperationException("Point resolved to a different process.");
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException($"Failed to validate picked element: {ex.Message}");
+                }
+            }
+            else if (handle.Backend == InspectionBackend.Uia)
+            {
+                container = ResolveUiaElementById(window, rawWalker, elementId, out _);
+            }
+            else
+            {
+                throw new InvalidOperationException($"elementId '{elementId}' has unsupported backend '{handle.Backend}'.");
+            }
         }
         else
         {
@@ -2154,17 +2403,49 @@ public sealed partial class AutomationController : IDisposable
         {
             var itemElementId = request.ItemElementId!.Trim();
             var itemHandle = RequireHandle(itemElementId);
-            if (itemHandle.Backend != InspectionBackend.Uia)
-            {
-                throw new InvalidOperationException($"itemElementId '{itemElementId}' is not a UIA handle.");
-            }
 
             if (itemHandle.WindowHandle != window.Properties.NativeWindowHandle.Value.ToInt64())
             {
                 throw new ArgumentException("itemElementId window does not match container window.");
             }
 
-            var item = ResolveUiaElementById(window, rawWalker, itemElementId, out _);
+            AutomationElement item;
+            if (itemHandle.Backend == InspectionBackend.Wpf)
+            {
+                var bounds = await ResolveWpfBoundsForHandleAsync(
+                    window,
+                    itemHandle,
+                    autoScroll: request.AutoWait,
+                    cancellationToken).ConfigureAwait(false);
+
+                var point = GetRectCenterPoint(bounds);
+                item = automation.FromPoint(point)
+                    ?? throw new InvalidOperationException("No UIA element found at point.");
+
+                try
+                {
+                    if (item.Properties.ProcessId.Value != application.ProcessId)
+                    {
+                        throw new InvalidOperationException("Point resolved to a different process.");
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException($"Failed to validate picked element: {ex.Message}");
+                }
+            }
+            else if (itemHandle.Backend == InspectionBackend.Uia)
+            {
+                item = ResolveUiaElementById(window, rawWalker, itemElementId, out _);
+            }
+            else
+            {
+                throw new InvalidOperationException($"itemElementId '{itemElementId}' has unsupported backend '{itemHandle.Backend}'.");
+            }
             TryScrollIntoView(item);
             SelectItemElement(item);
 
@@ -2326,26 +2607,18 @@ public sealed partial class AutomationController : IDisposable
 
         string? idForWindow = null;
         long? windowHandleFromId = null;
+        ElementHandle? elementHandleFromId = null;
         if (hasElementId)
         {
             idForWindow = request.ElementId!.Trim();
             var handle = RequireHandle(idForWindow);
-            if (handle.Backend != InspectionBackend.Uia)
-            {
-                throw new InvalidOperationException($"elementId '{idForWindow}' is not a UIA handle.");
-            }
-
             windowHandleFromId = handle.WindowHandle;
+            elementHandleFromId = handle;
         }
         else if (!string.IsNullOrWhiteSpace(request.ContainerElementId))
         {
             idForWindow = request.ContainerElementId!.Trim();
             var handle = RequireHandle(idForWindow);
-            if (handle.Backend != InspectionBackend.Uia)
-            {
-                throw new InvalidOperationException($"containerElementId '{idForWindow}' is not a UIA handle.");
-            }
-
             windowHandleFromId = handle.WindowHandle;
         }
 
@@ -2374,11 +2647,79 @@ public sealed partial class AutomationController : IDisposable
 
         await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
+        if (hasElementId && elementHandleFromId is not null && elementHandleFromId.Backend == InspectionBackend.Wpf)
+        {
+            // Best-effort WPF BringIntoView: this supports scrolling WPF elements into view even when UIA patterns are missing.
+            var beforeBounds = await ResolveWpfBoundsForHandleAsync(
+                window,
+                elementHandleFromId,
+                autoScroll: false,
+                cancellationToken).ConfigureAwait(false);
+
+            if (TryGetClientBoundsScreen(window, out var clientBounds) && RectIntersects(beforeBounds, clientBounds))
+            {
+                var alreadyVisible = new ScrollToElementResponse(Scrolled: false, MethodUsed: "alreadyVisible");
+                trace?.SetSummary($"scrolled={alreadyVisible.Scrolled} method={alreadyVisible.MethodUsed}");
+                return alreadyVisible;
+            }
+
+            var bring = await BringIntoViewWpfAsync(elementHandleFromId, cancellationToken).ConfigureAwait(false);
+            if (UiDelayScrollMs > 0)
+            {
+                await Task.Delay(UiDelayScrollMs, cancellationToken);
+            }
+
+            var bringResponse = new ScrollToElementResponse(
+                Scrolled: bring.BroughtIntoView,
+                MethodUsed: bring.BroughtIntoView ? "wpf_bringIntoView" : "wpf_bringIntoView_failed");
+
+            trace?.SetSummary($"scrolled={bringResponse.Scrolled} method={bringResponse.MethodUsed}");
+            return bringResponse;
+        }
+
         AutomationElement? container = null;
         if (!string.IsNullOrWhiteSpace(request.ContainerElementId))
         {
             var containerElementId = request.ContainerElementId!.Trim();
-            container = ResolveUiaElementById(window, rawWalker, containerElementId, out _);
+            var containerHandle = RequireHandle(containerElementId);
+
+            if (containerHandle.Backend == InspectionBackend.Wpf)
+            {
+                var bounds = await ResolveWpfBoundsForHandleAsync(
+                    window,
+                    containerHandle,
+                    autoScroll: request.AutoWait,
+                    cancellationToken).ConfigureAwait(false);
+
+                var containerPoint = GetRectCenterPoint(bounds);
+                container = automation.FromPoint(containerPoint)
+                    ?? throw new InvalidOperationException("No UIA element found at point.");
+
+                try
+                {
+                    if (container.Properties.ProcessId.Value != application.ProcessId)
+                    {
+                        throw new InvalidOperationException("Point resolved to a different process.");
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException($"Failed to validate picked element: {ex.Message}");
+                }
+            }
+            else if (containerHandle.Backend == InspectionBackend.Uia)
+            {
+                container = ResolveUiaElementById(window, rawWalker, containerElementId, out _);
+            }
+            else
+            {
+                throw new InvalidOperationException($"containerElementId '{containerElementId}' has unsupported backend '{containerHandle.Backend}'.");
+            }
+
             TryScrollIntoView(container);
         }
         else if (request.ContainerLocator is not null)
@@ -2559,27 +2900,23 @@ public sealed partial class AutomationController : IDisposable
 
         string? idForWindow = null;
         long? windowHandleFromId = null;
+        ElementHandle? sourceHandleFromId = null;
+        ElementHandle? targetHandleFromId = null;
+
         if (hasElementId)
         {
-            idForWindow = request.ElementId!.Trim();
-            var handle = RequireHandle(idForWindow);
-            if (handle.Backend != InspectionBackend.Uia)
-            {
-                throw new InvalidOperationException($"elementId '{idForWindow}' is not a UIA handle.");
-            }
-
-            windowHandleFromId = handle.WindowHandle;
+            var id = request.ElementId!.Trim();
+            idForWindow = id;
+            sourceHandleFromId = RequireHandle(id);
+            windowHandleFromId = sourceHandleFromId.WindowHandle;
         }
-        else if (hasTargetElementId)
-        {
-            idForWindow = request.TargetElementId!.Trim();
-            var handle = RequireHandle(idForWindow);
-            if (handle.Backend != InspectionBackend.Uia)
-            {
-                throw new InvalidOperationException($"targetElementId '{idForWindow}' is not a UIA handle.");
-            }
 
-            windowHandleFromId = handle.WindowHandle;
+        if (hasTargetElementId)
+        {
+            var id = request.TargetElementId!.Trim();
+            idForWindow ??= id;
+            targetHandleFromId = RequireHandle(id);
+            windowHandleFromId ??= targetHandleFromId.WindowHandle;
         }
 
         if (hasElementId && hasTargetElementId)
@@ -2617,9 +2954,60 @@ public sealed partial class AutomationController : IDisposable
 
         await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
 
-        var source = hasElementId
-            ? ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out _)
-            : request.AutoWait
+        Point start;
+        if (hasElementId)
+        {
+            var handle = sourceHandleFromId ?? RequireHandle(request.ElementId!.Trim());
+            if (handle.Backend == InspectionBackend.Wpf)
+            {
+                var bounds = await ResolveWpfBoundsForHandleAsync(
+                    window,
+                    handle,
+                    autoScroll: request.AutoWait,
+                    cancellationToken).ConfigureAwait(false);
+                start = GetRectCenterPoint(bounds);
+            }
+            else if (handle.Backend == InspectionBackend.Uia)
+            {
+                var source = ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out _);
+                TryScrollIntoView(source);
+
+                if (request.AutoWait)
+                {
+                    if (stableMs > 0)
+                    {
+                        await WaitForResolvedElementStateAsync(
+                            source,
+                            WaitForState.Stable,
+                            timeoutMs,
+                            pollIntervalMs,
+                            stableMs,
+                            expectedValue: null,
+                            expectedText: null,
+                            cancellationToken);
+                    }
+
+                    await WaitForResolvedElementStateAsync(
+                        source,
+                        WaitForState.Actionable,
+                        timeoutMs,
+                        pollIntervalMs,
+                        stableMs,
+                        expectedValue: null,
+                        expectedText: null,
+                        cancellationToken);
+                }
+
+                start = GetDragPoint(source);
+            }
+            else
+            {
+                throw new InvalidOperationException($"elementId '{request.ElementId!.Trim()}' has unsupported backend '{handle.Backend}'.");
+            }
+        }
+        else
+        {
+            var source = request.AutoWait
                 ? await ResolveUiaElementWithWaitAsync(
                     window,
                     request.Locator!,
@@ -2630,47 +3018,14 @@ public sealed partial class AutomationController : IDisposable
                     ActionKind.Drag,
                     cancellationToken)
                 : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.Drag);
-        TryScrollIntoView(source);
+            TryScrollIntoView(source);
 
-        if (request.AutoWait)
-        {
-            if (stableMs > 0)
-            {
-                await WaitForResolvedElementStateAsync(
-                    source,
-                    WaitForState.Stable,
-                    timeoutMs,
-                    pollIntervalMs,
-                    stableMs,
-                    expectedValue: null,
-                    expectedText: null,
-                    cancellationToken);
-            }
-
-            await WaitForResolvedElementStateAsync(
-                source,
-                WaitForState.Actionable,
-                timeoutMs,
-                pollIntervalMs,
-                stableMs,
-                expectedValue: null,
-                expectedText: null,
-                cancellationToken);
-        }
-
-        var start = GetDragPoint(source);
-
-        Point end;
-        if (hasTargetElementId)
-        {
-            var target = ResolveUiaElementById(window, rawWalker, request.TargetElementId!.Trim(), out _);
-            TryScrollIntoView(target);
             if (request.AutoWait)
             {
                 if (stableMs > 0)
                 {
                     await WaitForResolvedElementStateAsync(
-                        target,
+                        source,
                         WaitForState.Stable,
                         timeoutMs,
                         pollIntervalMs,
@@ -2681,8 +3036,8 @@ public sealed partial class AutomationController : IDisposable
                 }
 
                 await WaitForResolvedElementStateAsync(
-                    target,
-                    WaitForState.Visible,
+                    source,
+                    WaitForState.Actionable,
                     timeoutMs,
                     pollIntervalMs,
                     stableMs,
@@ -2690,7 +3045,58 @@ public sealed partial class AutomationController : IDisposable
                     expectedText: null,
                     cancellationToken);
             }
-            end = GetDragPoint(target);
+
+            start = GetDragPoint(source);
+        }
+
+        Point end;
+        if (hasTargetElementId)
+        {
+            var handle = targetHandleFromId ?? RequireHandle(request.TargetElementId!.Trim());
+            if (handle.Backend == InspectionBackend.Wpf)
+            {
+                var bounds = await ResolveWpfBoundsForHandleAsync(
+                    window,
+                    handle,
+                    autoScroll: request.AutoWait,
+                    cancellationToken).ConfigureAwait(false);
+                end = GetRectCenterPoint(bounds);
+            }
+            else if (handle.Backend == InspectionBackend.Uia)
+            {
+                var target = ResolveUiaElementById(window, rawWalker, request.TargetElementId!.Trim(), out _);
+                TryScrollIntoView(target);
+                if (request.AutoWait)
+                {
+                    if (stableMs > 0)
+                    {
+                        await WaitForResolvedElementStateAsync(
+                            target,
+                            WaitForState.Stable,
+                            timeoutMs,
+                            pollIntervalMs,
+                            stableMs,
+                            expectedValue: null,
+                            expectedText: null,
+                            cancellationToken);
+                    }
+
+                    await WaitForResolvedElementStateAsync(
+                        target,
+                        WaitForState.Visible,
+                        timeoutMs,
+                        pollIntervalMs,
+                        stableMs,
+                        expectedValue: null,
+                        expectedText: null,
+                        cancellationToken);
+                }
+                end = GetDragPoint(target);
+            }
+            else
+            {
+                throw new InvalidOperationException($"targetElementId '{request.TargetElementId!.Trim()}' has unsupported backend '{handle.Backend}'.");
+            }
         }
         else if (request.TargetLocator is not null)
         {

@@ -1668,6 +1668,73 @@ internal static class WpfVisualTreeInspector
         return BuildElementRefWpf(resolved.Element, resolved.XPath, request.ReturnFields);
     }
 
+    public static BringIntoViewWpfResponse BringIntoView(BringIntoViewWpfRequest request, CancellationToken cancellationToken)
+    {
+        if (request.WindowHandle == 0)
+        {
+            throw new ArgumentException("WindowHandle is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.XPath))
+        {
+            throw new ArgumentException("XPath is required.");
+        }
+
+        var window = ResolveWindow(request.WindowHandle);
+        using var treeService = new VisualTreeService();
+
+        var xpath = NormalizeXPath(request.XPath);
+        DependencyObject element;
+        try
+        {
+            element = ResolveByXPath(treeService, window, xpath, visibleOnly: false, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            return new BringIntoViewWpfResponse(
+                BroughtIntoView: false,
+                Bounds: null,
+                Reason: "not_found: " + ex.Message);
+        }
+
+        try
+        {
+            switch (element)
+            {
+                case FrameworkElement fe:
+                    fe.BringIntoView();
+                    break;
+                case FrameworkContentElement fce:
+                    fce.BringIntoView();
+                    break;
+                default:
+                    return new BringIntoViewWpfResponse(
+                        BroughtIntoView: false,
+                        Bounds: GetBoundsWpf(element),
+                        Reason: "not_supported");
+            }
+
+            try
+            {
+                window.UpdateLayout();
+            }
+            catch
+            {
+            }
+
+            return new BringIntoViewWpfResponse(
+                BroughtIntoView: true,
+                Bounds: GetBoundsWpf(element));
+        }
+        catch (Exception ex)
+        {
+            return new BringIntoViewWpfResponse(
+                BroughtIntoView: false,
+                Bounds: GetBoundsWpf(element),
+                Reason: ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
     public static HighlightWpfElementResponse HighlightElement(HighlightWpfElementRequest request, CancellationToken cancellationToken)
     {
         var locator = request.Locator ?? throw new ArgumentException("highlight_element requires a locator.");
@@ -4076,6 +4143,13 @@ internal static class WpfVisualTreeInspector
 
         if (matches.Length == 0)
         {
+            if (!string.IsNullOrWhiteSpace(ownerHint) &&
+                TryResolveAttachedDependencyProperty(ownerHint, propertyName, elementType, out var attached))
+            {
+                dependencyProperty = attached;
+                return true;
+            }
+
             return false;
         }
 
@@ -4091,6 +4165,135 @@ internal static class WpfVisualTreeInspector
             .First();
 
         return true;
+    }
+
+    private static readonly Dictionary<string, Type?> OwnerTypeCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object OwnerTypeCacheSync = new();
+
+    private static bool TryResolveAttachedDependencyProperty(
+        string ownerHint,
+        string propertyName,
+        Type elementType,
+        out DependencyProperty dependencyProperty)
+    {
+        dependencyProperty = null!;
+
+        Type? ownerType;
+        lock (OwnerTypeCacheSync)
+        {
+            if (!OwnerTypeCache.TryGetValue(ownerHint, out ownerType))
+            {
+                ownerType = ResolveTypeByName(ownerHint, elementType);
+                OwnerTypeCache[ownerHint] = ownerType;
+            }
+        }
+
+        if (ownerType is null)
+        {
+            return false;
+        }
+
+        var fieldName = propertyName.EndsWith("Property", StringComparison.Ordinal)
+            ? propertyName
+            : propertyName + "Property";
+
+        try
+        {
+            var field = ownerType.GetField(
+                fieldName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.FlattenHierarchy);
+
+            if (field is null || field.FieldType != typeof(DependencyProperty))
+            {
+                return false;
+            }
+
+            var value = field.GetValue(null) as DependencyProperty;
+            if (value is null)
+            {
+                return false;
+            }
+
+            dependencyProperty = value;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static Type? ResolveTypeByName(string hint, Type elementType)
+    {
+        if (string.IsNullOrWhiteSpace(hint))
+        {
+            return null;
+        }
+
+        // Full name fast paths
+        try
+        {
+            var direct = Type.GetType(hint, throwOnError: false, ignoreCase: true);
+            if (direct is not null)
+            {
+                return direct;
+            }
+        }
+        catch
+        {
+        }
+
+        var assemblies = new[]
+        {
+            elementType.Assembly,
+            typeof(DependencyObject).Assembly,
+            typeof(FrameworkElement).Assembly,
+            typeof(System.Windows.Media.RenderOptions).Assembly
+        }.Distinct().ToArray();
+
+        // If it looks like a full name, prefer Assembly.GetType lookups.
+        if (hint.Contains('.', StringComparison.Ordinal))
+        {
+            foreach (var asm in assemblies)
+            {
+                try
+                {
+                    var type = asm.GetType(hint, throwOnError: false, ignoreCase: true);
+                    if (type is not null)
+                    {
+                        return type;
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        // Fallback: search by short name in a small set of assemblies.
+        foreach (var asm in assemblies)
+        {
+            Type[] types;
+            try
+            {
+                types = asm.GetTypes();
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var type in types)
+            {
+                if (string.Equals(type.Name, hint, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(type.FullName, hint, StringComparison.OrdinalIgnoreCase))
+                {
+                    return type;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static int GetInheritanceDistance(Type derivedType, Type baseType)

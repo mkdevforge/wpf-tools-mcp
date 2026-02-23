@@ -64,6 +64,11 @@ public static class AppTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() => Task.FromResult(sessions.ListSessions()));
 
+    [McpServerTool(Name = "list_displays"), Description("List connected displays and the virtual screen bounds (multi-monitor diagnostics).")]
+    public static Task<ListDisplaysResponse> ListDisplays(
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() => Task.FromResult(DisplayDiagnostics.ListDisplays()));
+
     [McpServerTool(Name = "list_windows"), Description("Enumerate all top-level windows of the attached process.")]
     public static Task<ListWindowsResponse> ListWindows(
         SessionManager sessions,
@@ -89,6 +94,8 @@ public static class AppTools
         [Description("Image format: png | jpeg")] string? format = null,
         [Description("JPEG quality 1-100 (only used when format=jpeg)")] int? jpegQuality = null,
         [Description("Optional output file path (auto-generated when omitted)")] string? outputPath = null,
+        [Description("Include highlight overlays in the capture (defaults to false)")] bool includeOverlay = false,
+        [Description("Scroll element into view before capturing (defaults to true)")] bool autoScroll = true,
         [Description("Include base64 payload in response (defaults to false)")] bool returnBase64 = false,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
@@ -108,6 +115,8 @@ public static class AppTools
                         Format: ParseImageFormat(format),
                         JpegQuality: jpegQuality ?? 90,
                         OutputPath: outputPath,
+                        IncludeOverlay: includeOverlay,
+                        AutoScroll: autoScroll,
                         ReturnBase64: returnBase64),
                     cancellationToken),
                 cancellationToken);
@@ -117,7 +126,7 @@ public static class AppTools
     {
         if (string.IsNullOrWhiteSpace(captureMode))
         {
-            return ScreenshotCaptureMode.Screen;
+            return ScreenshotCaptureMode.Auto;
         }
 
         var value = captureMode.Trim();

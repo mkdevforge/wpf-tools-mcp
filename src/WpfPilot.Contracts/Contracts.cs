@@ -154,12 +154,14 @@ public sealed record TakeScreenshotRequest(
     ElementLocator? Locator = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
     InspectionBackend Backend = InspectionBackend.Auto,
-    ScreenshotCaptureMode CaptureMode = ScreenshotCaptureMode.Screen,
+    ScreenshotCaptureMode CaptureMode = ScreenshotCaptureMode.Auto,
     ScreenshotCaptureArea Area = ScreenshotCaptureArea.Client,
     ScreenshotClipMode Clip = ScreenshotClipMode.Intersect,
     ScreenshotImageFormat Format = ScreenshotImageFormat.Png,
     int JpegQuality = 90,
     string? OutputPath = null,
+    bool IncludeOverlay = false,
+    bool AutoScroll = true,
     bool ReturnBase64 = false);
 
 public sealed record TakeScreenshotResponse(
@@ -219,6 +221,18 @@ public sealed record HighlightElementResponse(
 public sealed record FocusWindowRequest(long? WindowHandle = null, string? Title = null);
 
 public sealed record FocusWindowResponse(bool Focused, long Handle, string Title);
+
+public sealed record DisplayInfo(
+    string DeviceName,
+    Rect Bounds,
+    bool IsPrimary,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? WorkArea = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? DpiScaleX = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? DpiScaleY = null);
+
+public sealed record ListDisplaysResponse(
+    Rect VirtualScreen,
+    IReadOnlyList<DisplayInfo> Displays);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ClickType
@@ -418,7 +432,9 @@ public sealed record ElementRef(
     string XPath,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClassName = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? Bounds = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonPropertyName("elementId")] string? ElementId = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonPropertyName("elementId")] string? ElementId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonPropertyName("elementIdUia")] string? ElementIdUia = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonPropertyName("elementIdWpf")] string? ElementIdWpf = null);
 
 public sealed record ResolveElementResponse(
     InspectionBackend BackendUsed,
@@ -488,6 +504,15 @@ public sealed record ResolveWpfElementRequest(
     InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     int MaxNodes = 2000,
     FindReturnFields ReturnFields = FindReturnFields.Minimal);
+
+public sealed record BringIntoViewWpfRequest(
+    long WindowHandle,
+    string XPath);
+
+public sealed record BringIntoViewWpfResponse(
+    bool BroughtIntoView,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? Bounds = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null);
 
 public sealed record HighlightWpfElementRequest(
     long? WindowHandle = null,

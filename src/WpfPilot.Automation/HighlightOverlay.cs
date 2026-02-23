@@ -11,6 +11,22 @@ internal static class HighlightOverlay
     private static readonly object Sync = new();
     private static OverlayHost? _host;
 
+    public static void Hide()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        OverlayHost? host;
+        lock (Sync)
+        {
+            host = _host;
+        }
+
+        host?.TryHide();
+    }
+
     public static async Task<HighlightOverlayResult> ShowAsync(
         ContractRect bounds,
         string color,
@@ -74,6 +90,30 @@ internal static class HighlightOverlay
             };
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
+        }
+
+        public bool TryHide()
+        {
+            try
+            {
+                if (!_ready.Task.IsCompletedSuccessfully)
+                {
+                    return false;
+                }
+
+                var hwnd = _ready.Task.Result;
+                if (hwnd == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                _ = SendMessage(hwnd, WM_APP_HIDE, IntPtr.Zero, IntPtr.Zero);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public async Task<HighlightOverlayResult> ShowAsync(
@@ -490,6 +530,10 @@ internal static class HighlightOverlay
 
                     return IntPtr.Zero;
 
+                case WM_APP_HIDE:
+                    state?.HandleTimer();
+                    return IntPtr.Zero;
+
                 case WM_TIMER:
                     state?.HandleTimer();
                     return IntPtr.Zero;
@@ -552,6 +596,7 @@ internal static class HighlightOverlay
     private const uint WM_TIMER = 0x0113;
     private const uint WM_APP = 0x8000;
     private const uint WM_APP_SHOW = WM_APP + 1;
+    private const uint WM_APP_HIDE = WM_APP + 2;
 
     private const byte AC_SRC_OVER = 0x00;
     private const byte AC_SRC_ALPHA = 0x01;
@@ -676,6 +721,9 @@ internal static class HighlightOverlay
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);

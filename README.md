@@ -8,7 +8,8 @@ WpfPilot is an **MCP server** that gives AI assistants the ability to **inspect 
 ## Install (dotnet tool)
 
 ```powershell
-dotnet tool install -g MkDevForge.WpfPilot --version 0.1.0-preview.1
+dotnet tool install -g MkDevForge.WpfPilot --version 0.1.0-preview.12
+dotnet tool update -g MkDevForge.WpfPilot --version 0.1.0-preview.12
 ```
 
 ## Run
@@ -21,6 +22,7 @@ The server speaks MCP over **stdio**.
 
 ## Debugging tools
 
+- `list_displays`: list connected displays and virtual screen bounds (helps with multi-monitor coordinate debugging).
 - `trace_start` / `trace_stop`: record MCP tool timings and write a JSON trace file (defaults to `%TEMP%`).
 - `performance_start` / `performance_stop`: lightweight UI-thread latency sampling.
 
@@ -44,6 +46,7 @@ Example (generic MCP config):
 - `inject_agent` requires the target process to be running as the **same user** and **not elevated** above the server.
 - **ARM64 target processes are not supported** for injection (x86/x64 only).
 - Custom controls that do not expose meaningful UIA peers/patterns may not be interactable via UI Automation.
+- Multi-monitor setups are supported; tool coordinates are in **virtual screen** coordinates (which may be negative).
 
 ## Licensing
 

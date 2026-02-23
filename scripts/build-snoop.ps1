@@ -12,6 +12,13 @@ if (-not (Test-Path $snoopRoot)) {
     throw "Snoop repo not found at '$snoopRoot'. Ensure the git submodule is initialized."
 }
 
+# GitVersion.MsBuild can fail in CI when building from a detached submodule HEAD.
+# Disable it aggressively for all Snoop builds.
+$env:DisableGitVersionTask = "true"
+$env:GitVersion_NoFetchEnabled = "true"
+$env:GitVersion_NoNormalizeEnabled = "true"
+$env:GitVersion_AllowShallowEnabled = "true"
+
 $injectorLauncherProj = Join-Path $snoopRoot "Snoop.InjectorLauncher\\Snoop.InjectorLauncher.csproj"
 $genericInjectorProj = Join-Path $snoopRoot "Snoop.GenericInjector\\Snoop.GenericInjector.vcxproj"
 

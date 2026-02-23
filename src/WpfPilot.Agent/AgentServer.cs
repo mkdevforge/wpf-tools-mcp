@@ -19,50 +19,77 @@ internal static class AgentServer
 
     public static async Task RunAsync(string pipeName, CancellationToken cancellationToken)
     {
+        // Allow multiple concurrent MCP sessions to connect to the same injected agent.
+        // Each connection is handled on its own task, but all WPF operations are still serialized
+        // via Dispatcher in RunOnUiAsync.
+
+        var connectionTasks = new List<Task>();
+
         while (!cancellationToken.IsCancellationRequested)
         {
-            await using var pipe = new NamedPipeServerStream(
-                pipeName,
-                PipeDirection.InOut,
-                maxNumberOfServerInstances: 1,
-                PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-
+            NamedPipeServerStream? pipe = null;
             try
             {
-                await pipe.WaitForConnectionAsync(cancellationToken);
+                pipe = CreatePipe(pipeName);
+                await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
+                pipe?.Dispose();
                 break;
             }
             catch
             {
+                pipe?.Dispose();
                 continue;
             }
 
-            while (pipe.IsConnected && !cancellationToken.IsCancellationRequested)
+            connectionTasks.Add(Task.Run(() => RunConnectionAsync(pipe, cancellationToken), CancellationToken.None));
+        }
+
+        try
+        {
+            await Task.WhenAll(connectionTasks).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best-effort shutdown.
+        }
+    }
+
+    private static NamedPipeServerStream CreatePipe(string pipeName) =>
+        new(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: NamedPipeServerStream.MaxAllowedServerInstances,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+
+    private static async Task RunConnectionAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    {
+        await using var _ = pipe.ConfigureAwait(false);
+
+        while (pipe.IsConnected && !cancellationToken.IsCancellationRequested)
+        {
+            AgentRequest request;
+            try
             {
-                AgentRequest request;
-                try
-                {
-                    request = await PipeProtocol.ReadAsync<AgentRequest>(pipe, cancellationToken);
-                }
-                catch
-                {
-                    break;
-                }
+                request = await PipeProtocol.ReadAsync<AgentRequest>(pipe, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                break;
+            }
 
-                var response = await HandleAsync(request, cancellationToken);
+            var response = await HandleAsync(request, cancellationToken).ConfigureAwait(false);
 
-                try
-                {
-                    await PipeProtocol.WriteAsync(pipe, response, cancellationToken);
-                }
-                catch
-                {
-                    break;
-                }
+            try
+            {
+                await PipeProtocol.WriteAsync(pipe, response, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                break;
             }
         }
     }
@@ -149,6 +176,18 @@ internal static class AgentServer
                             ?? new ResolveWpfElementRequest();
 
                         var response = WpfVisualTreeInspector.ResolveElement(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case "wpf/bring_into_view":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<BringIntoViewWpfRequest>(JsonOptions)
+                            ?? throw new InvalidOperationException("Missing request params.");
+
+                        var response = WpfVisualTreeInspector.BringIntoView(typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
