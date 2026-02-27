@@ -47,7 +47,7 @@ public sealed partial class AutomationController
             {
                 if (backend == InspectionBackend.Auto)
                 {
-                    backend = InspectionBackend.Uia;
+                    backend = IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia;
                 }
 
                 windowHandleUsed = request.WindowHandle
@@ -126,9 +126,72 @@ public sealed partial class AutomationController
                 error = overlayResult.Error;
             }
 
+            TakeScreenshotResponse? screenshot = null;
+            if (request.ReturnScreenshot)
+            {
+                try
+                {
+                    Window window;
+                    try
+                    {
+                        window = FindWindowByHandle(application, automation, windowHandleUsed);
+                    }
+                    catch
+                    {
+                        throw new InvalidOperationException("Window not found for highlight screenshot.");
+                    }
+
+                    await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
+
+                    var capture = CaptureScreenshotWithMetadata(
+                        window,
+                        requestedBounds: null,
+                        requestedMode: request.ScreenshotCaptureMode,
+                        area: request.ScreenshotArea,
+                        clip: ScreenshotClipMode.Intersect,
+                        includeOverlay: true);
+
+                    using var bitmap = capture.Bitmap;
+
+                    AnnotateBitmap(
+                        bitmap,
+                        capture.CapturedBounds,
+                        bounds,
+                        request.Color,
+                        request.Thickness,
+                        label: null);
+
+                    var screenshotPath = ResolveScreenshotOutputPath(request.ScreenshotOutputPath, request.ScreenshotFormat);
+                    SaveBitmapWithWic(bitmap, screenshotPath, request.ScreenshotFormat, request.ScreenshotJpegQuality);
+
+                    string? base64 = null;
+                    if (request.ScreenshotReturnBase64)
+                    {
+                        var bytes = await File.ReadAllBytesAsync(screenshotPath, cancellationToken);
+                        base64 = Convert.ToBase64String(bytes);
+                    }
+
+                    screenshot = new TakeScreenshotResponse(
+                        Path: screenshotPath,
+                        Width: bitmap.Width,
+                        Height: bitmap.Height,
+                        Format: GetImageFormatName(request.ScreenshotFormat),
+                        CapturedBounds: capture.CapturedBounds,
+                        RequestedBounds: bounds,
+                        WasClipped: capture.WasClipped,
+                        WindowHandleUsed: windowHandleUsed,
+                        CaptureModeUsed: capture.CaptureModeUsed,
+                        Base64: base64);
+                }
+                catch (Exception screenshotEx)
+                {
+                    error = (error is null ? "" : (error + "\n")) + "highlight_screenshot_failed: " + screenshotEx.GetBaseException().Message;
+                }
+            }
+
             var response = shown
-                ? new HighlightElementResponse(Highlighted: true, Bounds: bounds, MethodUsed: methodUsed)
-                : new HighlightElementResponse(Highlighted: false, Bounds: bounds, Reason: "overlay_failed", MethodUsed: methodUsed, Error: error);
+                ? new HighlightElementResponse(Highlighted: true, Bounds: bounds, MethodUsed: methodUsed, Error: error, Screenshot: screenshot)
+                : new HighlightElementResponse(Highlighted: false, Bounds: bounds, Reason: "overlay_failed", MethodUsed: methodUsed, Error: error, Screenshot: screenshot);
 
             trace?.SetSummary($"{backend} highlighted={response.Highlighted} bounds={bounds.Width}x{bounds.Height}");
             return response;

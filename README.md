@@ -8,8 +8,8 @@ WpfPilot is an **MCP server** that gives AI assistants the ability to **inspect 
 ## Install (dotnet tool)
 
 ```powershell
-dotnet tool install -g MkDevForge.WpfPilot --version 0.1.0-preview.12
-dotnet tool update -g MkDevForge.WpfPilot --version 0.1.0-preview.12
+dotnet tool install -g MkDevForge.WpfPilot --version 0.1.0-preview.14
+dotnet tool update -g MkDevForge.WpfPilot --version 0.1.0-preview.14
 ```
 
 ## Run
@@ -25,6 +25,8 @@ The server speaks MCP over **stdio**.
 - `list_displays`: list connected displays and virtual screen bounds (helps with multi-monitor coordinate debugging).
 - `trace_start` / `trace_stop`: record MCP tool timings and write a JSON trace file (defaults to `%TEMP%`).
 - `performance_start` / `performance_stop`: lightweight UI-thread latency sampling.
+- `set_window_bounds` / `set_window_state`: resize/restore windows (useful for deterministic screenshots).
+- `take_screenshot`: supports optional annotation (rect/label) for debugging.
 
 ## MCP client config
 

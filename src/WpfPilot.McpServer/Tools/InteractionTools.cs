@@ -32,6 +32,56 @@ public static class InteractionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() => sessions.GetActiveWindowAsync(sessionId, cancellationToken));
 
+    [McpServerTool(Name = "set_window_bounds"), Description("Move/resize a window by setting its bounds (outer window rectangle).")]
+    public static Task<SetWindowBoundsResponse> SetWindowBounds(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("X screen coordinate (pixels)")] int? x = null,
+        [Description("Y screen coordinate (pixels)")] int? y = null,
+        [Description("Width (pixels)")] int? width = null,
+        [Description("Height (pixels)")] int? height = null,
+        [Description("Clamp the resulting bounds to the virtual screen")] bool clampToVirtualScreen = true,
+        [Description("Bring window to foreground first")] bool ensureForeground = true,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.SetWindowBoundsAsync(
+                    new SetWindowBoundsRequest(
+                        WindowHandle: effectiveWindowHandle,
+                        X: x,
+                        Y: y,
+                        Width: width,
+                        Height: height,
+                        ClampToVirtualScreen: clampToVirtualScreen,
+                        EnsureForeground: ensureForeground),
+                    cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "set_window_state"), Description("Set a window state (normal/minimized/maximized).")]
+    public static Task<SetWindowStateResponse> SetWindowState(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Target window state")] WindowState state = WindowState.Normal,
+        [Description("Bring window to foreground first")] bool ensureForeground = true,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.SetWindowStateAsync(
+                    new SetWindowStateRequest(
+                        WindowHandle: effectiveWindowHandle,
+                        State: state,
+                        EnsureForeground: ensureForeground),
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "click_element"), Description("Click an element by locator or elementId.")]
     public static Task<ClickElementResponse> ClickElement(
         SessionManager sessions,

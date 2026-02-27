@@ -163,12 +163,13 @@ public static class InspectionTools
             return automation.RunExclusiveAsync(() => automation.ReleaseElementAsync(elementId), cancellationToken);
         });
 
-    [McpServerTool(Name = "pick_element_at_point"), Description("Pick an element at a screen coordinate (UIA or WPF).")]
+    [McpServerTool(Name = "pick_element_at_point"), Description("Pick an element at a coordinate (UIA or WPF).")]
     public static Task<PickElementAtPointResponse> PickElementAtPoint(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
-        [Description("Screen X coordinate (pixels)")] int x,
-        [Description("Screen Y coordinate (pixels)")] int y,
+        [Description("X coordinate (pixels)")] int x,
+        [Description("Y coordinate (pixels)")] int y,
+        [Description("Coordinate space: screen | client")] MouseCoordinateSpace coordSpace = MouseCoordinateSpace.Screen,
         [Description("Inspection backend selection")] InspectionBackend backend = InspectionBackend.Auto,
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Include ancestor chain in response")] bool includeAncestors = false,
@@ -182,7 +183,8 @@ public static class InspectionTools
                     new PickElementAtPointRequest(
                         X: x,
                         Y: y,
-                        WindowHandle: effectiveWindowHandle,
+                        CoordSpace: coordSpace,
+                        WindowHandle: coordSpace == MouseCoordinateSpace.Client ? effectiveWindowHandle : windowHandle,
                         Backend: backend,
                         IncludeAncestors: includeAncestors,
                         MaxAncestors: maxAncestors),
@@ -201,6 +203,13 @@ public static class InspectionTools
         [Description("Highlight duration (ms)")] int durationMs = 1500,
         [Description("Stroke color (e.g. #3B82F6)")] string color = "#3B82F6",
         [Description("Stroke thickness (px)")] int thickness = 3,
+        [Description("Capture and return an annotated screenshot (defaults to false)")] bool returnScreenshot = false,
+        [Description("Screenshot capture mode")] ScreenshotCaptureMode screenshotCaptureMode = ScreenshotCaptureMode.Auto,
+        [Description("Screenshot capture area")] ScreenshotCaptureArea screenshotArea = ScreenshotCaptureArea.Client,
+        [Description("Screenshot image format")] ScreenshotImageFormat screenshotFormat = ScreenshotImageFormat.Png,
+        [Description("JPEG quality 1-100 (only used when screenshotFormat=jpeg)")] int screenshotJpegQuality = 90,
+        [Description("Optional output file path (auto-generated when omitted)")] string? screenshotOutputPath = null,
+        [Description("Include base64 payload in screenshot response (defaults to false)")] bool screenshotReturnBase64 = false,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -215,7 +224,14 @@ public static class InspectionTools
                         Backend: backend,
                         DurationMs: durationMs,
                         Color: color,
-                        Thickness: thickness),
+                        Thickness: thickness,
+                        ReturnScreenshot: returnScreenshot,
+                        ScreenshotCaptureMode: screenshotCaptureMode,
+                        ScreenshotArea: screenshotArea,
+                        ScreenshotFormat: screenshotFormat,
+                        ScreenshotJpegQuality: screenshotJpegQuality,
+                        ScreenshotOutputPath: screenshotOutputPath,
+                        ScreenshotReturnBase64: screenshotReturnBase64),
                     cancellationToken),
                 cancellationToken);
         });

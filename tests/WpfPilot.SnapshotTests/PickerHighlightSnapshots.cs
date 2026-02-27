@@ -209,6 +209,8 @@ public sealed class PickerHighlightSnapshots
         return response with
         {
             WindowHandleUsed = 0,
+            XScreen = 0,
+            YScreen = 0,
             Element = element,
             Ancestors = ancestors
         };

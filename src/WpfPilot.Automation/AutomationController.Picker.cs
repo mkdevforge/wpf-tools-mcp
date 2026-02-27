@@ -18,6 +18,34 @@ public sealed partial class AutomationController
             var application = EnsureAttached();
             var automation = EnsureAutomation();
 
+            int xScreen;
+            int yScreen;
+            var coordSpaceUsed = request.CoordSpace;
+
+            switch (request.CoordSpace)
+            {
+                case MouseCoordinateSpace.Screen:
+                    xScreen = request.X;
+                    yScreen = request.Y;
+                    break;
+                case MouseCoordinateSpace.Client:
+                    if (request.WindowHandle is not long hwnd || hwnd == 0)
+                    {
+                        throw new InvalidOperationException("client_coords_require_windowHandle");
+                    }
+
+                    if (!TryGetClientTopLeftScreen(new IntPtr(hwnd), out var clientTopLeft))
+                    {
+                        throw new InvalidOperationException("client_origin_unavailable");
+                    }
+
+                    xScreen = clientTopLeft.X + request.X;
+                    yScreen = clientTopLeft.Y + request.Y;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(request.CoordSpace), request.CoordSpace, "Unsupported coordinate space.");
+            }
+
             var backend = request.Backend;
             if (backend == InspectionBackend.Auto)
             {
@@ -27,7 +55,7 @@ public sealed partial class AutomationController
             long windowHandleForWpf;
             if (backend == InspectionBackend.Wpf)
             {
-                var resolvedWindowHandle = ResolveWindowHandleAtPointUia(request.X, request.Y, cancellationToken);
+                var resolvedWindowHandle = ResolveWindowHandleAtPointUia(xScreen, yScreen, cancellationToken);
                 if (request.WindowHandle is long expectedHandle && expectedHandle != resolvedWindowHandle)
                 {
                     throw new InvalidOperationException(
@@ -43,8 +71,8 @@ public sealed partial class AutomationController
 
             var response = backend switch
             {
-                InspectionBackend.Uia => PickElementAtPointUia(request, cancellationToken),
-                InspectionBackend.Wpf => await PickElementAtPointWpfAsync(windowHandleForWpf, request, cancellationToken).ConfigureAwait(false),
+                InspectionBackend.Uia => PickElementAtPointUia(request, xScreen, yScreen, coordSpaceUsed, cancellationToken),
+                InspectionBackend.Wpf => await PickElementAtPointWpfAsync(windowHandleForWpf, request, xScreen, yScreen, coordSpaceUsed, cancellationToken).ConfigureAwait(false),
                 _ => throw new ArgumentOutOfRangeException(nameof(request.Backend), request.Backend, "Unsupported backend.")
             };
 
@@ -64,6 +92,9 @@ public sealed partial class AutomationController
 
     private PickElementAtPointResponse PickElementAtPointUia(
         PickElementAtPointRequest request,
+        int xScreen,
+        int yScreen,
+        MouseCoordinateSpace coordSpaceUsed,
         CancellationToken cancellationToken)
     {
         var application = EnsureAttached();
@@ -71,7 +102,7 @@ public sealed partial class AutomationController
 
         var requestedWindowHandle = request.WindowHandle;
 
-        var point = new System.Drawing.Point(request.X, request.Y);
+        var point = new System.Drawing.Point(xScreen, yScreen);
         var element = automation.FromPoint(point)
             ?? throw new InvalidOperationException("No UIA element found at point.");
 
@@ -132,7 +163,14 @@ public sealed partial class AutomationController
             ancestors = BuildUiaAncestorRefs(window, rawWalker, element, windowHandleUsed, request.MaxAncestors);
         }
 
-        return new PickElementAtPointResponse(InspectionBackend.Uia, elementRef, windowHandleUsed, ancestors);
+        return new PickElementAtPointResponse(
+            BackendUsed: InspectionBackend.Uia,
+            Element: elementRef,
+            WindowHandleUsed: windowHandleUsed,
+            XScreen: xScreen,
+            YScreen: yScreen,
+            CoordSpaceUsed: coordSpaceUsed,
+            Ancestors: ancestors);
     }
 
     private long ResolveWindowHandleAtPointUia(int x, int y, CancellationToken cancellationToken)
@@ -209,6 +247,9 @@ public sealed partial class AutomationController
     private async Task<PickElementAtPointResponse> PickElementAtPointWpfAsync(
         long windowHandleUsed,
         PickElementAtPointRequest request,
+        int xScreen,
+        int yScreen,
+        MouseCoordinateSpace coordSpaceUsed,
         CancellationToken cancellationToken)
     {
         var client = await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
@@ -221,8 +262,8 @@ public sealed partial class AutomationController
             "wpf/pick_element_at_point",
             new PickWpfElementAtPointRequest(
                 WindowHandle: windowHandleUsed,
-                X: request.X,
-                Y: request.Y,
+                X: xScreen,
+                Y: yScreen,
                 IncludeAncestors: request.IncludeAncestors,
                 MaxAncestors: request.MaxAncestors,
                 ReturnFields: FindReturnFields.Standard),
@@ -259,7 +300,14 @@ public sealed partial class AutomationController
             ancestors = withIds;
         }
 
-        return new PickElementAtPointResponse(InspectionBackend.Wpf, picked, windowHandleUsed, ancestors);
+        return new PickElementAtPointResponse(
+            BackendUsed: InspectionBackend.Wpf,
+            Element: picked,
+            WindowHandleUsed: windowHandleUsed,
+            XScreen: xScreen,
+            YScreen: yScreen,
+            CoordSpaceUsed: coordSpaceUsed,
+            Ancestors: ancestors);
     }
 
     private IReadOnlyList<ElementRef> BuildUiaAncestorRefs(

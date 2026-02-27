@@ -108,13 +108,13 @@ The MCP server manages both channels in Phase 2. Inspection tools route through 
 |---|---|---|
 | `list_windows` | Enumerate all windows of the target process | Window titles, handles, dimensions, process info |
 | `list_displays` | List connected displays and virtual screen bounds (multi-monitor diagnostics) | Virtual screen bounds + per-display bounds |
-| `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`) | File path + image metadata (`width`, `height`, `format`), optional Base64 payload |
+| `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload |
 | `get_visual_tree` | Return an inspection tree (UIA or WPF) for the main window or a subtree | Structured JSON. Configurable depth. `visibleOnly=true` means **in-viewport**; use `includeOffViewport=true` to include offscreen elements. |
 | `find_elements` | Find elements without dumping the full tree | Matches with element summaries and optional `elementId`s |
 | `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef (includes `elementId`, XPath, bounds, etc.) |
 | `get_path_to_element` | Get the XPath for a resolved element | XPath string |
-| `pick_element_at_point` | Pick an element at a screen coordinate | ElementRef + optional ancestor chain |
-| `highlight_element` | Highlight an element on-screen | Highlight result + bounds + method used |
+| `pick_element_at_point` | Pick an element at a coordinate (`coordSpace`: screen/client) | ElementRef + optional ancestor chain |
+| `highlight_element` | Highlight an element on-screen. Can optionally return an annotated screenshot (`returnScreenshot=true`). | Highlight result + bounds + method used |
 | `get_element_properties` | Inspect a single element via UIA | All UIA automation properties, supported patterns, current values |
 
 ### Phase 1 — Interaction (FlaUI)
@@ -132,6 +132,8 @@ The MCP server manages both channels in Phase 2. Inspection tools route through 
 | `wait_for` | Wait for an element to satisfy a state | Locator/elementId + state + timeout |
 | `get_active_window` | Get the active window for this session | `sessionId` |
 | `set_active_window` | Bring a window to the foreground and set it as the session’s active window | `sessionId` + window handle or title |
+| `set_window_bounds` | Move/resize a window by setting its bounds (outer window rectangle) | `sessionId` + optional `windowHandle` + `x/y/width/height` |
+| `set_window_state` | Set a window state (normal/minimized/maximized) | `sessionId` + optional `windowHandle` + state |
 
 ### Phase 1 — App Lifecycle
 

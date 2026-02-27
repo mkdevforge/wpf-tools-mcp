@@ -162,6 +162,10 @@ public sealed record TakeScreenshotRequest(
     string? OutputPath = null,
     bool IncludeOverlay = false,
     bool AutoScroll = true,
+    bool Annotate = false,
+    string AnnotationColor = "#3B82F6",
+    int AnnotationThickness = 3,
+    string? AnnotationLabel = null,
     bool ReturnBase64 = false);
 
 public sealed record TakeScreenshotResponse(
@@ -179,6 +183,7 @@ public sealed record TakeScreenshotResponse(
 public sealed record PickElementAtPointRequest(
     int X,
     int Y,
+    MouseCoordinateSpace CoordSpace = MouseCoordinateSpace.Screen,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WindowHandle = null,
     InspectionBackend Backend = InspectionBackend.Auto,
     bool IncludeAncestors = false,
@@ -188,6 +193,9 @@ public sealed record PickElementAtPointResponse(
     InspectionBackend BackendUsed,
     ElementRef Element,
     long WindowHandleUsed,
+    int XScreen,
+    int YScreen,
+    MouseCoordinateSpace CoordSpaceUsed,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ElementRef>? Ancestors = null);
 
 public sealed record PickWpfElementAtPointRequest(
@@ -209,18 +217,60 @@ public sealed record HighlightElementRequest(
     InspectionBackend Backend = InspectionBackend.Auto,
     int DurationMs = 1500,
     string Color = "#3B82F6",
-    int Thickness = 3);
+    int Thickness = 3,
+    bool ReturnScreenshot = false,
+    ScreenshotCaptureMode ScreenshotCaptureMode = ScreenshotCaptureMode.Auto,
+    ScreenshotCaptureArea ScreenshotArea = ScreenshotCaptureArea.Client,
+    ScreenshotImageFormat ScreenshotFormat = ScreenshotImageFormat.Png,
+    int ScreenshotJpegQuality = 90,
+    string? ScreenshotOutputPath = null,
+    bool ScreenshotReturnBase64 = false);
 
 public sealed record HighlightElementResponse(
     bool Highlighted,
     Rect Bounds,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MethodUsed = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TakeScreenshotResponse? Screenshot = null);
 
 public sealed record FocusWindowRequest(long? WindowHandle = null, string? Title = null);
 
 public sealed record FocusWindowResponse(bool Focused, long Handle, string Title);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum WindowState
+{
+    Normal,
+    Minimized,
+    Maximized
+}
+
+public sealed record SetWindowBoundsRequest(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WindowHandle = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? X = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Y = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Width = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Height = null,
+    bool ClampToVirtualScreen = true,
+    bool EnsureForeground = true);
+
+public sealed record SetWindowBoundsResponse(
+    bool Updated,
+    long WindowHandleUsed,
+    Rect PreviousBounds,
+    Rect NewBounds,
+    bool WasClamped);
+
+public sealed record SetWindowStateRequest(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WindowHandle = null,
+    WindowState State = WindowState.Normal,
+    bool EnsureForeground = true);
+
+public sealed record SetWindowStateResponse(
+    bool Updated,
+    long WindowHandleUsed,
+    WindowState State);
 
 public sealed record DisplayInfo(
     string DeviceName,

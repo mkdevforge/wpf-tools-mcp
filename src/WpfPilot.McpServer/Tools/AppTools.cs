@@ -96,6 +96,10 @@ public static class AppTools
         [Description("Optional output file path (auto-generated when omitted)")] string? outputPath = null,
         [Description("Include highlight overlays in the capture (defaults to false)")] bool includeOverlay = false,
         [Description("Scroll element into view before capturing (defaults to true)")] bool autoScroll = true,
+        [Description("Annotate the resolved element bounds onto the screenshot (defaults to false)")] bool annotate = false,
+        [Description("Annotation stroke color (e.g. #3B82F6)")] string annotationColor = "#3B82F6",
+        [Description("Annotation stroke thickness (px)")] int annotationThickness = 3,
+        [Description("Optional annotation label")] string? annotationLabel = null,
         [Description("Include base64 payload in response (defaults to false)")] bool returnBase64 = false,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
@@ -117,6 +121,10 @@ public static class AppTools
                         OutputPath: outputPath,
                         IncludeOverlay: includeOverlay,
                         AutoScroll: autoScroll,
+                        Annotate: annotate,
+                        AnnotationColor: annotationColor,
+                        AnnotationThickness: annotationThickness,
+                        AnnotationLabel: annotationLabel,
                         ReturnBase64: returnBase64),
                     cancellationToken),
                 cancellationToken);

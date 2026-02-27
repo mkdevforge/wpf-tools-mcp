@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.Reflection;
@@ -800,7 +801,117 @@ public sealed partial class AutomationController : IDisposable
                     }
                 }
 
-                capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay);
+                if (autoScroll && hasElementTarget && requestedBounds is { } beforeBounds)
+                {
+                    var containerBounds =
+                        area == ScreenshotCaptureArea.Client && TryGetClientBoundsScreen(window, out var clientBounds)
+                            ? clientBounds
+                            : area == ScreenshotCaptureArea.Window && TryGetWindowBoundsScreen(window, out var windowBounds)
+                                ? windowBounds
+                                : ToRect(window.BoundingRectangle);
+
+                    if (!RectIntersects(beforeBounds, containerBounds))
+                    {
+                        if (elementBackend == InspectionBackend.Uia)
+                        {
+                            try
+                            {
+                                if (hasElementId)
+                                {
+                                    await ScrollToElementAsync(
+                                        new ScrollToElementRequest(
+                                            WindowHandle: windowHandleUsed,
+                                            ElementId: request.ElementId!.Trim(),
+                                            AutoWait: false),
+                                        cancellationToken).ConfigureAwait(false);
+                                }
+                                else if (request.Locator is not null)
+                                {
+                                    await ScrollToElementAsync(
+                                        new ScrollToElementRequest(
+                                            WindowHandle: windowHandleUsed,
+                                            Locator: request.Locator,
+                                            AutoWait: false),
+                                        cancellationToken).ConfigureAwait(false);
+                                }
+                            }
+                            catch
+                            {
+                            }
+
+                            if (UiDelayScrollMs > 0)
+                            {
+                                await Task.Delay(UiDelayScrollMs, cancellationToken);
+                            }
+
+                            if (!hasElementId && request.Locator is not null)
+                            {
+                                try
+                                {
+                                    element = ResolveElement(window, request.Locator, controlWalker, rawWalker);
+                                }
+                                catch
+                                {
+                                }
+                            }
+
+                            if (hasElementTarget)
+                            {
+                                requestedBounds = ToRect(element.BoundingRectangle);
+                            }
+                        }
+                    }
+                }
+
+                try
+                {
+                    capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay);
+                }
+                catch (InvalidOperationException ex) when (autoScroll &&
+                                                          hasElementTarget &&
+                                                          ex.Message.Contains("outside the capture area", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Best-effort retry: try scrolling again (more robust than ScrollItem-only) and re-read bounds.
+                    if (elementBackend == InspectionBackend.Uia)
+                    {
+                        try
+                        {
+                            if (hasElementId)
+                            {
+                                await ScrollToElementAsync(
+                                    new ScrollToElementRequest(
+                                        WindowHandle: windowHandleUsed,
+                                        ElementId: request.ElementId!.Trim(),
+                                        AutoWait: false),
+                                    cancellationToken).ConfigureAwait(false);
+                            }
+                            else if (request.Locator is not null)
+                            {
+                                await ScrollToElementAsync(
+                                    new ScrollToElementRequest(
+                                        WindowHandle: windowHandleUsed,
+                                        Locator: request.Locator,
+                                        AutoWait: false),
+                                    cancellationToken).ConfigureAwait(false);
+                            }
+                        }
+                        catch
+                        {
+                        }
+
+                        if (UiDelayScrollMs > 0)
+                        {
+                            await Task.Delay(UiDelayScrollMs, cancellationToken);
+                        }
+
+                        if (hasElementTarget)
+                        {
+                            requestedBounds = ToRect(element.BoundingRectangle);
+                        }
+                    }
+
+                    capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay);
+                }
             }
             catch (Exception ex)
             {
@@ -880,6 +991,24 @@ public sealed partial class AutomationController : IDisposable
 
             using var bitmapToSave = bitmap;
 
+            if (request.Annotate && requestedBoundsUsed is { } annotationBounds)
+            {
+                try
+                {
+                    AnnotateBitmap(
+                        bitmapToSave,
+                        capturedBounds,
+                        annotationBounds,
+                        request.AnnotationColor,
+                        request.AnnotationThickness,
+                        request.AnnotationLabel);
+                }
+                catch
+                {
+                    // Ignore annotation failures; screenshot capture itself succeeded.
+                }
+            }
+
             var outputPath = ResolveScreenshotOutputPath(request.OutputPath, request.Format);
             SaveBitmapWithWic(bitmapToSave, outputPath, request.Format, request.JpegQuality);
 
@@ -940,7 +1069,142 @@ public sealed partial class AutomationController : IDisposable
                || message.Contains("Element is outside the window client area", StringComparison.OrdinalIgnoreCase)
                || message.Contains("Failed to compute crop rectangle", StringComparison.OrdinalIgnoreCase)
                || message.Contains("PrintWindow capture failed", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("Failed to crop element", StringComparison.OrdinalIgnoreCase);
+               || message.Contains("Failed to crop element", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("Requested bounds are outside the capture area", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AnnotateBitmap(
+        Bitmap bitmap,
+        Rect capturedBounds,
+        Rect annotationBounds,
+        string color,
+        int thickness,
+        string? label)
+    {
+        if (bitmap.Width <= 0 || bitmap.Height <= 0)
+        {
+            return;
+        }
+
+        thickness = Math.Clamp(thickness, 1, 20);
+
+        if (!TryParseColor(color, out var parsed))
+        {
+            parsed = Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6);
+        }
+
+        static Rect Intersect(Rect a, Rect b)
+        {
+            var left = Math.Max(a.X, b.X);
+            var top = Math.Max(a.Y, b.Y);
+            var right = Math.Min(a.X + a.Width, b.X + b.Width);
+            var bottom = Math.Min(a.Y + a.Height, b.Y + b.Height);
+            return new Rect(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
+        }
+
+        var visible = Intersect(annotationBounds, capturedBounds);
+        if (visible.Width <= 0 || visible.Height <= 0)
+        {
+            return;
+        }
+
+        var x = visible.X - capturedBounds.X;
+        var y = visible.Y - capturedBounds.Y;
+        var w = visible.Width;
+        var h = visible.Height;
+
+        // Clamp to bitmap bounds defensively.
+        if (x >= bitmap.Width || y >= bitmap.Height)
+        {
+            return;
+        }
+
+        w = Math.Min(w, bitmap.Width - x);
+        h = Math.Min(h, bitmap.Height - y);
+
+        if (w <= 0 || h <= 0)
+        {
+            return;
+        }
+
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+        using var pen = new Pen(parsed, thickness)
+        {
+            Alignment = PenAlignment.Inset
+        };
+
+        // DrawRectangle uses inclusive coordinates; subtract 1 to stay inside the bitmap.
+        var drawW = Math.Max(1, w - 1);
+        var drawH = Math.Max(1, h - 1);
+        graphics.DrawRectangle(pen, x, y, drawW, drawH);
+
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            using var font = new Font("Segoe UI", 10, FontStyle.Bold, GraphicsUnit.Pixel);
+            var text = label.Trim();
+            var textSize = graphics.MeasureString(text, font);
+
+            var pad = 4;
+            var boxW = (int)Math.Ceiling(textSize.Width) + pad * 2;
+            var boxH = (int)Math.Ceiling(textSize.Height) + pad * 2;
+
+            var boxX = Math.Clamp(x, 0, Math.Max(0, bitmap.Width - boxW));
+            var boxY = Math.Clamp(y - boxH - 2, 0, Math.Max(0, bitmap.Height - boxH));
+
+            using var bg = new SolidBrush(Color.FromArgb(180, 0, 0, 0));
+            using var fg = new SolidBrush(Color.White);
+
+            graphics.FillRectangle(bg, boxX, boxY, boxW, boxH);
+            graphics.DrawString(text, font, fg, boxX + pad, boxY + pad);
+        }
+    }
+
+    private static bool TryParseColor(string value, out Color color)
+    {
+        color = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith('#'))
+        {
+            try
+            {
+                color = ColorTranslator.FromHtml(trimmed);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        var hex = trimmed.AsSpan(1);
+        if (hex.Length == 6 && int.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb))
+        {
+            color = Color.FromArgb(
+                0xFF,
+                (rgb >> 16) & 0xFF,
+                (rgb >> 8) & 0xFF,
+                rgb & 0xFF);
+            return true;
+        }
+
+        if (hex.Length == 8 && int.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var argb))
+        {
+            color = Color.FromArgb(
+                (argb >> 24) & 0xFF,
+                (argb >> 16) & 0xFF,
+                (argb >> 8) & 0xFF,
+                argb & 0xFF);
+            return true;
+        }
+
+        return false;
     }
 
     private static (Bitmap Bitmap, Rect CapturedBounds, Rect? RequestedBounds, bool WasClipped, ScreenshotCaptureMode CaptureModeUsed)
