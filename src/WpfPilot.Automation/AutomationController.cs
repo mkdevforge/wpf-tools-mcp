@@ -1456,7 +1456,13 @@ public sealed partial class AutomationController : IDisposable
         {
             var bitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
             using var graphics = Graphics.FromImage(bitmap);
-            graphics.CopyFromScreen(bounds.X, bounds.Y, 0, 0, new Size(bounds.Width, bounds.Height), CopyPixelOperation.SourceCopy);
+            graphics.CopyFromScreen(
+                bounds.X,
+                bounds.Y,
+                0,
+                0,
+                new Size(bounds.Width, bounds.Height),
+                CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
             return bitmap;
         }
         catch (Exception ex)
