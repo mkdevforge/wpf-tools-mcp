@@ -8,8 +8,8 @@ WpfPilot is an **MCP server** that gives AI assistants the ability to **inspect 
 ## Install (dotnet tool)
 
 ```powershell
-dotnet tool install -g MkDevForge.WpfPilot --version 0.1.0-preview.14
-dotnet tool update -g MkDevForge.WpfPilot --version 0.1.0-preview.14
+dotnet tool install -g MkDevForge.WpfPilot --version 0.1.0-preview.15
+dotnet tool update -g MkDevForge.WpfPilot --version 0.1.0-preview.15
 ```
 
 ## Run
