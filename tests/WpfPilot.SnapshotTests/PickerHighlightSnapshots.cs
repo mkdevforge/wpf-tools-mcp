@@ -190,6 +190,46 @@ public sealed class PickerHighlightSnapshots
         await Verifier.Verify(stable);
     }
 
+    [Test]
+    public async Task HighlightElement_uia_elementId_prefers_inproc_when_agent_available()
+    {
+        try
+        {
+            _ = await _mcp.CallToolAsync<InjectAgentResponse>("inject_agent", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId
+            });
+        }
+        catch (InvalidOperationException ex) when (ShouldSkipForMissingAssets(ex))
+        {
+            Assert.Ignore(ex.Message);
+            return;
+        }
+
+        var resolved = await _mcp.CallToolAsync<ResolveElementResponse>("resolve_element", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["backend"] = "uia",
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "Basic_Button"
+            }
+        });
+
+        Assert.That(resolved.Element.ElementId, Is.Not.Null.And.Not.Empty, "Expected a UIA elementId from resolve_element.");
+
+        var result = await _mcp.CallToolAsync<HighlightElementResponse>("highlight_element", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["elementId"] = resolved.Element.ElementId,
+            ["durationMs"] = 250,
+            ["preferInProcHighlight"] = true
+        });
+
+        Assert.That(result.Highlighted, Is.True, result.Error ?? result.Reason ?? "Highlight failed.");
+        Assert.That(result.MethodUsed, Is.EqualTo("wpf_agent_mapped"));
+    }
+
     private static PickElementAtPointResponse ScrubPickResponse(PickElementAtPointResponse response)
     {
         var element = response.Element with

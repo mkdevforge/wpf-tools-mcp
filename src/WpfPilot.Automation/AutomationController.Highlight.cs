@@ -111,6 +111,61 @@ public sealed partial class AutomationController
                     }
                 }
             }
+            else if (backend == InspectionBackend.Uia && request.PreferInProcHighlight && hasElementId)
+            {
+                try
+                {
+                    var client = await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
+                    if (client is not null)
+                    {
+                        if (TryGetHighlightProbePoint(bounds, out var xScreen, out var yScreen))
+                        {
+                            var picked = await client.CallAsync<PickWpfElementAtPointResponse>(
+                                "wpf/pick_element_at_point",
+                                new PickWpfElementAtPointRequest(
+                                    WindowHandle: windowHandleUsed,
+                                    X: xScreen,
+                                    Y: yScreen,
+                                    IncludeAncestors: true,
+                                    MaxAncestors: 12,
+                                    ReturnFields: FindReturnFields.Standard),
+                                cancellationToken).ConfigureAwait(false);
+
+                            var mapped = SelectBestBoundsMatch(bounds, picked);
+                            var mappedLocator = new ElementLocator(XPath: mapped.XPath);
+
+                            var agentResult = await client.CallAsync<HighlightWpfElementResponse>(
+                                "wpf/highlight_element",
+                                new HighlightWpfElementRequest(
+                                    WindowHandle: windowHandleUsed,
+                                    Locator: mappedLocator,
+                                    RootXPath: null,
+                                    DurationMs: request.DurationMs,
+                                    Color: request.Color,
+                                    Thickness: request.Thickness),
+                                cancellationToken).ConfigureAwait(false);
+
+                            shown = agentResult.Highlighted;
+                            if (shown)
+                            {
+                                methodUsed = "wpf_agent_mapped";
+                            }
+                            else if (!string.IsNullOrWhiteSpace(agentResult.Reason))
+                            {
+                                error = (error is null ? "" : (error + "\n")) + "wpf_agent_mapped_failed: " + agentResult.Reason;
+                            }
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    error = (error is null ? "" : (error + "\n")) + "wpf_agent_map_failed: " + ex.GetBaseException().Message;
+                }
+            }
 
             if (!shown)
             {
@@ -266,5 +321,102 @@ public sealed partial class AutomationController
                 MaxNodes: 2000,
                 ReturnFields: FindReturnFields.Standard),
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool TryGetHighlightProbePoint(Rect bounds, out int xScreen, out int yScreen)
+    {
+        xScreen = 0;
+        yScreen = 0;
+
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return false;
+        }
+
+        var virtualScreen = DisplayDiagnostics.GetVirtualScreenBounds();
+        var intersection = Intersect(bounds, virtualScreen);
+        if (intersection.Width <= 0 || intersection.Height <= 0)
+        {
+            return false;
+        }
+
+        xScreen = intersection.X + Math.Max(0, intersection.Width / 2);
+        yScreen = intersection.Y + Math.Max(0, intersection.Height / 2);
+        return true;
+    }
+
+    private static Rect Intersect(Rect a, Rect b)
+    {
+        var ax2 = (long)a.X + a.Width;
+        var ay2 = (long)a.Y + a.Height;
+        var bx2 = (long)b.X + b.Width;
+        var by2 = (long)b.Y + b.Height;
+
+        var left = Math.Max(a.X, b.X);
+        var top = Math.Max(a.Y, b.Y);
+        var right = Math.Min(ax2, bx2);
+        var bottom = Math.Min(ay2, by2);
+
+        var width = (int)Math.Max(0, right - left);
+        var height = (int)Math.Max(0, bottom - top);
+        return new Rect(left, top, width, height);
+    }
+
+    private static ElementRef SelectBestBoundsMatch(Rect target, PickWpfElementAtPointResponse picked)
+    {
+        var candidates = new List<ElementRef>(1 + (picked.Ancestors?.Count ?? 0))
+        {
+            picked.Element
+        };
+
+        if (picked.Ancestors is { Count: > 0 })
+        {
+            candidates.AddRange(picked.Ancestors);
+        }
+
+        ElementRef best = picked.Element;
+        var bestScore = double.NegativeInfinity;
+
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Bounds is not Rect candidateBounds || candidateBounds.Width <= 0 || candidateBounds.Height <= 0)
+            {
+                continue;
+            }
+
+            var score = ComputeIoU(target, candidateBounds);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+
+        return best;
+    }
+
+    private static double ComputeIoU(Rect a, Rect b)
+    {
+        if (a.Width <= 0 || a.Height <= 0 || b.Width <= 0 || b.Height <= 0)
+        {
+            return 0;
+        }
+
+        var intersection = Intersect(a, b);
+        if (intersection.Width <= 0 || intersection.Height <= 0)
+        {
+            return 0;
+        }
+
+        var intersectionArea = (double)intersection.Width * intersection.Height;
+        var areaA = (double)a.Width * a.Height;
+        var areaB = (double)b.Width * b.Height;
+        var union = areaA + areaB - intersectionArea;
+        if (union <= 0)
+        {
+            return 0;
+        }
+
+        return intersectionArea / union;
     }
 }

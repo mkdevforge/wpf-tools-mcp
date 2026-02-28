@@ -215,6 +215,7 @@ public sealed record HighlightElementRequest(
     [property: JsonPropertyName("elementId")] string? ElementId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WindowHandle = null,
     InspectionBackend Backend = InspectionBackend.Auto,
+    [property: JsonPropertyName("preferInProcHighlight")] bool PreferInProcHighlight = true,
     int DurationMs = 1500,
     string Color = "#3B82F6",
     int Thickness = 3,
