@@ -122,6 +122,14 @@ public sealed class ElementHandleSnapshots
         Assert.Fail("Element did not disappear within timeout.");
     }
 
+    private static ElementRef ScrubElementRefForSnapshot(ElementRef element) =>
+        element with
+        {
+            ElementId = "<element>",
+            ClassName = string.IsNullOrWhiteSpace(element.ClassName) ? null : "<class>",
+            Bounds = element.Bounds is null ? null : new Rect(0, 0, 0, 0)
+        };
+
     [Test]
     public async Task ResolveElement_uia_then_click_by_elementId_snapshot()
     {
@@ -139,6 +147,8 @@ public sealed class ElementHandleSnapshots
             });
 
             Assert.That(resolved.Element.ElementId, Does.StartWith("uia_"));
+            Assert.That(resolved.Element.Bounds, Is.Not.Null, "UIA resolve_element should include Bounds by default.");
+            Assert.That(resolved.Element.ClassName, Is.Not.Null.And.Not.Empty, "UIA resolve_element should include ClassName by default.");
 
             var click = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
             {
@@ -161,7 +171,7 @@ public sealed class ElementHandleSnapshots
                 Resolve = resolved with
                 {
                     WindowHandleUsed = 0,
-                    Element = resolved.Element with { ElementId = "<element>" }
+                    Element = ScrubElementRefForSnapshot(resolved.Element)
                 },
                 Click = click,
                 Status = status.Element.Name
@@ -270,6 +280,9 @@ public sealed class ElementHandleSnapshots
                 }
             });
 
+            Assert.That(thumb.Element.Bounds, Is.Not.Null, "UIA resolve_element should include Bounds by default.");
+            Assert.That(thumb.Element.ClassName, Is.Not.Null.And.Not.Empty, "UIA resolve_element should include ClassName by default.");
+
             var bounds = sliderBefore.Element.Bounds;
             var toX = bounds.X + bounds.Width - 4;
             var toY = bounds.Y + bounds.Height / 2;
@@ -299,7 +312,7 @@ public sealed class ElementHandleSnapshots
                 ResolveThumb = thumb with
                 {
                     WindowHandleUsed = 0,
-                    Element = thumb.Element with { ElementId = "<element>" }
+                    Element = ScrubElementRefForSnapshot(thumb.Element)
                 },
                 Drag = drag,
                 Value = rangeValue

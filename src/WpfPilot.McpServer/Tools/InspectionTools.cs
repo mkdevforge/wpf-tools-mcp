@@ -74,7 +74,7 @@ public static class InspectionTools
         [Description("Filter to interactive elements only")] bool interactiveOnly = false,
         [Description("Interactive filtering mode")] InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         [Description("Maximum number of matches returned")] int maxResults = 25,
-        [Description("Maximum number of nodes scanned")] int maxNodes = 1000,
+        [Description("Maximum number of nodes scanned")] int maxNodes = 5000,
         [Description("Match verbosity preset")] FindReturnFields returnFields = FindReturnFields.Minimal,
         [Description("Include element IDs in results (recommended)")] bool includeElementIds = true,
         CancellationToken cancellationToken = default) =>

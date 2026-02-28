@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
+using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Interop;
@@ -2849,7 +2850,7 @@ internal static class WpfVisualTreeInspector
             // Only UIElement / ContentElement can participate in WPF automation peers.
             if (element is UIElement or ContentElement)
             {
-                var severity = isInteractive ? "error" : "info";
+                var severity = isInteractive && IsLikelyInteractiveCoverageType(element) ? "error" : "info";
                 findings.Add(new UiaCoverageFinding(
                     IssueCode: "no_automation_peer",
                     Severity: severity,
@@ -2891,9 +2892,10 @@ internal static class WpfVisualTreeInspector
 
         if (isInteractive && !HasAnyActionablePattern(peer))
         {
+            var severity = IsLikelyInteractiveCoverageElement(element, peer) ? "warning" : "info";
             findings.Add(new UiaCoverageFinding(
                 IssueCode: "no_actionable_patterns",
-                Severity: "warning",
+                Severity: severity,
                 Element: elementRef,
                 Details: hasPeerName
                     ?
@@ -2916,9 +2918,10 @@ internal static class WpfVisualTreeInspector
 
         if (isInteractive && !hasPeerName && !hasAutomationPropertiesName && !hasAutomationId)
         {
+            var severity = IsLikelyInteractiveCoverageElement(element, peer) ? "warning" : "info";
             findings.Add(new UiaCoverageFinding(
                 IssueCode: "missing_accessible_name",
-                Severity: "warning",
+                Severity: severity,
                 Element: elementRef,
                 Details:
                 [
@@ -2935,6 +2938,58 @@ internal static class WpfVisualTreeInspector
         }
 
         return findings;
+    }
+
+    private static bool IsLikelyInteractiveCoverageElement(DependencyObject element, AutomationPeer peer)
+    {
+        if (IsLikelyInteractiveCoverageType(element))
+        {
+            return true;
+        }
+
+        try
+        {
+            var controlType = peer.GetAutomationControlType();
+            return controlType is AutomationControlType.Button
+                or AutomationControlType.CheckBox
+                or AutomationControlType.ComboBox
+                or AutomationControlType.Edit
+                or AutomationControlType.Hyperlink
+                or AutomationControlType.List
+                or AutomationControlType.ListItem
+                or AutomationControlType.Menu
+                or AutomationControlType.MenuBar
+                or AutomationControlType.MenuItem
+                or AutomationControlType.RadioButton
+                or AutomationControlType.ScrollBar
+                or AutomationControlType.Slider
+                or AutomationControlType.Spinner
+                or AutomationControlType.SplitButton
+                or AutomationControlType.Tab
+                or AutomationControlType.TabItem
+                or AutomationControlType.Tree
+                or AutomationControlType.TreeItem;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsLikelyInteractiveCoverageType(DependencyObject element)
+    {
+        return element is ButtonBase
+            or ToggleButton
+            or TextBoxBase
+            or Selector
+            or RangeBase
+            or ScrollBar
+            or MenuItem
+            or ListBoxItem
+            or ComboBoxItem
+            or TabItem
+            or TreeViewItem
+            or Thumb;
     }
 
     private static AutomationPeer? TryCreateAutomationPeer(DependencyObject element)

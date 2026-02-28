@@ -3,7 +3,7 @@
   Findings: [
     {
       IssueCode: no_actionable_patterns,
-      Severity: warning,
+      Severity: info,
       Element: {
         Type: MainWindow
       },

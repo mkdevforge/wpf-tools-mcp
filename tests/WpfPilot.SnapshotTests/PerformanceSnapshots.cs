@@ -119,7 +119,7 @@ public sealed class PerformanceSnapshots
         Max = Bucket(summary.MaxLatencyMs)
     };
 
-    private static string Bucket(int latencyMs) =>
+    private static string Bucket(double latencyMs) =>
         latencyMs < 50 ? "<50"
         : latencyMs < 100 ? "50-99"
         : latencyMs < 250 ? "100-249"

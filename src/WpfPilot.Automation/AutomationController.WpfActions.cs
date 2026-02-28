@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Linq;
 using FlaUI.Core.AutomationElements;
 using WpfPilot.Contracts;
 
@@ -6,6 +7,44 @@ namespace WpfPilot.Automation;
 
 public sealed partial class AutomationController
 {
+    private async Task EnsureWpfHandleEnabledOrThrowAsync(
+        string elementId,
+        string actionName,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(elementId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(actionName);
+
+        try
+        {
+            var props = await GetComputedPropertiesAsync(
+                elementId: elementId,
+                propertyNames: ["IsEnabled"],
+                includeSources: false,
+                includeDefault: true,
+                includeUnset: false,
+                maxProperties: 10,
+                valueFormat: "string",
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            var isEnabledProp = props.Properties.FirstOrDefault(p => string.Equals(p.Name, "IsEnabled", StringComparison.Ordinal));
+            if (isEnabledProp?.Value is not null &&
+                bool.TryParse(isEnabledProp.Value, out var isEnabled) &&
+                !isEnabled)
+            {
+                throw new InvalidOperationException($"element_disabled: action={actionName} (Backend=wpf, elementId={elementId}).");
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"wpf_enabled_check_failed: action={actionName} elementId={elementId}.", ex);
+        }
+    }
+
     private async Task<BringIntoViewWpfResponse> BringIntoViewWpfAsync(
         ElementHandle handle,
         CancellationToken cancellationToken)

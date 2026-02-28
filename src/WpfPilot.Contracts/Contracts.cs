@@ -840,11 +840,11 @@ public sealed record PerformanceSummary(
     int ProbeIntervalMs,
     int SampleCount,
     int DroppedProbeCount,
-    int MinLatencyMs,
-    int P50LatencyMs,
-    int P95LatencyMs,
-    int P99LatencyMs,
-    int MaxLatencyMs);
+    double MinLatencyMs,
+    double P50LatencyMs,
+    double P95LatencyMs,
+    double P99LatencyMs,
+    double MaxLatencyMs);
 
 public sealed record PerformanceStopResponse(PerformanceSummary Summary);
 

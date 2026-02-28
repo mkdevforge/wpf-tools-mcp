@@ -172,13 +172,22 @@ public sealed partial class AutomationController
             GetName(element),
             GetClassName(element));
 
+        Rect? bounds = null;
+        try
+        {
+            bounds = ToRect(element.BoundingRectangle);
+        }
+        catch
+        {
+        }
+
         var elementRef = new ElementRef(
             Type: element.ControlType.ToString(),
             AutomationId: GetAutomationId(element),
             Name: GetName(element),
             XPath: xpath,
-            ClassName: null,
-            Bounds: null,
+            ClassName: GetClassName(element),
+            Bounds: bounds,
             ElementId: elementId);
 
         return new ResolveElementResponse(InspectionBackend.Uia, elementRef, hwnd);
@@ -326,7 +335,7 @@ public sealed partial class AutomationController
             IncludeOffViewport: includeOffViewport,
             InteractiveOnly: interactiveOnly,
             InteractiveMode: interactiveMode,
-            MaxNodes: 2000,
+            MaxNodes: 8000,
             ReturnFields: FindReturnFields.Standard);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);

@@ -1455,15 +1455,51 @@ public sealed partial class AutomationController : IDisposable
         try
         {
             var bitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
-            using var graphics = Graphics.FromImage(bitmap);
-            graphics.CopyFromScreen(
-                bounds.X,
-                bounds.Y,
-                0,
-                0,
-                new Size(bounds.Width, bounds.Height),
-                CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
-            return bitmap;
+            try
+            {
+                using var graphics = Graphics.FromImage(bitmap);
+                var hdcDest = graphics.GetHdc();
+                try
+                {
+                    var hdcSrc = GetDC(IntPtr.Zero);
+                    if (hdcSrc == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException($"GetDC failed: {Marshal.GetLastWin32Error()}");
+                    }
+
+                    try
+                    {
+                        if (!BitBlt(
+                                hdcDest,
+                                xDest: 0,
+                                yDest: 0,
+                                width: bounds.Width,
+                                height: bounds.Height,
+                                hdcSrc,
+                                xSrc: bounds.X,
+                                ySrc: bounds.Y,
+                                rop: SRCCOPY | CAPTUREBLT))
+                        {
+                            throw new InvalidOperationException($"BitBlt failed: {Marshal.GetLastWin32Error()}");
+                        }
+                    }
+                    finally
+                    {
+                        _ = ReleaseDC(IntPtr.Zero, hdcSrc);
+                    }
+                }
+                finally
+                {
+                    graphics.ReleaseHdc(hdcDest);
+                }
+
+                return bitmap;
+            }
+            catch
+            {
+                bitmap.Dispose();
+                throw;
+            }
         }
         catch (Exception ex)
         {
@@ -1757,6 +1793,8 @@ public sealed partial class AutomationController : IDisposable
 
             if (handle.Backend == InspectionBackend.Wpf)
             {
+                await EnsureWpfHandleEnabledOrThrowAsync(elementId, "click_element", cancellationToken).ConfigureAwait(false);
+
                 var bounds = await ResolveWpfBoundsForHandleAsync(
                     window,
                     handle,
@@ -1818,6 +1856,7 @@ public sealed partial class AutomationController : IDisposable
         }
 
         TryScrollIntoView(element);
+        EnsureEnabledOrThrow(element, "click_element");
 
         if (request.AutoWait)
         {
@@ -1836,7 +1875,7 @@ public sealed partial class AutomationController : IDisposable
 
             await WaitForResolvedElementStateAsync(
                 element,
-                WaitForState.Actionable,
+                WaitForState.Visible,
                 timeoutMs,
                 pollIntervalMs,
                 stableMs,
@@ -1853,7 +1892,14 @@ public sealed partial class AutomationController : IDisposable
 
             if (shouldTryInvoke && element.Patterns.Invoke.PatternOrDefault is { } invoke)
             {
-                invoke.Invoke();
+                try
+                {
+                    invoke.Invoke();
+                }
+                catch (COMException ex)
+                {
+                    throw (InvalidOperationException)WrapUiaActionException(ex, "click_element", element);
+                }
                 if (UiDelayMs > 0)
                 {
                     await Task.Delay(UiDelayMs, cancellationToken);
@@ -1864,7 +1910,14 @@ public sealed partial class AutomationController : IDisposable
 
             if (element.Patterns.Toggle.PatternOrDefault is { } toggle)
             {
-                toggle.Toggle();
+                try
+                {
+                    toggle.Toggle();
+                }
+                catch (COMException ex)
+                {
+                    throw (InvalidOperationException)WrapUiaActionException(ex, "click_element", element);
+                }
                 if (UiDelayMs > 0)
                 {
                     await Task.Delay(UiDelayMs, cancellationToken);
@@ -1875,7 +1928,14 @@ public sealed partial class AutomationController : IDisposable
 
             if (element.Patterns.SelectionItem.PatternOrDefault is { } selectionItem)
             {
-                selectionItem.Select();
+                try
+                {
+                    selectionItem.Select();
+                }
+                catch (COMException ex)
+                {
+                    throw (InvalidOperationException)WrapUiaActionException(ex, "click_element", element);
+                }
                 if (UiDelayMs > 0)
                 {
                     await Task.Delay(UiDelayMs, cancellationToken);
@@ -2073,6 +2133,7 @@ public sealed partial class AutomationController : IDisposable
             }
 
             TryScrollIntoView(element);
+            EnsureEnabledOrThrow(element, "invoke");
 
             if (request.AutoWait)
             {
@@ -2091,7 +2152,7 @@ public sealed partial class AutomationController : IDisposable
 
                 await WaitForResolvedElementStateAsync(
                     element,
-                    WaitForState.Enabled,
+                    WaitForState.Visible,
                     timeoutMs,
                     pollIntervalMs,
                     stableMs,
@@ -2107,7 +2168,14 @@ public sealed partial class AutomationController : IDisposable
                     $"InvokePattern not supported for element (ControlType={element.ControlType}, AutomationId={GetAutomationId(element)}, Name={GetName(element)}).");
             }
 
-            invoke.Invoke();
+            try
+            {
+                invoke.Invoke();
+            }
+            catch (COMException ex)
+            {
+                throw (InvalidOperationException)WrapUiaActionException(ex, "invoke", element);
+            }
             if (UiDelayMs > 0)
             {
                 await Task.Delay(UiDelayMs, cancellationToken);
@@ -2183,6 +2251,8 @@ public sealed partial class AutomationController : IDisposable
 
             if (handle.Backend == InspectionBackend.Wpf)
             {
+                await EnsureWpfHandleEnabledOrThrowAsync(elementId, "type_text", cancellationToken).ConfigureAwait(false);
+
                 var bounds = await ResolveWpfBoundsForHandleAsync(
                     window,
                     handle,
@@ -2239,6 +2309,7 @@ public sealed partial class AutomationController : IDisposable
         }
 
         TryScrollIntoView(element);
+        EnsureEnabledOrThrow(element, "type_text");
 
         if (request.AutoWait)
         {
@@ -2264,22 +2335,19 @@ public sealed partial class AutomationController : IDisposable
                 expectedValue: null,
                 expectedText: null,
                 cancellationToken);
-
-            await WaitForResolvedElementStateAsync(
-                element,
-                WaitForState.Enabled,
-                timeoutMs,
-                pollIntervalMs,
-                stableMs,
-                expectedValue: null,
-                expectedText: null,
-                cancellationToken);
         }
 
         var valuePattern = element.Patterns.Value.PatternOrDefault;
         if (valuePattern is not null && valuePattern.IsReadOnly == false)
         {
-            valuePattern.SetValue(request.Text);
+            try
+            {
+                valuePattern.SetValue(request.Text);
+            }
+            catch (COMException ex)
+            {
+                throw (InvalidOperationException)WrapUiaActionException(ex, "type_text", element);
+            }
             if (request.AutoWait)
             {
                 await WaitForValuePatternTextAsync(
@@ -2414,6 +2482,11 @@ public sealed partial class AutomationController : IDisposable
             }
 
             TryScrollIntoView(element);
+            EnsureEnabledOrThrow(element, "set_value");
+
+            var triedDrag = false;
+            var preferDrag = element.ControlType == ControlType.Thumb ||
+                             HasMultipleThumbDescendants(element, rawWalker, maxNodesToScan: 5000);
 
             if (request.AutoWait)
             {
@@ -2435,29 +2508,80 @@ public sealed partial class AutomationController : IDisposable
                     WaitForState.Visible,
                     timeoutMs,
                     pollIntervalMs,
-                    stableMs,
-                    expectedValue: null,
-                    expectedText: null,
-                    cancellationToken);
+                     stableMs,
+                     expectedValue: null,
+                     expectedText: null,
+                     cancellationToken);
+            }
 
-                await WaitForResolvedElementStateAsync(
-                    element,
-                    WaitForState.Enabled,
-                    timeoutMs,
-                    pollIntervalMs,
-                    stableMs,
-                    expectedValue: null,
-                    expectedText: null,
-                    cancellationToken);
+            if (preferDrag)
+            {
+                triedDrag = true;
+                if (await TrySetValueByDraggingAsync(
+                        element,
+                        rawWalker,
+                        request.Value,
+                        request.AutoWait,
+                        timeoutMs,
+                        pollIntervalMs,
+                        steps: 16,
+                        cancellationToken).ConfigureAwait(false))
+                {
+                    trace?.SetSummary("method=drag");
+                    return new SetValueResponse(Set: true, MethodUsed: "drag");
+                }
             }
 
             var rangeValue = element.Patterns.RangeValue.PatternOrDefault;
             if (rangeValue is not null && rangeValue.IsReadOnly == false)
             {
-                rangeValue.SetValue(request.Value);
+                try
+                {
+                    rangeValue.SetValue(request.Value);
+                }
+                catch (COMException ex)
+                {
+                    if (!triedDrag &&
+                        await TrySetValueByDraggingAsync(
+                            element,
+                            rawWalker,
+                            request.Value,
+                            request.AutoWait,
+                            timeoutMs,
+                            pollIntervalMs,
+                            steps: 16,
+                            cancellationToken).ConfigureAwait(false))
+                    {
+                        trace?.SetSummary("method=drag");
+                        return new SetValueResponse(Set: true, MethodUsed: "drag");
+                    }
+                    throw (InvalidOperationException)WrapUiaActionException(ex, "set_value", element);
+                }
                 if (request.AutoWait)
                 {
-                    await WaitForRangeValueAsync(rangeValue, expected: request.Value, timeoutMs, pollIntervalMs, cancellationToken);
+                    try
+                    {
+                        await WaitForRangeValueAsync(rangeValue, expected: request.Value, timeoutMs, pollIntervalMs, cancellationToken);
+                    }
+                    catch
+                    {
+                        if (!triedDrag &&
+                            await TrySetValueByDraggingAsync(
+                                element,
+                                rawWalker,
+                                request.Value,
+                                request.AutoWait,
+                                timeoutMs,
+                                pollIntervalMs,
+                                steps: 16,
+                                cancellationToken).ConfigureAwait(false))
+                        {
+                            trace?.SetSummary("method=drag");
+                            return new SetValueResponse(Set: true, MethodUsed: "drag");
+                        }
+
+                        throw;
+                    }
                 }
                 else if (UiDelayMs > 0)
                 {
@@ -2471,7 +2595,14 @@ public sealed partial class AutomationController : IDisposable
             var valuePattern = element.Patterns.Value.PatternOrDefault;
             if (valuePattern is not null && valuePattern.IsReadOnly == false)
             {
-                valuePattern.SetValue(request.Value.ToString(CultureInfo.InvariantCulture));
+                try
+                {
+                    valuePattern.SetValue(request.Value.ToString(CultureInfo.InvariantCulture));
+                }
+                catch (COMException ex)
+                {
+                    throw (InvalidOperationException)WrapUiaActionException(ex, "set_value", element);
+                }
                 if (request.AutoWait)
                 {
                     await WaitForValuePatternTextAsync(
@@ -2632,6 +2763,7 @@ public sealed partial class AutomationController : IDisposable
         }
 
         TryScrollIntoView(container);
+        EnsureEnabledOrThrow(container, "select_item");
 
         if (request.AutoWait)
         {
@@ -2651,16 +2783,6 @@ public sealed partial class AutomationController : IDisposable
             await WaitForResolvedElementStateAsync(
                 container,
                 WaitForState.Visible,
-                timeoutMs,
-                pollIntervalMs,
-                stableMs,
-                expectedValue: null,
-                expectedText: null,
-                cancellationToken);
-
-            await WaitForResolvedElementStateAsync(
-                container,
-                WaitForState.Enabled,
                 timeoutMs,
                 pollIntervalMs,
                 stableMs,
@@ -3230,6 +3352,8 @@ public sealed partial class AutomationController : IDisposable
             var handle = sourceHandleFromId ?? RequireHandle(request.ElementId!.Trim());
             if (handle.Backend == InspectionBackend.Wpf)
             {
+                await EnsureWpfHandleEnabledOrThrowAsync(request.ElementId!.Trim(), "drag", cancellationToken).ConfigureAwait(false);
+
                 var bounds = await ResolveWpfBoundsForHandleAsync(
                     window,
                     handle,
@@ -3241,6 +3365,7 @@ public sealed partial class AutomationController : IDisposable
             {
                 var source = ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out _);
                 TryScrollIntoView(source);
+                EnsureEnabledOrThrow(source, "drag");
 
                 if (request.AutoWait)
                 {
@@ -3259,7 +3384,7 @@ public sealed partial class AutomationController : IDisposable
 
                     await WaitForResolvedElementStateAsync(
                         source,
-                        WaitForState.Actionable,
+                        WaitForState.Visible,
                         timeoutMs,
                         pollIntervalMs,
                         stableMs,
@@ -3289,6 +3414,7 @@ public sealed partial class AutomationController : IDisposable
                     cancellationToken)
                 : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.Drag);
             TryScrollIntoView(source);
+            EnsureEnabledOrThrow(source, "drag");
 
             if (request.AutoWait)
             {
@@ -3307,7 +3433,7 @@ public sealed partial class AutomationController : IDisposable
 
                 await WaitForResolvedElementStateAsync(
                     source,
-                    WaitForState.Actionable,
+                    WaitForState.Visible,
                     timeoutMs,
                     pollIntervalMs,
                     stableMs,
@@ -4627,6 +4753,351 @@ public sealed partial class AutomationController : IDisposable
         return new Point(centerX, centerY);
     }
 
+    private static async Task<bool> TrySetValueByDraggingAsync(
+        AutomationElement element,
+        ITreeWalker rawWalker,
+        double value,
+        bool autoWait,
+        int timeoutMs,
+        int pollIntervalMs,
+        int steps,
+        CancellationToken cancellationToken)
+    {
+        if (steps <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(steps), steps, "steps must be > 0.");
+        }
+
+        try
+        {
+            if (!TryFindNearestRangeValueElement(element, rawWalker, out var rangeElement, out var rangeValue))
+            {
+                return false;
+            }
+
+            double min;
+            double max;
+            try
+            {
+                min = rangeValue.Minimum;
+                max = rangeValue.Maximum;
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (max <= min)
+            {
+                return false;
+            }
+
+            Rectangle trackBounds;
+            try
+            {
+                trackBounds = rangeElement.BoundingRectangle;
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (trackBounds.Width <= 0 || trackBounds.Height <= 0)
+            {
+                return false;
+            }
+
+            var orientationElement = rangeElement;
+            if (rangeElement.ControlType == ControlType.Thumb)
+            {
+                try
+                {
+                    var parent = rawWalker.GetParent(rangeElement);
+                    if (parent is not null)
+                    {
+                        var parentBounds = parent.BoundingRectangle;
+                        if (parentBounds.Width > 0 &&
+                            parentBounds.Height > 0 &&
+                            (parentBounds.Width >= trackBounds.Width || parentBounds.Height >= trackBounds.Height))
+                        {
+                            trackBounds = parentBounds;
+                            orientationElement = parent;
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            var horizontal = IsHorizontal(orientationElement, trackBounds);
+
+            var fraction = (value - min) / (max - min);
+            fraction = Math.Clamp(fraction, 0, 1);
+
+            const int paddingPx = 4;
+
+            var thumbs = FindThumbCandidates(element, orientationElement, rawWalker);
+            if (thumbs.Count == 0)
+            {
+                return false;
+            }
+
+            int targetCoord;
+            int targetX;
+            int targetY;
+            if (horizontal)
+            {
+                var usableWidth = Math.Max(1, trackBounds.Width - 2 * paddingPx);
+                targetX = trackBounds.Left + paddingPx + (int)Math.Round(fraction * usableWidth, MidpointRounding.AwayFromZero);
+                targetY = trackBounds.Top + trackBounds.Height / 2;
+                targetCoord = targetX;
+            }
+            else
+            {
+                var usableHeight = Math.Max(1, trackBounds.Height - 2 * paddingPx);
+                targetY = trackBounds.Bottom - paddingPx - (int)Math.Round(fraction * usableHeight, MidpointRounding.AwayFromZero);
+                targetX = trackBounds.Left + trackBounds.Width / 2;
+                targetCoord = targetY;
+            }
+
+            var thumbToDrag = PickClosestThumb(thumbs, horizontal, targetCoord);
+            EnsureEnabledOrThrow(thumbToDrag, "set_value");
+            TryScrollIntoView(thumbToDrag);
+
+            var start = GetDragPoint(thumbToDrag);
+            var end = horizontal ? new Point(targetX, start.Y) : new Point(start.X, targetY);
+
+            Mouse.MoveTo(start);
+            await Task.Delay(1, cancellationToken);
+
+            try
+            {
+                Mouse.Down(FlaUI.Core.Input.MouseButton.Left);
+                await Task.Delay(1, cancellationToken);
+
+                for (var step = 1; step <= steps; step++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var t = step / (double)steps;
+                    var x = start.X + (int)Math.Round((end.X - start.X) * t, MidpointRounding.AwayFromZero);
+                    var y = start.Y + (int)Math.Round((end.Y - start.Y) * t, MidpointRounding.AwayFromZero);
+
+                    Mouse.MoveTo(new Point(x, y));
+                    if (step < steps)
+                    {
+                        await Task.Delay(1, cancellationToken);
+                    }
+                }
+            }
+            finally
+            {
+                try
+                {
+                    Mouse.Up(FlaUI.Core.Input.MouseButton.Left);
+                }
+                catch
+                {
+                }
+            }
+
+            if (UiDelayMs > 0)
+            {
+                await Task.Delay(UiDelayMs, cancellationToken);
+            }
+
+            if (autoWait)
+            {
+                var verify = thumbToDrag.Patterns.RangeValue.PatternOrDefault ?? rangeValue;
+                try
+                {
+                    await WaitForRangeValueAsync(verify, expected: value, timeoutMs, pollIntervalMs, cancellationToken);
+                }
+                catch
+                {
+                    // Best-effort; some custom controls expose unreliable RangeValue patterns even though dragging updates visuals.
+                }
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryFindNearestRangeValueElement(
+        AutomationElement start,
+        ITreeWalker rawWalker,
+        out AutomationElement rangeElement,
+        out IRangeValuePattern rangeValue)
+    {
+        rangeElement = start;
+        rangeValue = null!;
+
+        AutomationElement? fallbackElement = null;
+        IRangeValuePattern? fallbackPattern = null;
+
+        AutomationElement? current = start;
+        for (var i = 0; i < 60 && current is not null; i++)
+        {
+            try
+            {
+                var pattern = current.Patterns.RangeValue.PatternOrDefault;
+                if (pattern is not null)
+                {
+                    fallbackElement ??= current;
+                    fallbackPattern ??= pattern;
+
+                    if (current.ControlType != ControlType.Thumb)
+                    {
+                        rangeElement = current;
+                        rangeValue = pattern;
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                current = rawWalker.GetParent(current);
+            }
+            catch
+            {
+                current = null;
+            }
+        }
+
+        if (fallbackElement is not null && fallbackPattern is not null)
+        {
+            rangeElement = fallbackElement;
+            rangeValue = fallbackPattern;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsHorizontal(AutomationElement element, Rectangle bounds)
+    {
+        try
+        {
+            var orientation = element.Properties.Orientation.Value;
+            if (orientation == OrientationType.Horizontal)
+            {
+                return true;
+            }
+
+            if (orientation == OrientationType.Vertical)
+            {
+                return false;
+            }
+        }
+        catch
+        {
+        }
+
+        return bounds.Width >= bounds.Height;
+    }
+
+    private static List<AutomationElement> FindThumbCandidates(AutomationElement element, AutomationElement rangeElement, ITreeWalker rawWalker)
+    {
+        var thumbs = new List<AutomationElement>(capacity: 4);
+
+        if (element.ControlType == ControlType.Thumb)
+        {
+            thumbs.Add(element);
+            return thumbs;
+        }
+
+        FindThumbDescendants(element, rawWalker, thumbs, maxNodesToScan: 5000, maxThumbs: 8);
+        if (thumbs.Count == 0 && !ReferenceEquals(element, rangeElement))
+        {
+            FindThumbDescendants(rangeElement, rawWalker, thumbs, maxNodesToScan: 5000, maxThumbs: 8);
+        }
+
+        return thumbs;
+    }
+
+    private static void FindThumbDescendants(
+        AutomationElement root,
+        ITreeWalker rawWalker,
+        List<AutomationElement> thumbs,
+        int maxNodesToScan,
+        int maxThumbs)
+    {
+        var scanned = 0;
+        foreach (var descendant in EnumerateSelfAndDescendantsDepthFirst(root, rawWalker))
+        {
+            scanned++;
+            if (scanned > maxNodesToScan || thumbs.Count >= maxThumbs)
+            {
+                return;
+            }
+
+            if (descendant.ControlType == ControlType.Thumb)
+            {
+                thumbs.Add(descendant);
+            }
+        }
+    }
+
+    private static bool HasMultipleThumbDescendants(AutomationElement root, ITreeWalker rawWalker, int maxNodesToScan)
+    {
+        var scanned = 0;
+        var count = 0;
+
+        foreach (var descendant in EnumerateSelfAndDescendantsDepthFirst(root, rawWalker))
+        {
+            scanned++;
+            if (scanned > maxNodesToScan)
+            {
+                return false;
+            }
+
+            if (descendant.ControlType == ControlType.Thumb && ++count >= 2)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static AutomationElement PickClosestThumb(IReadOnlyList<AutomationElement> thumbs, bool horizontal, int targetCoord)
+    {
+        AutomationElement? best = null;
+        var bestDistance = long.MaxValue;
+
+        foreach (var thumb in thumbs)
+        {
+            Rectangle bounds;
+            try
+            {
+                bounds = thumb.BoundingRectangle;
+            }
+            catch
+            {
+                continue;
+            }
+
+            var center = horizontal ? bounds.Left + bounds.Width / 2 : bounds.Top + bounds.Height / 2;
+            var distance = Math.Abs((long)center - targetCoord);
+            if (best is null || distance < bestDistance)
+            {
+                best = thumb;
+                bestDistance = distance;
+            }
+        }
+
+        return best ?? thumbs[0];
+    }
+
     private static bool IsSaneMousePoint(Point point) =>
         IsSaneMouseCoordinate(point.X) && IsSaneMouseCoordinate(point.Y);
 
@@ -4884,6 +5355,39 @@ public sealed partial class AutomationController : IDisposable
         {
             return false;
         }
+    }
+
+    private static void EnsureEnabledOrThrow(AutomationElement element, string actionName)
+    {
+        bool isEnabled;
+        try
+        {
+            isEnabled = element.Properties.IsEnabled.Value;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"element_enabled_unknown: action={actionName} (ControlType={element.ControlType}, AutomationId={GetAutomationId(element)}, Name={GetName(element)}).",
+                ex);
+        }
+
+        if (!isEnabled)
+        {
+            throw new InvalidOperationException(
+                $"element_disabled: action={actionName} (ControlType={element.ControlType}, AutomationId={GetAutomationId(element)}, Name={GetName(element)}).");
+        }
+    }
+
+    private static Exception WrapUiaActionException(Exception exception, string actionName, AutomationElement element)
+    {
+        if (exception is COMException comException)
+        {
+            return new InvalidOperationException(
+                $"uia_action_failed: action={actionName} hresult=0x{comException.HResult:X8} (ControlType={element.ControlType}, AutomationId={GetAutomationId(element)}, Name={GetName(element)}).",
+                comException);
+        }
+
+        return exception;
     }
 
     private static bool TryScrollItemIntoViewFromAncestors(AutomationElement element, ITreeWalker rawWalker)
@@ -6397,6 +6901,27 @@ public sealed partial class AutomationController : IDisposable
     [DllImport("user32.dll")]
     private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
 
+    private const int SRCCOPY = 0x00CC0020;
+    private const int CAPTUREBLT = 0x40000000;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetDC(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool BitBlt(
+        IntPtr hdcDest,
+        int xDest,
+        int yDest,
+        int width,
+        int height,
+        IntPtr hdcSrc,
+        int xSrc,
+        int ySrc,
+        int rop);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr hwnd, out RECT lpRect);
 
@@ -6559,7 +7084,7 @@ public sealed partial class AutomationController : IDisposable
         bool interactiveOnly = false,
         InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         int maxResults = 25,
-        int maxNodes = 1000,
+        int maxNodes = 5000,
         FindReturnFields returnFields = FindReturnFields.Minimal,
         bool includeElementIds = true,
         CancellationToken cancellationToken = default)
@@ -6591,6 +7116,15 @@ public sealed partial class AutomationController : IDisposable
 
                 var wpf = await FindElementsWpfAsync(request, injectIfMissing: true, cancellationToken).ConfigureAwait(false);
                 var responseWpf = includeElementIds ? AttachWpfElementIds(wpf, resolvedWindowHandle) : wpf;
+
+                if (responseWpf.Truncated && responseWpf.ReturnedMatches == 0)
+                {
+                    var nextWarnings = responseWpf.Warnings is null
+                        ? new List<string>(capacity: 1)
+                        : new List<string>(responseWpf.Warnings);
+                    nextWarnings.Add($"find_elements scanned {responseWpf.ScannedNodes} nodes and returned 0 matches before truncating; try increasing maxNodes (current {maxNodes}) or narrowing root/query.");
+                    responseWpf = responseWpf with { Warnings = nextWarnings };
+                }
                 trace?.SetSummary($"{responseWpf.BackendUsed} matches={responseWpf.ReturnedMatches} truncated={responseWpf.Truncated}");
                 return responseWpf;
             }
@@ -6614,6 +7148,15 @@ public sealed partial class AutomationController : IDisposable
                 if (wpf is not null)
                 {
                     var responseWpf = includeElementIds ? AttachWpfElementIds(wpf, resolvedWindowHandle) : wpf;
+
+                    if (responseWpf.Truncated && responseWpf.ReturnedMatches == 0)
+                    {
+                        var nextWarnings = responseWpf.Warnings is null
+                            ? new List<string>(capacity: 1)
+                            : new List<string>(responseWpf.Warnings);
+                        nextWarnings.Add($"find_elements scanned {responseWpf.ScannedNodes} nodes and returned 0 matches before truncating; try increasing maxNodes (current {maxNodes}) or narrowing root/query.");
+                        responseWpf = responseWpf with { Warnings = nextWarnings };
+                    }
                     trace?.SetSummary($"{responseWpf.BackendUsed} matches={responseWpf.ReturnedMatches} truncated={responseWpf.Truncated}");
                     return responseWpf;
                 }
@@ -6650,6 +7193,14 @@ public sealed partial class AutomationController : IDisposable
                 cancellationToken);
 
             var finalResponse = warnings is null ? response : response with { Warnings = warnings };
+            if (finalResponse.Truncated && finalResponse.ReturnedMatches == 0)
+            {
+                var nextWarnings = finalResponse.Warnings is null
+                    ? new List<string>(capacity: 1)
+                    : new List<string>(finalResponse.Warnings);
+                nextWarnings.Add($"find_elements scanned {finalResponse.ScannedNodes} nodes and returned 0 matches before truncating; try increasing maxNodes (current {maxNodes}) or narrowing root/query.");
+                finalResponse = finalResponse with { Warnings = nextWarnings };
+            }
             trace?.SetSummary($"{finalResponse.BackendUsed} matches={finalResponse.ReturnedMatches} truncated={finalResponse.Truncated}");
             return finalResponse;
         }
@@ -6726,7 +7277,7 @@ public sealed partial class AutomationController : IDisposable
                 Locator: locator,
                 RootXPath: null,
                 VisibleOnly: true,
-                MaxNodes: 2000);
+                MaxNodes: 8000);
 
             var wpfResponse = await GetWpfPathAsync(request, injectIfMissing: true, cancellationToken).ConfigureAwait(false);
             trace?.SetSummary($"{wpfResponse.BackendUsed} {wpfResponse.XPath}");

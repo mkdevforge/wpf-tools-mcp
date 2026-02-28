@@ -12,7 +12,7 @@ internal sealed class UiThreadLatencyRecorder
         private const int MaxSamples = 10_000;
 
         private readonly object _sync = new();
-        private readonly Queue<int> _latenciesMs = new();
+        private readonly Queue<double> _latenciesMs = new();
         private readonly Dispatcher _dispatcher;
 
         private Timer? _probeTimer;
@@ -138,11 +138,13 @@ internal sealed class UiThreadLatencyRecorder
                 }
 
                 var nowTicks = Stopwatch.GetTimestamp();
-                var latencyMs = (int)Math.Round((nowTicks - scheduledTicks) * 1000.0 / Stopwatch.Frequency);
+                var latencyMs = (nowTicks - scheduledTicks) * 1000.0 / Stopwatch.Frequency;
                 if (latencyMs < 0)
                 {
                     latencyMs = 0;
                 }
+
+                latencyMs = Math.Round(latencyMs, 3, MidpointRounding.AwayFromZero);
 
                 lock (_sync)
                 {
@@ -165,7 +167,7 @@ internal sealed class UiThreadLatencyRecorder
             }
         }
 
-        private PerformanceSummary BuildSummary(int[] samples, int dropped, DateTime stoppedAtUtc)
+        private PerformanceSummary BuildSummary(double[] samples, int dropped, DateTime stoppedAtUtc)
         {
             if (samples.Length == 0)
             {
@@ -199,7 +201,7 @@ internal sealed class UiThreadLatencyRecorder
                 MaxLatencyMs: samples[^1]);
         }
 
-        private static int PercentileNearestRank(int[] sorted, double percentile)
+        private static double PercentileNearestRank(double[] sorted, double percentile)
         {
             if (sorted.Length == 0)
             {
@@ -278,4 +280,3 @@ internal sealed class UiThreadLatencyRecorder
         }
     }
 }
-

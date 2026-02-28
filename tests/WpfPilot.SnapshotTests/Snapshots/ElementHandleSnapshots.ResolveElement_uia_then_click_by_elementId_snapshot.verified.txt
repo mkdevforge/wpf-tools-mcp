@@ -6,6 +6,8 @@
       AutomationId: Basic_Button,
       Name: Click me,
       XPath: /Window/Button[1],
+      ClassName: <class>,
+      Bounds: {},
       ElementId: <element>
     }
   },

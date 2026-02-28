@@ -5,6 +5,8 @@
       Type: Thumb,
       AutomationId: Thumb,
       XPath: /Window/Slider/Thumb,
+      ClassName: <class>,
+      Bounds: {},
       ElementId: <element>
     }
   },
