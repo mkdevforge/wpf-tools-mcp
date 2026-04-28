@@ -984,6 +984,7 @@ sealed class McpWrapper : IAsyncDisposable
         var transportOptions = new StdioClientTransportOptions
         {
             Command = serverExePath,
+            Arguments = ["--tool-profile", "diagnostics"],
             Name = "WpfPilot.McpSmokeRunner",
             StandardErrorLines = line =>
             {

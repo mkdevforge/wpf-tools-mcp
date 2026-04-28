@@ -10,6 +10,7 @@ public sealed partial class AutomationController
     private AgentClient? _agentClient;
     private string? _agentPipeName;
     private int? _agentPid;
+    private string? _agentAutoConnectFailure;
 
     public bool IsAgentConnected
     {
@@ -102,6 +103,7 @@ public sealed partial class AutomationController
             {
                 _ = await existingClient.CallAsync<string>("ping", @params: null, cancellationToken);
                 var response = new InjectAgentResponse(Injected: false, PipeName: existingPipeName);
+                ClearAutoAgentFailure();
                 trace?.SetSummary($"injected={response.Injected} pipe={response.PipeName}");
                 return response;
             }
@@ -147,6 +149,7 @@ public sealed partial class AutomationController
             }
 
             var response = new InjectAgentResponse(Injected: false, PipeName: pipeName);
+            ClearAutoAgentFailure();
             trace?.SetSummary($"injected={response.Injected} pipe={response.PipeName}");
             return response;
         }
@@ -199,6 +202,7 @@ public sealed partial class AutomationController
         }
 
         var finalResponse = new InjectAgentResponse(Injected: true, PipeName: pipeName);
+        ClearAutoAgentFailure();
         trace?.SetSummary($"injected={finalResponse.Injected} pipe={finalResponse.PipeName}");
         return finalResponse;
         }
@@ -630,9 +634,14 @@ public sealed partial class AutomationController
         return await client.CallAsync<GetVisualTreeResponse>("wpf/get_visual_tree", request, cancellationToken);
     }
 
-    internal async Task<GetVisualTreeResponse?> TryGetVisualTreeWpfAsync(GetWpfVisualTreeRequestV2 request, CancellationToken cancellationToken)
+    internal async Task<GetVisualTreeResponse?> TryGetVisualTreeWpfAsync(
+        GetWpfVisualTreeRequestV2 request,
+        CancellationToken cancellationToken,
+        bool autoInject = false)
     {
-        var client = await EnsureAgentConnectedOrNullAsync(cancellationToken);
+        var client = autoInject
+            ? await EnsureAgentConnectedForAutoAsync(cancellationToken)
+            : await EnsureAgentConnectedOrNullAsync(cancellationToken);
         if (client is null)
         {
             return null;
@@ -642,8 +651,13 @@ public sealed partial class AutomationController
         {
             return await client.CallAsync<GetVisualTreeResponse>("wpf/get_visual_tree", request, cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
+            if (autoInject)
+            {
+                SetAutoAgentFailure(ex);
+            }
+
             return null;
         }
     }
@@ -665,9 +679,14 @@ public sealed partial class AutomationController
         return await client.CallAsync<FindElementsResponse>("wpf/find_elements", request, cancellationToken);
     }
 
-    internal async Task<FindElementsResponse?> TryFindElementsWpfAsync(FindElementsWpfRequest request, CancellationToken cancellationToken)
+    internal async Task<FindElementsResponse?> TryFindElementsWpfAsync(
+        FindElementsWpfRequest request,
+        CancellationToken cancellationToken,
+        bool autoInject = false)
     {
-        var client = await EnsureAgentConnectedOrNullAsync(cancellationToken);
+        var client = autoInject
+            ? await EnsureAgentConnectedForAutoAsync(cancellationToken)
+            : await EnsureAgentConnectedOrNullAsync(cancellationToken);
         if (client is null)
         {
             return null;
@@ -677,8 +696,13 @@ public sealed partial class AutomationController
         {
             return await client.CallAsync<FindElementsResponse>("wpf/find_elements", request, cancellationToken);
         }
-        catch
+        catch (Exception ex)
         {
+            if (autoInject)
+            {
+                SetAutoAgentFailure(ex);
+            }
+
             return null;
         }
     }
@@ -783,6 +807,84 @@ public sealed partial class AutomationController
         return client ?? throw new InvalidOperationException("Agent injection succeeded, but the pipe client was not initialized.");
     }
 
+    private async Task<AgentClient?> EnsureAgentConnectedForAutoAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var application = EnsureAttached();
+        var pid = application.ProcessId;
+
+        lock (_agentSync)
+        {
+            if (_agentClient is not null && _agentClient.IsConnected && _agentPid == pid)
+            {
+                return _agentClient;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_agentAutoConnectFailure))
+            {
+                return null;
+            }
+        }
+
+        var existing = await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            ClearAutoAgentFailure();
+            return existing;
+        }
+
+        try
+        {
+            _ = await InjectAgentAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            SetAutoAgentFailure(ex);
+            return null;
+        }
+
+        lock (_agentSync)
+        {
+            return _agentClient is not null && _agentClient.IsConnected ? _agentClient : null;
+        }
+    }
+
+    private string GetAutoAgentFallbackWarning()
+    {
+        string? failure;
+        lock (_agentSync)
+        {
+            failure = _agentAutoConnectFailure;
+        }
+
+        return string.IsNullOrWhiteSpace(failure)
+            ? "backend=auto: WPF agent not connected; used UIA."
+            : $"backend=auto: WPF auto-injection failed; used UIA. {failure}";
+    }
+
+    private void ClearAutoAgentFailure()
+    {
+        lock (_agentSync)
+        {
+            _agentAutoConnectFailure = null;
+        }
+    }
+
+    private void SetAutoAgentFailure(Exception ex)
+    {
+        var message = ex.GetBaseException().Message;
+        lock (_agentSync)
+        {
+            _agentAutoConnectFailure = string.IsNullOrWhiteSpace(message)
+                ? ex.GetType().Name
+                : message.Trim();
+        }
+    }
+
     private static async Task<AgentClient> ConnectToAgentWithRetryAsync(string pipeName, CancellationToken cancellationToken)
     {
         var start = Stopwatch.GetTimestamp();
@@ -864,6 +966,7 @@ public sealed partial class AutomationController
             _agentClient = null;
             _agentPipeName = null;
             _agentPid = null;
+            _agentAutoConnectFailure = null;
         }
 
         if (client is not null)

@@ -24,7 +24,11 @@ internal sealed class McpTestContext : IAsyncDisposable
 
     public IReadOnlyCollection<string> ServerStderrLines => _stderrLines.ToArray();
 
-    public static async Task<McpTestContext> StartAsync(string serverExePath, CancellationToken cancellationToken = default)
+    public static async Task<McpTestContext> StartAsync(
+        string serverExePath,
+        string? toolProfile = "diagnostics",
+        IReadOnlyDictionary<string, string?>? environmentVariables = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverExePath);
         if (!File.Exists(serverExePath))
@@ -38,6 +42,9 @@ internal sealed class McpTestContext : IAsyncDisposable
         {
             Command = serverExePath,
             Name = "WpfPilot.McpServer (tests)",
+            Arguments = string.IsNullOrWhiteSpace(toolProfile)
+                ? []
+                : ["--tool-profile", toolProfile],
             StandardErrorLines = line =>
             {
                 if (!string.IsNullOrWhiteSpace(line))
@@ -47,10 +54,18 @@ internal sealed class McpTestContext : IAsyncDisposable
             }
         };
 
+        if (environmentVariables is not null)
+        {
+            transportOptions.EnvironmentVariables = new Dictionary<string, string?>(environmentVariables, StringComparer.OrdinalIgnoreCase);
+        }
+
         var transport = new StdioClientTransport(transportOptions, NullLoggerFactory.Instance);
         var client = await McpClient.CreateAsync(transport, clientOptions: null, NullLoggerFactory.Instance, cancellationToken);
         return new McpTestContext(client, stderrLines);
     }
+
+    public async Task<IList<McpClientTool>> ListToolsAsync(CancellationToken cancellationToken = default) =>
+        await _client.ListToolsAsync(cancellationToken: cancellationToken);
 
     public async Task<T> CallToolAsync<T>(
         string toolName,

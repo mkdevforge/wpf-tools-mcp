@@ -22,7 +22,8 @@ public sealed partial class AutomationController
         bool includeOffViewport = true,
         bool interactiveOnly = false,
         InteractiveMode interactiveMode = InteractiveMode.Heuristic,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool autoInject = false)
     {
         ArgumentNullException.ThrowIfNull(locator);
 
@@ -33,9 +34,19 @@ public sealed partial class AutomationController
             pollIntervalMs = Math.Clamp(pollIntervalMs, 25, 2000);
             stableMs = Math.Clamp(stableMs, 0, 5000);
 
-            var effectiveBackend = backend == InspectionBackend.Auto
-                ? (IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia)
-                : backend;
+            var effectiveBackend = backend;
+            if (backend == InspectionBackend.Auto)
+            {
+                if (autoInject)
+                {
+                    var autoClient = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
+                    effectiveBackend = autoClient is not null ? InspectionBackend.Wpf : InspectionBackend.Uia;
+                }
+                else
+                {
+                    effectiveBackend = IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia;
+                }
+            }
 
             var response = await (effectiveBackend switch
             {

@@ -4,11 +4,14 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using System.Runtime.InteropServices;
 using WpfPilot.Automation;
+using WpfPilot.McpServer;
+using WpfPilot.McpServer.Tools;
 using WpfPilot.McpServer.Subscriptions;
 
 EnablePerMonitorV2DpiAwareness();
 
-var builder = Host.CreateApplicationBuilder(args);
+var profile = ToolProfileOptions.Parse(args, Environment.GetEnvironmentVariable("WPFPILOT_TOOL_PROFILE"), out var hostArgs);
+var builder = Host.CreateApplicationBuilder(hostArgs);
 builder.Logging.AddConsole(consoleLogOptions =>
 {
     consoleLogOptions.LogToStandardErrorThreshold = LogLevel.Trace;
@@ -17,10 +20,18 @@ builder.Logging.AddConsole(consoleLogOptions =>
 builder.Services.AddSingleton<SessionManager>();
 builder.Services.AddSingleton<SubscriptionManager>();
 
-builder.Services
+var mcpBuilder = builder.Services
     .AddMcpServer()
-    .WithStdioServerTransport()
-    .WithToolsFromAssembly();
+    .WithStdioServerTransport();
+
+if (profile == ToolProfile.Diagnostics)
+{
+    mcpBuilder.WithToolsFromAssembly();
+}
+else
+{
+    mcpBuilder.WithTools((IEnumerable<Type>)CoreToolRegistry.ToolTypes);
+}
 
 await builder.Build().RunAsync();
 

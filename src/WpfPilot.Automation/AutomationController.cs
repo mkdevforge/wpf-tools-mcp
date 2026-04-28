@@ -7049,7 +7049,8 @@ public sealed partial class AutomationController : IDisposable
         InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         TreePreset preset = TreePreset.Minimal,
         IReadOnlyList<string>? fields = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool autoInject = false)
     {
         var trace = BeginTraceSpan("get_visual_tree");
         try
@@ -7098,14 +7099,14 @@ public sealed partial class AutomationController : IDisposable
                     Preset: preset,
                     Fields: fields);
 
-                var wpf = await TryGetVisualTreeWpfAsync(request, cancellationToken).ConfigureAwait(false);
+                var wpf = await TryGetVisualTreeWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
                 if (wpf is not null)
                 {
                     trace?.SetSummary($"{wpf.BackendUsed} returned={wpf.ReturnedNodes} truncated={wpf.Truncated}");
                     return wpf;
                 }
 
-                warnings = ["backend=auto: WPF agent not connected; used UIA."];
+                warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
             }
 
             var window = windowHandle is long requestedHandle
@@ -7168,7 +7169,8 @@ public sealed partial class AutomationController : IDisposable
         int maxNodes = 5000,
         FindReturnFields returnFields = FindReturnFields.Minimal,
         bool includeElementIds = true,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool autoInject = false)
     {
         var trace = BeginTraceSpan("find_elements");
         try
@@ -7225,7 +7227,7 @@ public sealed partial class AutomationController : IDisposable
                     MaxNodes: maxNodes,
                     ReturnFields: returnFields);
 
-                var wpf = await TryFindElementsWpfAsync(request, cancellationToken).ConfigureAwait(false);
+                var wpf = await TryFindElementsWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
                 if (wpf is not null)
                 {
                     var responseWpf = includeElementIds ? AttachWpfElementIds(wpf, resolvedWindowHandle) : wpf;
@@ -7242,7 +7244,7 @@ public sealed partial class AutomationController : IDisposable
                     return responseWpf;
                 }
 
-                warnings = ["backend=auto: WPF agent not connected; used UIA."];
+                warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
             }
 
             var window = windowHandle is long requestedHandle
