@@ -538,7 +538,7 @@ public sealed class ElementHandleSnapshots
             Assert.That(resolved.Element.ElementId, Does.StartWith("wpf_"));
             var initialPath = resolved.Element.XPath;
 
-            _ = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+            var insert = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
             {
                 ["sessionId"] = _sessionId,
                 ["locator"] = new Dictionary<string, object?>
@@ -546,6 +546,12 @@ public sealed class ElementHandleSnapshots
                     ["automationId"] = "Dynamic_InsertSiblingBeforeStatus"
                 },
                 ["clickMode"] = "mouseAlways"
+            });
+            Assert.That(insert.Clicked, Is.True);
+
+            _ = await WaitForElementAsync(new Dictionary<string, object?>
+            {
+                ["automationId"] = "Dynamic_InsertedSibling"
             });
 
             var dataContext = await _mcp.CallToolAsync<GetDataContextResponse>("get_data_context", new Dictionary<string, object?>
