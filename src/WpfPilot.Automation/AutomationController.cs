@@ -606,7 +606,8 @@ public sealed partial class AutomationController : IDisposable
 
     public async Task<TakeScreenshotResponse> TakeScreenshotAsync(
         TakeScreenshotRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool autoInject = false)
     {
         var trace = BeginTraceSpan("take_screenshot");
         try
@@ -655,6 +656,18 @@ public sealed partial class AutomationController : IDisposable
                 window = request.WindowHandle is long requestedHandle
                     ? FindWindowByHandle(application, automation, requestedHandle)
                     : FindMainWindow(application, automation);
+            }
+
+            if (requestedBackend == InspectionBackend.Auto &&
+                autoInject &&
+                !hasElementId &&
+                request.Locator is not null)
+            {
+                var autoClient = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
+                if (autoClient is not null)
+                {
+                    elementBackend = InspectionBackend.Wpf;
+                }
             }
 
             await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
@@ -988,6 +1001,22 @@ public sealed partial class AutomationController : IDisposable
             catch (Exception ex)
             {
                 if (requestedBackend == InspectionBackend.Auto &&
+                    autoInject &&
+                    !hasElementId &&
+                    request.Locator is not null &&
+                    elementBackend == InspectionBackend.Wpf &&
+                    IsEligibleAutoScreenshotFallback(ex))
+                {
+                    var fallbackResponse = await TakeScreenshotAsync(
+                        request with { Backend = InspectionBackend.Uia },
+                        cancellationToken,
+                        autoInject: false).ConfigureAwait(false);
+
+                    trace?.SetSummary($"{fallbackResponse.Format} {fallbackResponse.Width}x{fallbackResponse.Height} {Path.GetFileName(fallbackResponse.Path)} backend={InspectionBackend.Uia} fallback=true");
+                    return fallbackResponse;
+                }
+
+                if (requestedBackend == InspectionBackend.Auto &&
                     !hasElementId &&
                     request.Locator is not null &&
                     elementBackend == InspectionBackend.Uia &&
@@ -1148,7 +1177,8 @@ public sealed partial class AutomationController : IDisposable
                || message.Contains("Failed to compute crop rectangle", StringComparison.OrdinalIgnoreCase)
                || message.Contains("PrintWindow capture failed", StringComparison.OrdinalIgnoreCase)
                || message.Contains("Failed to crop element", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("Requested bounds are outside the capture area", StringComparison.OrdinalIgnoreCase);
+               || message.Contains("Requested bounds are outside the capture area", StringComparison.OrdinalIgnoreCase)
+               || message.Contains("wpf_resolve:", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void AnnotateBitmap(
@@ -7068,9 +7098,15 @@ public sealed partial class AutomationController : IDisposable
 
             if (backend == InspectionBackend.Wpf)
             {
+                var resolvedWindowHandle = windowHandle ?? FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
+                var wpfRootXPath = await ResolveWpfRootXPathAsync(
+                    root,
+                    resolvedWindowHandle,
+                    cancellationToken).ConfigureAwait(false);
+
                 var request = new GetWpfVisualTreeRequestV2(
-                    WindowHandle: windowHandle,
-                    RootXPath: root?.XPath,
+                    WindowHandle: resolvedWindowHandle,
+                    RootXPath: wpfRootXPath,
                     Depth: depth,
                     MaxNodes: maxNodes,
                     VisibleOnly: visibleOnly,
@@ -7087,26 +7123,59 @@ public sealed partial class AutomationController : IDisposable
 
             if (backend == InspectionBackend.Auto)
             {
-                var request = new GetWpfVisualTreeRequestV2(
-                    WindowHandle: windowHandle,
-                    RootXPath: root?.XPath,
-                    Depth: depth,
-                    MaxNodes: maxNodes,
-                    VisibleOnly: visibleOnly,
-                    IncludeOffViewport: includeOffViewport,
-                    InteractiveOnly: interactiveOnly,
-                    InteractiveMode: interactiveMode,
-                    Preset: preset,
-                    Fields: fields);
+                var resolvedWindowHandle = windowHandle;
+                var wpfRootXPath = root?.XPath;
+                var canTryWpf = true;
 
-                var wpf = await TryGetVisualTreeWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
-                if (wpf is not null)
+                if (root is not null && string.IsNullOrWhiteSpace(wpfRootXPath))
                 {
-                    trace?.SetSummary($"{wpf.BackendUsed} returned={wpf.ReturnedNodes} truncated={wpf.Truncated}");
-                    return wpf;
+                    resolvedWindowHandle ??= FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
+                    var client = autoInject
+                        ? await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false)
+                        : await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
+
+                    if (client is null)
+                    {
+                        canTryWpf = false;
+                        warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                    }
+                    else
+                    {
+                        try
+                        {
+                            wpfRootXPath = await ResolveWpfRootXPathAsync(root, resolvedWindowHandle.Value, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            canTryWpf = false;
+                            warnings = [$"backend=auto: WPF root locator could not be resolved; used UIA. {ex.GetBaseException().Message}"];
+                        }
+                    }
                 }
 
-                warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                if (canTryWpf)
+                {
+                    var request = new GetWpfVisualTreeRequestV2(
+                        WindowHandle: resolvedWindowHandle,
+                        RootXPath: wpfRootXPath,
+                        Depth: depth,
+                        MaxNodes: maxNodes,
+                        VisibleOnly: visibleOnly,
+                        IncludeOffViewport: includeOffViewport,
+                        InteractiveOnly: interactiveOnly,
+                        InteractiveMode: interactiveMode,
+                        Preset: preset,
+                        Fields: fields);
+
+                    var wpf = await TryGetVisualTreeWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                    if (wpf is not null)
+                    {
+                        trace?.SetSummary($"{wpf.BackendUsed} returned={wpf.ReturnedNodes} truncated={wpf.Truncated}");
+                        return wpf;
+                    }
+
+                    warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                }
             }
 
             var window = windowHandle is long requestedHandle
@@ -7185,9 +7254,14 @@ public sealed partial class AutomationController : IDisposable
             if (backend == InspectionBackend.Wpf)
             {
                 var resolvedWindowHandle = windowHandle ?? FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
+                var wpfRootXPath = await ResolveWpfRootXPathAsync(
+                    root,
+                    resolvedWindowHandle,
+                    cancellationToken).ConfigureAwait(false);
+
                 var request = new FindElementsWpfRequest(
                     WindowHandle: resolvedWindowHandle,
-                    RootXPath: root?.XPath,
+                    RootXPath: wpfRootXPath,
                     Query: query,
                     VisibleOnly: visibleOnly,
                     IncludeOffViewport: includeOffViewport,
@@ -7215,36 +7289,67 @@ public sealed partial class AutomationController : IDisposable
             if (backend == InspectionBackend.Auto)
             {
                 var resolvedWindowHandle = windowHandle ?? FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
-                var request = new FindElementsWpfRequest(
-                    WindowHandle: resolvedWindowHandle,
-                    RootXPath: root?.XPath,
-                    Query: query,
-                    VisibleOnly: visibleOnly,
-                    IncludeOffViewport: includeOffViewport,
-                    InteractiveOnly: interactiveOnly,
-                    InteractiveMode: interactiveMode,
-                    MaxResults: maxResults,
-                    MaxNodes: maxNodes,
-                    ReturnFields: returnFields);
+                var wpfRootXPath = root?.XPath;
+                var canTryWpf = true;
 
-                var wpf = await TryFindElementsWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
-                if (wpf is not null)
+                if (root is not null && string.IsNullOrWhiteSpace(wpfRootXPath))
                 {
-                    var responseWpf = includeElementIds ? AttachWpfElementIds(wpf, resolvedWindowHandle) : wpf;
+                    var client = autoInject
+                        ? await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false)
+                        : await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
 
-                    if (responseWpf.Truncated && responseWpf.ReturnedMatches == 0)
+                    if (client is null)
                     {
-                        var nextWarnings = responseWpf.Warnings is null
-                            ? new List<string>(capacity: 1)
-                            : new List<string>(responseWpf.Warnings);
-                        nextWarnings.Add($"find_elements scanned {responseWpf.ScannedNodes} nodes and returned 0 matches before truncating; try increasing maxNodes (current {maxNodes}) or narrowing root/query.");
-                        responseWpf = responseWpf with { Warnings = nextWarnings };
+                        canTryWpf = false;
+                        warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
                     }
-                    trace?.SetSummary($"{responseWpf.BackendUsed} matches={responseWpf.ReturnedMatches} truncated={responseWpf.Truncated}");
-                    return responseWpf;
+                    else
+                    {
+                        try
+                        {
+                            wpfRootXPath = await ResolveWpfRootXPathAsync(root, resolvedWindowHandle, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            canTryWpf = false;
+                            warnings = [$"backend=auto: WPF root locator could not be resolved; used UIA. {ex.GetBaseException().Message}"];
+                        }
+                    }
                 }
 
-                warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                if (canTryWpf)
+                {
+                    var request = new FindElementsWpfRequest(
+                        WindowHandle: resolvedWindowHandle,
+                        RootXPath: wpfRootXPath,
+                        Query: query,
+                        VisibleOnly: visibleOnly,
+                        IncludeOffViewport: includeOffViewport,
+                        InteractiveOnly: interactiveOnly,
+                        InteractiveMode: interactiveMode,
+                        MaxResults: maxResults,
+                        MaxNodes: maxNodes,
+                        ReturnFields: returnFields);
+
+                    var wpf = await TryFindElementsWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                    if (wpf is not null)
+                    {
+                        var responseWpf = includeElementIds ? AttachWpfElementIds(wpf, resolvedWindowHandle) : wpf;
+
+                        if (responseWpf.Truncated && responseWpf.ReturnedMatches == 0)
+                        {
+                            var nextWarnings = responseWpf.Warnings is null
+                                ? new List<string>(capacity: 1)
+                                : new List<string>(responseWpf.Warnings);
+                            nextWarnings.Add($"find_elements scanned {responseWpf.ScannedNodes} nodes and returned 0 matches before truncating; try increasing maxNodes (current {maxNodes}) or narrowing root/query.");
+                            responseWpf = responseWpf with { Warnings = nextWarnings };
+                        }
+                        trace?.SetSummary($"{responseWpf.BackendUsed} matches={responseWpf.ReturnedMatches} truncated={responseWpf.Truncated}");
+                        return responseWpf;
+                    }
+
+                    warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                }
             }
 
             var window = windowHandle is long requestedHandle
@@ -7442,9 +7547,10 @@ public sealed partial class AutomationController : IDisposable
         {
             var id = elementId!.Trim();
             var handle = RequireHandle(id);
-            if (handle.Backend != InspectionBackend.Uia)
+            if (handle.Backend != InspectionBackend.Uia &&
+                handle.Backend != InspectionBackend.Wpf)
             {
-                throw new InvalidOperationException($"elementId '{id}' is not a UIA handle.");
+                throw new InvalidOperationException($"elementId '{id}' has unsupported backend '{handle.Backend}'.");
             }
 
             if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
@@ -7461,7 +7567,9 @@ public sealed partial class AutomationController : IDisposable
                 throw new InvalidOperationException($"stale_element: window_closed for '{id}'. Call resolve_element again.");
             }
 
-            element = ResolveUiaElementById(window, rawWalker, id, out xpath);
+            element = handle.Backend == InspectionBackend.Uia
+                ? ResolveUiaElementById(window, rawWalker, id, out xpath)
+                : ResolveUiaElementByWpfHandle(window, controlWalker, rawWalker, id, handle, out xpath);
         }
         else
         {

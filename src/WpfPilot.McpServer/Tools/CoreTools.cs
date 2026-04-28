@@ -147,7 +147,8 @@ public static class CoreInspectionTools
                         ElementId: elementId,
                         Backend: InspectionBackend.Auto,
                         OutputPath: outputPath),
-                    cancellationToken),
+                    cancellationToken,
+                    autoInject: true),
                 cancellationToken);
         });
 

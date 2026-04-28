@@ -380,6 +380,33 @@ public sealed partial class AutomationController
         return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task<string?> ResolveWpfRootXPathAsync(
+        ElementLocator? root,
+        long windowHandle,
+        CancellationToken cancellationToken)
+    {
+        if (root is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(root.XPath))
+        {
+            return root.XPath.Trim();
+        }
+
+        var resolved = await ResolveWpfElementRefAsync(
+            root,
+            windowHandle,
+            visibleOnly: false,
+            includeOffViewport: true,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
+            cancellationToken).ConfigureAwait(false);
+
+        return resolved.XPath;
+    }
+
     private static (bool Satisfied, string? FailureReason) CheckStableBounds(
         Rect? bounds,
         int stableMs,
@@ -491,6 +518,111 @@ public sealed partial class AutomationController
         {
             throw new InvalidOperationException($"stale_element: not_found for '{elementId}'. Call resolve_element again.");
         }
+    }
+
+    private AutomationElement ResolveUiaElementByWpfHandle(
+        Window window,
+        ITreeWalker controlWalker,
+        ITreeWalker rawWalker,
+        string elementId,
+        ElementHandle handle,
+        out string xpathUsed)
+    {
+        var ranked = new List<(AutomationElement Element, string XPath, int Score)>();
+
+        foreach (var candidate in EnumerateSelfAndDescendantsDepthFirst(window, controlWalker))
+        {
+            var score = ScoreUiaCandidateForWpfHandle(candidate, handle);
+            if (score <= 0)
+            {
+                continue;
+            }
+
+            var xpath = ComputeXPath(window, candidate, rawWalker);
+            if (string.Equals(xpath, handle.XPath, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 50;
+            }
+
+            ranked.Add((candidate, xpath, score));
+        }
+
+        if (ranked.Count == 0 && !string.IsNullOrWhiteSpace(handle.XPath))
+        {
+            try
+            {
+                var byXPath = TryResolveByXPath(window, new ElementLocator(XPath: handle.XPath), rawWalker);
+                if (byXPath is not null)
+                {
+                    xpathUsed = ComputeXPath(window, byXPath, rawWalker);
+                    return byXPath;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        if (ranked.Count == 0)
+        {
+            throw new InvalidOperationException($"stale_element: not_found for '{elementId}'. Call resolve_element again.");
+        }
+
+        var ordered = ranked
+            .OrderByDescending(c => c.Score)
+            .ThenBy(c => c.XPath, StringComparer.Ordinal)
+            .ToArray();
+
+        var bestScore = ordered[0].Score;
+        var ties = ordered.TakeWhile(c => c.Score == bestScore).ToArray();
+        if (ties.Length > 1)
+        {
+            throw new InvalidOperationException(
+                $"elementId '{elementId}' maps ambiguously to UIA properties. Call get_element_properties with a locator.");
+        }
+
+        xpathUsed = ordered[0].XPath;
+        return ordered[0].Element;
+    }
+
+    private static int ScoreUiaCandidateForWpfHandle(AutomationElement element, ElementHandle handle)
+    {
+        var score = 0;
+
+        if (!string.IsNullOrWhiteSpace(handle.AutomationId))
+        {
+            if (!string.Equals(GetAutomationId(element), handle.AutomationId, StringComparison.Ordinal))
+            {
+                return 0;
+            }
+
+            score += 100;
+        }
+
+        if (!string.IsNullOrWhiteSpace(handle.Name) &&
+            string.Equals(GetName(element), handle.Name, StringComparison.Ordinal))
+        {
+            score += 30;
+        }
+
+        if (!string.IsNullOrWhiteSpace(handle.ClassName) &&
+            string.Equals(GetClassName(element), handle.ClassName, StringComparison.Ordinal))
+        {
+            score += 20;
+        }
+
+        if (!string.IsNullOrWhiteSpace(handle.Type))
+        {
+            var expected = handle.Type.Trim();
+            if (string.Equals(element.ControlType.ToString(), expected, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(GetXPathLabel(element), expected, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(GetClassName(element), expected, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 10;
+            }
+        }
+
+        return score;
     }
 
     private sealed record ElementHandle(

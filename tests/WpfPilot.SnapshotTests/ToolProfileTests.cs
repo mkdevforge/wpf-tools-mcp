@@ -238,6 +238,25 @@ public sealed class ToolProfileTests
             Assert.That(resolved.BackendUsed, Is.EqualTo(InspectionBackend.Wpf));
             Assert.That(resolved.Element.ElementId, Is.Not.Null.And.Not.Empty);
 
+            var properties = await mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["elementId"] = resolved.Element.ElementId
+            });
+
+            Assert.That(properties.Element.AutomationId, Is.EqualTo("Basic_Button"));
+
+            var subtree = await mcp.CallToolAsync<GetVisualTreeResponse>("get_visual_tree", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["root"] = new Dictionary<string, object?> { ["automationId"] = "Basic_Button" },
+                ["depth"] = 1,
+                ["maxNodes"] = 10
+            });
+
+            Assert.That(subtree.BackendUsed, Is.EqualTo(InspectionBackend.Wpf));
+            Assert.That(subtree.Root.AutomationId, Is.EqualTo("Basic_Button"));
+
             var click = await mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
             {
                 ["sessionId"] = launch.SessionId,
@@ -248,10 +267,12 @@ public sealed class ToolProfileTests
 
             var screenshot = await mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
             {
-                ["sessionId"] = launch.SessionId
+                ["sessionId"] = launch.SessionId,
+                ["locator"] = new Dictionary<string, object?> { ["automationId"] = "Basic_Button" }
             });
 
             Assert.That(File.Exists(screenshot.Path), Is.True);
+            Assert.That(screenshot.RequestedBounds, Is.Not.Null);
             File.Delete(screenshot.Path);
         }
         finally
