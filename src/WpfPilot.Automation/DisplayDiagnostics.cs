@@ -118,6 +118,31 @@ public static class DisplayDiagnostics
         return new Rect(x, y, cx, cy);
     }
 
+    public static Rect ClampBoundsToVirtualScreen(Rect desired, Rect virtualScreen, out bool wasClamped)
+    {
+        wasClamped = false;
+        if (virtualScreen.Width <= 0 || virtualScreen.Height <= 0)
+        {
+            return desired;
+        }
+
+        var width = Math.Max(1, desired.Width);
+        var height = Math.Max(1, desired.Height);
+
+        var clampedWidth = Math.Min(width, virtualScreen.Width);
+        var clampedHeight = Math.Min(height, virtualScreen.Height);
+        wasClamped |= clampedWidth != desired.Width || clampedHeight != desired.Height;
+
+        var maxX = virtualScreen.X + virtualScreen.Width - clampedWidth;
+        var maxY = virtualScreen.Y + virtualScreen.Height - clampedHeight;
+
+        var clampedX = Math.Clamp(desired.X, virtualScreen.X, maxX);
+        var clampedY = Math.Clamp(desired.Y, virtualScreen.Y, maxY);
+        wasClamped |= clampedX != desired.X || clampedY != desired.Y;
+
+        return new Rect(clampedX, clampedY, clampedWidth, clampedHeight);
+    }
+
     private static bool TryGetMonitorDpi(IntPtr hMonitor, out uint dpiX, out uint dpiY)
     {
         dpiX = 0;

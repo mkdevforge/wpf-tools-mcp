@@ -11,7 +11,7 @@
     <ProjectReference Include="..\WpfPilot.AgentProtocol\WpfPilot.AgentProtocol.csproj" />
     <ProjectReference Include="..\WpfPilot.Contracts\WpfPilot.Contracts.csproj" />
     <ProjectReference Include="..\..\references\snoopwpf\Snoop.Core\Snoop.Core.csproj">
-      <AdditionalProperties>DisableGitVersionTask=true</AdditionalProperties>
+      <AdditionalProperties>DisableGitVersionTask=true;GetVersion=false;GenerateGitVersionInformation=false;WriteVersionInfoToBuildLog=false</AdditionalProperties>
     </ProjectReference>
   </ItemGroup>
 

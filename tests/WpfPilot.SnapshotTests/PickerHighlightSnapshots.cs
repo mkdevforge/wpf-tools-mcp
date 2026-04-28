@@ -58,18 +58,22 @@ public sealed class PickerHighlightSnapshots
     [Test]
     public async Task PickElementAtPoint_uia_snapshot()
     {
-        var screenshot = await _mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
+        var button = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
         {
             ["sessionId"] = _sessionId,
-            ["captureMode"] = "auto"
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "Basic_Button"
+            }
         });
 
+        var bounds = button.Element.Bounds;
         var pick = await _mcp.CallToolAsync<PickElementAtPointResponse>("pick_element_at_point", new Dictionary<string, object?>
         {
             ["sessionId"] = _sessionId,
             ["backend"] = "uia",
-            ["x"] = screenshot.CapturedBounds.X + screenshot.CapturedBounds.Width - 10,
-            ["y"] = screenshot.CapturedBounds.Y + screenshot.CapturedBounds.Height - 10,
+            ["x"] = bounds.X + Math.Max(1, bounds.Width / 2),
+            ["y"] = bounds.Y + Math.Max(1, bounds.Height / 2),
             ["includeAncestors"] = true,
             ["maxAncestors"] = 8
         });
@@ -98,18 +102,22 @@ public sealed class PickerHighlightSnapshots
             return;
         }
 
-        var screenshot = await _mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
+        var button = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
         {
             ["sessionId"] = _sessionId,
-            ["captureMode"] = "auto"
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "Basic_Button"
+            }
         });
 
+        var bounds = button.Element.Bounds;
         var pick = await _mcp.CallToolAsync<PickElementAtPointResponse>("pick_element_at_point", new Dictionary<string, object?>
         {
             ["sessionId"] = _sessionId,
             ["backend"] = "wpf",
-            ["x"] = screenshot.CapturedBounds.X + screenshot.CapturedBounds.Width - 10,
-            ["y"] = screenshot.CapturedBounds.Y + screenshot.CapturedBounds.Height - 10,
+            ["x"] = bounds.X + Math.Max(1, bounds.Width / 2),
+            ["y"] = bounds.Y + Math.Max(1, bounds.Height / 2),
             ["includeAncestors"] = true,
             ["maxAncestors"] = 8
         });

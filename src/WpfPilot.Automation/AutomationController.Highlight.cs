@@ -1,3 +1,4 @@
+using System.Drawing;
 using FlaUI.Core.AutomationElements;
 using WpfPilot.Contracts;
 
@@ -25,6 +26,7 @@ public sealed partial class AutomationController
             var automation = EnsureAutomation();
 
             string? resolvedElementId = null;
+            string? effectiveWpfAgentElementId = null;
             var backend = request.Backend;
             ElementLocator effectiveLocator = request.Locator ?? new ElementLocator();
 
@@ -42,6 +44,7 @@ public sealed partial class AutomationController
                 }
 
                 effectiveLocator = new ElementLocator(XPath: handle.XPath);
+                effectiveWpfAgentElementId = handle.WpfAgentElementId;
             }
             else
             {
@@ -61,7 +64,7 @@ public sealed partial class AutomationController
                 bounds = backend switch
                 {
                     InspectionBackend.Uia => ResolveHighlightBoundsUia(application, automation, windowHandleUsed, effectiveLocator, resolvedElementId),
-                    InspectionBackend.Wpf => (wpfResolved = await ResolveHighlightElementWpfAsync(windowHandleUsed, effectiveLocator, cancellationToken).ConfigureAwait(false)).Bounds
+                    InspectionBackend.Wpf => (wpfResolved = await ResolveHighlightElementWpfAsync(windowHandleUsed, effectiveLocator, effectiveWpfAgentElementId, cancellationToken).ConfigureAwait(false)).Bounds
                         ?? new Rect(0, 0, 0, 0),
                     _ => throw new ArgumentOutOfRangeException(nameof(backend), backend, "Unsupported backend.")
                 };
@@ -80,6 +83,8 @@ public sealed partial class AutomationController
                 return new HighlightElementResponse(Highlighted: false, Bounds: bounds, Reason: "no_bounds");
             }
 
+            RememberHighlight(bounds, request.Color, request.Thickness, request.DurationMs);
+
             var shown = false;
             string? methodUsed = null;
             string? error = null;
@@ -89,15 +94,17 @@ public sealed partial class AutomationController
                 var client = await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
                 if (client is not null)
                 {
-                    var locator = wpfResolved is not null
-                        ? new ElementLocator(XPath: wpfResolved.XPath)
-                        : effectiveLocator;
+                    var agentElementId = wpfResolved?.ElementIdWpf ?? effectiveWpfAgentElementId;
+                    var locator = string.IsNullOrWhiteSpace(agentElementId)
+                        ? (wpfResolved is not null ? new ElementLocator(XPath: wpfResolved.XPath) : effectiveLocator)
+                        : null;
 
                     var agentResult = await client.CallAsync<HighlightWpfElementResponse>(
                         "wpf/highlight_element",
                         new HighlightWpfElementRequest(
                             WindowHandle: windowHandleUsed,
                             Locator: locator,
+                            ElementId: agentElementId,
                             RootXPath: null,
                             DurationMs: request.DurationMs,
                             Color: request.Color,
@@ -138,7 +145,8 @@ public sealed partial class AutomationController
                                 "wpf/highlight_element",
                                 new HighlightWpfElementRequest(
                                     WindowHandle: windowHandleUsed,
-                                    Locator: mappedLocator,
+                                    Locator: string.IsNullOrWhiteSpace(mapped.ElementIdWpf) ? mappedLocator : null,
+                                    ElementId: mapped.ElementIdWpf,
                                     RootXPath: null,
                                     DurationMs: request.DurationMs,
                                     Color: request.Color,
@@ -303,6 +311,7 @@ public sealed partial class AutomationController
     private async Task<ElementRef> ResolveHighlightElementWpfAsync(
         long windowHandle,
         ElementLocator locator,
+        string? agentElementId,
         CancellationToken cancellationToken)
     {
         var client = await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
@@ -315,12 +324,50 @@ public sealed partial class AutomationController
             "wpf/resolve_element",
             new ResolveWpfElementRequest(
                 WindowHandle: windowHandle,
-                Locator: locator,
+                Locator: string.IsNullOrWhiteSpace(agentElementId) ? locator : null,
+                ElementId: agentElementId,
                 RootXPath: null,
                 VisibleOnly: true,
                 MaxNodes: 2000,
                 ReturnFields: FindReturnFields.Standard),
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private void RememberHighlight(Rect bounds, string color, int thickness, int durationMs)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return;
+        }
+
+        _lastHighlight = new LastHighlightRequest(
+            bounds,
+            color,
+            Math.Clamp(thickness, 1, 20),
+            DateTime.UtcNow.AddMilliseconds(Math.Clamp(durationMs, 1, 60_000)));
+    }
+
+    private void DrawActiveHighlightOverlay(Bitmap bitmap, Rect capturedBounds)
+    {
+        var highlight = _lastHighlight;
+        if (highlight is null)
+        {
+            return;
+        }
+
+        if (highlight.ExpiresAtUtc < DateTime.UtcNow)
+        {
+            _lastHighlight = null;
+            return;
+        }
+
+        AnnotateBitmap(
+            bitmap,
+            capturedBounds,
+            highlight.Bounds,
+            highlight.Color,
+            highlight.Thickness,
+            label: null);
     }
 
     private static bool TryGetHighlightProbePoint(Rect bounds, out int xScreen, out int yScreen)

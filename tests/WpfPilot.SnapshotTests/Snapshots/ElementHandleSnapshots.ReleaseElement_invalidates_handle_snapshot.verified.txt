@@ -1,6 +1,6 @@
-{
+﻿{
   Release: {
     Released: true
   },
-  Error: Tool 'click_element' failed: An error occurred invoking 'click_element': Unknown elementId '<element>'. Call resolve_element again.
+  Error: Tool 'click_element' failed: An error occurred invoking 'click_element': tool=ClickElement: Unknown elementId '<element>'. Call resolve_element again.
 }

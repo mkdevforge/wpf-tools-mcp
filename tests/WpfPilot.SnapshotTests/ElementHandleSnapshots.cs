@@ -519,6 +519,71 @@ public sealed class ElementHandleSnapshots
         }
     }
 
+    [Test]
+    public async Task Wpf_elementId_survives_xpath_shift_snapshot()
+    {
+        await LaunchDynamicContentTestAppAsync();
+        try
+        {
+            var resolved = await _mcp.CallToolAsync<ResolveElementResponse>("resolve_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["backend"] = "wpf",
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Dynamic_Status"
+                }
+            });
+
+            Assert.That(resolved.Element.ElementId, Does.StartWith("wpf_"));
+            var initialPath = resolved.Element.XPath;
+
+            _ = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Dynamic_InsertSiblingBeforeStatus"
+                },
+                ["clickMode"] = "mouseAlways"
+            });
+
+            var dataContext = await _mcp.CallToolAsync<GetDataContextResponse>("get_data_context", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["elementId"] = resolved.Element.ElementId,
+                ["maxDepth"] = 0
+            });
+
+            var currentPath = await _mcp.CallToolAsync<GetPathToElementResponse>("get_path_to_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["elementId"] = resolved.Element.ElementId
+            });
+
+            Assert.That(currentPath.XPath, Is.Not.EqualTo(initialPath));
+
+            await Verifier.Verify(new
+            {
+                Resolve = resolved with
+                {
+                    WindowHandleUsed = 0,
+                    Element = resolved.Element with
+                    {
+                        ElementId = "<element>"
+                    }
+                },
+                InitialPath = initialPath,
+                CurrentPath = currentPath.XPath,
+                DataContextSucceeded = dataContext is not null
+            });
+        }
+        finally
+        {
+            await CloseTestAppAsync();
+        }
+    }
+
     private static string? FindFirstXPathByType(TreeNode node, string type)
     {
         if (string.Equals(node.Type, type, StringComparison.OrdinalIgnoreCase))

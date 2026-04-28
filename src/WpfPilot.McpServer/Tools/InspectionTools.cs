@@ -70,7 +70,7 @@ public static class InspectionTools
         [Description("Optional root locator for subtree")] ElementLocator? root = null,
         [Description("Search query")] FindElementsQuery? query = null,
         [Description("Filter to visible elements only")] bool visibleOnly = true,
-        [Description("Include off-viewport elements even when visibleOnly=true")] bool includeOffViewport = false,
+        [Description("Include off-viewport elements even when visibleOnly=true")] bool includeOffViewport = true,
         [Description("Filter to interactive elements only")] bool interactiveOnly = false,
         [Description("Interactive filtering mode")] InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         [Description("Maximum number of matches returned")] int maxResults = 25,
@@ -128,7 +128,7 @@ public static class InspectionTools
         [Description("Polling interval (ms)")] int pollIntervalMs = 100,
         [Description("Stable duration (ms)")] int stableMs = 0,
         [Description("Filter to visible elements only")] bool visibleOnly = true,
-        [Description("Include off-viewport elements even when visibleOnly=true")] bool includeOffViewport = false,
+        [Description("Include off-viewport elements even when visibleOnly=true")] bool includeOffViewport = true,
         [Description("Filter to interactive elements only")] bool interactiveOnly = false,
         [Description("Interactive filtering mode")] InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         CancellationToken cancellationToken = default) =>
@@ -174,6 +174,7 @@ public static class InspectionTools
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Include ancestor chain in response")] bool includeAncestors = false,
         [Description("Maximum number of ancestors returned")] int maxAncestors = 8,
+        [Description("Return the containing window/root when no deeper element is hit (defaults to false)")] bool returnRootOnMiss = false,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -187,7 +188,8 @@ public static class InspectionTools
                         WindowHandle: coordSpace == MouseCoordinateSpace.Client ? effectiveWindowHandle : windowHandle,
                         Backend: backend,
                         IncludeAncestors: includeAncestors,
-                        MaxAncestors: maxAncestors),
+                        MaxAncestors: maxAncestors,
+                        ReturnRootOnMiss: returnRootOnMiss),
                     cancellationToken),
                 cancellationToken);
         });

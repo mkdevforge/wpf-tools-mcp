@@ -22,6 +22,54 @@ public sealed partial class AutomationController
         }
     }
 
+    private (long? WindowHandle, ElementLocator? Locator, string? AgentElementId, string? PublicElementId) PrepareWpfAgentTarget(
+        string toolName,
+        ElementLocator? locator,
+        string? elementId,
+        long? windowHandle)
+    {
+        var hasLocator = locator is not null;
+        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+        if (hasLocator == hasElementId)
+        {
+            throw new ArgumentException($"{toolName} requires exactly one of: locator OR elementId.");
+        }
+
+        if (!hasElementId)
+        {
+            return (windowHandle, locator, null, null);
+        }
+
+        var id = elementId!.Trim();
+        var handle = RequireHandle(id);
+        if (handle.Backend != InspectionBackend.Wpf)
+        {
+            throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
+        }
+
+        if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+        {
+            throw new ArgumentException("windowHandle does not match the elementId window.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(handle.WpfAgentElementId))
+        {
+            return (handle.WindowHandle, null, handle.WpfAgentElementId, id);
+        }
+
+        return (handle.WindowHandle, new ElementLocator(XPath: handle.XPath), null, id);
+    }
+
+    private static bool IsWpfAgentStaleOrNotFound(Exception ex)
+    {
+        var message = ex.Message ?? string.Empty;
+        return message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase) ||
+               message.StartsWith("wpf_handle_stale:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static ElementRef StripAgentElementId(ElementRef element) =>
+        element with { ElementIdWpf = null };
+
     public async Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default)
     {
         var trace = BeginTraceSpan("inject_agent");
@@ -251,40 +299,13 @@ public sealed partial class AutomationController
         var trace = BeginTraceSpan("get_binding_info");
         try
         {
-        var hasLocator = locator is not null;
-        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
-        if (hasLocator == hasElementId)
-        {
-            throw new ArgumentException("get_binding_info requires exactly one of: locator OR elementId.");
-        }
-
-        string? resolvedElementId = null;
-        long? effectiveWindowHandle = windowHandle;
-        ElementLocator effectiveLocator = locator ?? new ElementLocator();
-
-        if (hasElementId)
-        {
-            var id = elementId!.Trim();
-            resolvedElementId = id;
-            var handle = RequireHandle(id);
-            if (handle.Backend != InspectionBackend.Wpf)
-            {
-                throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
-            }
-
-            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
-            {
-                throw new ArgumentException("windowHandle does not match the elementId window.");
-            }
-
-            effectiveWindowHandle = handle.WindowHandle;
-            effectiveLocator = new ElementLocator(XPath: handle.XPath);
-        }
+        var target = PrepareWpfAgentTarget("get_binding_info", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
         var request = new GetBindingInfoRequest(
-            WindowHandle: effectiveWindowHandle,
-            Locator: effectiveLocator,
+            WindowHandle: target.WindowHandle,
+            Locator: target.Locator,
+            ElementId: target.AgentElementId,
             IncludeUnbound: includeUnbound,
             MaxProperties: maxProperties,
             ValueFormat: valueFormat);
@@ -292,14 +313,13 @@ public sealed partial class AutomationController
         try
         {
             var response = await client.CallAsync<GetBindingInfoResponse>("wpf/get_binding_info", request, cancellationToken);
+            response = response with { Element = StripAgentElementId(response.Element) };
             trace?.SetSummary($"bindings={response.Bindings.Count} truncated={response.Truncated}");
             return response;
         }
-        catch (InvalidOperationException ex) when (hasElementId &&
-                                                  resolvedElementId is not null &&
-                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
         {
-            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+            throw new InvalidOperationException($"stale_element: not_found for '{target.PublicElementId}'. Call resolve_element again.");
         }
         }
         catch (Exception ex)
@@ -373,6 +393,12 @@ public sealed partial class AutomationController
                 MaxFindings: maxFindings);
 
             var response = await client.CallAsync<GetUiaCoverageReportResponse>("wpf/uia_coverage_report", request, cancellationToken);
+            response = response with
+            {
+                Findings = response.Findings
+                    .Select(f => f with { Element = StripAgentElementId(f.Element) })
+                    .ToArray()
+            };
             trace?.SetSummary($"findings={response.Summary.FindingsCount} truncated={response.Summary.Truncated}");
             return response;
         }
@@ -403,40 +429,13 @@ public sealed partial class AutomationController
         var trace = BeginTraceSpan("get_data_context");
         try
         {
-        var hasLocator = locator is not null;
-        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
-        if (hasLocator == hasElementId)
-        {
-            throw new ArgumentException("get_data_context requires exactly one of: locator OR elementId.");
-        }
-
-        string? resolvedElementId = null;
-        long? effectiveWindowHandle = windowHandle;
-        ElementLocator effectiveLocator = locator ?? new ElementLocator();
-
-        if (hasElementId)
-        {
-            var id = elementId!.Trim();
-            resolvedElementId = id;
-            var handle = RequireHandle(id);
-            if (handle.Backend != InspectionBackend.Wpf)
-            {
-                throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
-            }
-
-            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
-            {
-                throw new ArgumentException("windowHandle does not match the elementId window.");
-            }
-
-            effectiveWindowHandle = handle.WindowHandle;
-            effectiveLocator = new ElementLocator(XPath: handle.XPath);
-        }
+        var target = PrepareWpfAgentTarget("get_data_context", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
         var request = new GetDataContextRequest(
-            WindowHandle: effectiveWindowHandle,
-            Locator: effectiveLocator,
+            WindowHandle: target.WindowHandle,
+            Locator: target.Locator,
+            ElementId: target.AgentElementId,
             Mode: mode,
             MaxDepth: maxDepth,
             MaxPropertiesPerObject: maxPropertiesPerObject,
@@ -451,11 +450,9 @@ public sealed partial class AutomationController
             trace?.SetSummary($"type={response.DataContextType ?? "null"}");
             return response;
         }
-        catch (InvalidOperationException ex) when (hasElementId &&
-                                                  resolvedElementId is not null &&
-                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
         {
-            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+            throw new InvalidOperationException($"stale_element: not_found for '{target.PublicElementId}'. Call resolve_element again.");
         }
         }
         catch (Exception ex)
@@ -484,40 +481,13 @@ public sealed partial class AutomationController
         var trace = BeginTraceSpan("get_computed_properties");
         try
         {
-        var hasLocator = locator is not null;
-        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
-        if (hasLocator == hasElementId)
-        {
-            throw new ArgumentException("get_computed_properties requires exactly one of: locator OR elementId.");
-        }
-
-        string? resolvedElementId = null;
-        long? effectiveWindowHandle = windowHandle;
-        ElementLocator effectiveLocator = locator ?? new ElementLocator();
-
-        if (hasElementId)
-        {
-            var id = elementId!.Trim();
-            resolvedElementId = id;
-            var handle = RequireHandle(id);
-            if (handle.Backend != InspectionBackend.Wpf)
-            {
-                throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
-            }
-
-            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
-            {
-                throw new ArgumentException("windowHandle does not match the elementId window.");
-            }
-
-            effectiveWindowHandle = handle.WindowHandle;
-            effectiveLocator = new ElementLocator(XPath: handle.XPath);
-        }
+        var target = PrepareWpfAgentTarget("get_computed_properties", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
         var request = new GetComputedPropertiesRequest(
-            WindowHandle: effectiveWindowHandle,
-            Locator: effectiveLocator,
+            WindowHandle: target.WindowHandle,
+            Locator: target.Locator,
+            ElementId: target.AgentElementId,
             PropertyNames: propertyNames,
             IncludeSources: includeSources,
             IncludeDefault: includeDefault,
@@ -528,14 +498,13 @@ public sealed partial class AutomationController
         try
         {
             var response = await client.CallAsync<GetComputedPropertiesResponse>("wpf/get_computed_properties", request, cancellationToken);
+            response = response with { Element = StripAgentElementId(response.Element) };
             trace?.SetSummary($"props={response.Properties.Count} truncated={response.Truncated}");
             return response;
         }
-        catch (InvalidOperationException ex) when (hasElementId &&
-                                                  resolvedElementId is not null &&
-                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
         {
-            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+            throw new InvalidOperationException($"stale_element: not_found for '{target.PublicElementId}'. Call resolve_element again.");
         }
         }
         catch (Exception ex)
@@ -561,40 +530,13 @@ public sealed partial class AutomationController
         var trace = BeginTraceSpan("get_style_chain");
         try
         {
-        var hasLocator = locator is not null;
-        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
-        if (hasLocator == hasElementId)
-        {
-            throw new ArgumentException("get_style_chain requires exactly one of: locator OR elementId.");
-        }
-
-        string? resolvedElementId = null;
-        long? effectiveWindowHandle = windowHandle;
-        ElementLocator effectiveLocator = locator ?? new ElementLocator();
-
-        if (hasElementId)
-        {
-            var id = elementId!.Trim();
-            resolvedElementId = id;
-            var handle = RequireHandle(id);
-            if (handle.Backend != InspectionBackend.Wpf)
-            {
-                throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
-            }
-
-            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
-            {
-                throw new ArgumentException("windowHandle does not match the elementId window.");
-            }
-
-            effectiveWindowHandle = handle.WindowHandle;
-            effectiveLocator = new ElementLocator(XPath: handle.XPath);
-        }
+        var target = PrepareWpfAgentTarget("get_style_chain", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
         var request = new GetStyleChainRequest(
-            WindowHandle: effectiveWindowHandle,
-            Locator: effectiveLocator,
+            WindowHandle: target.WindowHandle,
+            Locator: target.Locator,
+            ElementId: target.AgentElementId,
             IncludeThemeStyle: includeThemeStyle,
             IncludeResourceKeys: includeResourceKeys,
             MaxBasedOnDepth: maxBasedOnDepth);
@@ -602,14 +544,13 @@ public sealed partial class AutomationController
         try
         {
             var response = await client.CallAsync<GetStyleChainResponse>("wpf/get_style_chain", request, cancellationToken);
+            response = response with { Element = StripAgentElementId(response.Element) };
             trace?.SetSummary($"entries={response.Styles.Count}");
             return response;
         }
-        catch (InvalidOperationException ex) when (hasElementId &&
-                                                  resolvedElementId is not null &&
-                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
         {
-            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+            throw new InvalidOperationException($"stale_element: not_found for '{target.PublicElementId}'. Call resolve_element again.");
         }
         }
         catch (Exception ex)
@@ -636,40 +577,13 @@ public sealed partial class AutomationController
         var trace = BeginTraceSpan("get_template_info");
         try
         {
-        var hasLocator = locator is not null;
-        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
-        if (hasLocator == hasElementId)
-        {
-            throw new ArgumentException("get_template_info requires exactly one of: locator OR elementId.");
-        }
-
-        string? resolvedElementId = null;
-        long? effectiveWindowHandle = windowHandle;
-        ElementLocator effectiveLocator = locator ?? new ElementLocator();
-
-        if (hasElementId)
-        {
-            var id = elementId!.Trim();
-            resolvedElementId = id;
-            var handle = RequireHandle(id);
-            if (handle.Backend != InspectionBackend.Wpf)
-            {
-                throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
-            }
-
-            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
-            {
-                throw new ArgumentException("windowHandle does not match the elementId window.");
-            }
-
-            effectiveWindowHandle = handle.WindowHandle;
-            effectiveLocator = new ElementLocator(XPath: handle.XPath);
-        }
+        var target = PrepareWpfAgentTarget("get_template_info", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
         var request = new GetTemplateInfoRequest(
-            WindowHandle: effectiveWindowHandle,
-            Locator: effectiveLocator,
+            WindowHandle: target.WindowHandle,
+            Locator: target.Locator,
+            ElementId: target.AgentElementId,
             IncludeNamedElements: includeNamedElements,
             MaxNamedElements: maxNamedElements,
             IncludeResourceKeys: includeResourceKeys,
@@ -678,15 +592,14 @@ public sealed partial class AutomationController
         try
         {
             var response = await client.CallAsync<GetTemplateInfoResponse>("wpf/get_template_info", request, cancellationToken);
+            response = response with { Element = StripAgentElementId(response.Element) };
             var named = response.Template.NamedElements is null ? 0 : response.Template.NamedElements.Count;
             trace?.SetSummary($"named={named}");
             return response;
         }
-        catch (InvalidOperationException ex) when (hasElementId &&
-                                                  resolvedElementId is not null &&
-                                                  ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+        catch (InvalidOperationException ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
         {
-            throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
+            throw new InvalidOperationException($"stale_element: not_found for '{target.PublicElementId}'. Call resolve_element again.");
         }
         }
         catch (Exception ex)

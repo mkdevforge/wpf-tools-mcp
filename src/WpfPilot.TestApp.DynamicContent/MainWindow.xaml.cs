@@ -8,6 +8,7 @@ public partial class MainWindow : Window
 {
     private int _clicks;
     private Button? _dynamicButton;
+    private TextBlock? _insertedSibling;
 
     public MainWindow()
     {
@@ -46,6 +47,26 @@ public partial class MainWindow : Window
         _dynamicButton.Click -= DynamicButton_Click;
         DynamicHost.Children.Remove(_dynamicButton);
         _dynamicButton = null;
+    }
+
+    private void InsertSiblingBeforeStatus_Click(object sender, RoutedEventArgs e)
+    {
+        if (_insertedSibling is not null)
+        {
+            return;
+        }
+
+        _insertedSibling = new TextBlock
+        {
+            Text = "Inserted before status",
+            Margin = new Thickness(0, 0, 0, 12)
+        };
+
+        AutomationProperties.SetAutomationId(_insertedSibling, "Dynamic_InsertedSibling");
+
+        var parent = (Panel)DynamicStatus.Parent;
+        var statusIndex = parent.Children.IndexOf(DynamicStatus);
+        parent.Children.Insert(statusIndex, _insertedSibling);
     }
 
     private void DynamicButton_Click(object sender, RoutedEventArgs e)

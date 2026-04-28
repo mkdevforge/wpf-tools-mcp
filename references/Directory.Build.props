@@ -6,6 +6,8 @@
     <GitVersion_NoFetchEnabled>true</GitVersion_NoFetchEnabled>
     <GitVersion_NoNormalizeEnabled>true</GitVersion_NoNormalizeEnabled>
     <GitVersion_AllowShallowEnabled>true</GitVersion_AllowShallowEnabled>
+    <GetVersion>false</GetVersion>
+    <GenerateGitVersionInformation>false</GenerateGitVersionInformation>
+    <WriteVersionInfoToBuildLog>false</WriteVersionInfoToBuildLog>
   </PropertyGroup>
 </Project>
-

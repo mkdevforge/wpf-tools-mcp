@@ -42,6 +42,13 @@
                     HorizontalAlignment="Left"
                     Click="RemoveDynamicButton_Click" />
 
+            <Button AutomationProperties.AutomationId="Dynamic_InsertSiblingBeforeStatus"
+                    Content="Insert sibling before status"
+                    Width="220"
+                    Margin="0,0,0,12"
+                    HorizontalAlignment="Left"
+                    Click="InsertSiblingBeforeStatus_Click" />
+
             <StackPanel x:Name="DynamicHost"
                         Margin="0,0,0,12" />
 

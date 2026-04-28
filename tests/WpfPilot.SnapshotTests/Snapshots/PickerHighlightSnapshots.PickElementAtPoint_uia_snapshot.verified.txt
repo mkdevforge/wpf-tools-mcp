@@ -2,15 +2,30 @@
   Pick: {
     BackendUsed: Uia,
     Element: {
-      Type: Window,
-      Name: WpfPilot TestApp,
-      XPath: /Window,
-      ClassName: Window,
+      Type: Text,
+      Name: Click me,
+      XPath: /Window/Button[1]/TextBlock,
+      ClassName: TextBlock,
       Bounds: {
-        Width: 900,
-        Height: 650
+        Width: 45,
+        Height: 16
       },
       ElementId: <element>
-    }
+    },
+    Ancestors: [
+      {
+        Type: Window,
+        Name: WpfPilot TestApp,
+        XPath: /Window,
+        ElementId: <ancestor:0>
+      },
+      {
+        Type: Button,
+        AutomationId: Basic_Button,
+        Name: Click me,
+        XPath: /Window/Button[1],
+        ElementId: <ancestor:1>
+      }
+    ]
   }
 }

@@ -2,20 +2,58 @@
   Pick: {
     BackendUsed: Wpf,
     Element: {
-      Type: Border,
-      XPath: /Window/Border,
-      ClassName: System.Windows.Controls.Border,
+      Type: TextBlock,
+      XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button/Border/ContentPresenter/TextBlock,
+      ClassName: System.Windows.Controls.TextBlock,
       Bounds: {
-        Width: 884,
-        Height: 611
+        Width: 45,
+        Height: 16
       },
       ElementId: <element>
     },
     Ancestors: [
       {
-        Type: MainWindow,
-        XPath: /Window,
+        Type: Border,
+        XPath: /Window/Border,
         ElementId: <ancestor:0>
+      },
+      {
+        Type: AdornerDecorator,
+        XPath: /Window/Border/AdornerDecorator,
+        ElementId: <ancestor:1>
+      },
+      {
+        Type: ContentPresenter,
+        XPath: /Window/Border/AdornerDecorator/ContentPresenter,
+        ElementId: <ancestor:2>
+      },
+      {
+        Type: Grid,
+        XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid,
+        ElementId: <ancestor:3>
+      },
+      {
+        Type: StackPanel,
+        XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel,
+        ElementId: <ancestor:4>
+      },
+      {
+        Type: Button,
+        AutomationId: Basic_Button,
+        XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button,
+        ElementId: <ancestor:5>
+      },
+      {
+        Type: Border,
+        Name: border,
+        XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button/Border,
+        ElementId: <ancestor:6>
+      },
+      {
+        Type: ContentPresenter,
+        Name: contentPresenter,
+        XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button/Border/ContentPresenter,
+        ElementId: <ancestor:7>
       }
     ]
   }

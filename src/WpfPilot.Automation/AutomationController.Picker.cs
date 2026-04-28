@@ -29,12 +29,13 @@ public sealed partial class AutomationController
                     yScreen = request.Y;
                     break;
                 case MouseCoordinateSpace.Client:
-                    if (request.WindowHandle is not long hwnd || hwnd == 0)
+                    var clientWindowHandle = request.WindowHandle;
+                    if (clientWindowHandle is null or 0)
                     {
-                        throw new InvalidOperationException("client_coords_require_windowHandle");
+                        clientWindowHandle = FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
                     }
 
-                    if (!TryGetClientTopLeftScreen(new IntPtr(hwnd), out var clientTopLeft))
+                    if (!TryGetClientTopLeftScreen(new IntPtr(clientWindowHandle.Value), out var clientTopLeft))
                     {
                         throw new InvalidOperationException("client_origin_unavailable");
                     }
@@ -103,30 +104,42 @@ public sealed partial class AutomationController
         var requestedWindowHandle = request.WindowHandle;
 
         var point = new System.Drawing.Point(xScreen, yScreen);
-        var element = automation.FromPoint(point)
-            ?? throw new InvalidOperationException("No UIA element found at point.");
-
-        try
-        {
-            var pid = element.Properties.ProcessId.Value;
-            if (pid != application.ProcessId)
-            {
-                throw new InvalidOperationException("Point resolved to a different process.");
-            }
-        }
-        catch (InvalidOperationException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Failed to validate picked element: {ex.Message}");
-        }
+        var element = automation.FromPoint(point);
 
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
 
-        var resolved = ResolveContainingWindowUia(element, rawWalker);
-        var windowHandleUsed = resolved.WindowHandle;
+        long windowHandleUsed;
+        if (element is null)
+        {
+            if (requestedWindowHandle is not long requested)
+            {
+                throw new InvalidOperationException($"no_hit_at_point: x={xScreen} y={yScreen}.");
+            }
+
+            windowHandleUsed = requested;
+        }
+        else
+        {
+            try
+            {
+                var pid = element.Properties.ProcessId.Value;
+                if (pid != application.ProcessId)
+                {
+                    throw new InvalidOperationException($"no_hit_at_point: point resolved to process {pid}, expected {application.ProcessId}.");
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to validate picked element: {ex.Message}");
+            }
+
+            var resolved = ResolveContainingWindowUia(element, rawWalker);
+            windowHandleUsed = resolved.WindowHandle;
+        }
 
         if (requestedWindowHandle is long expectedHandle && expectedHandle != windowHandleUsed)
         {
@@ -142,6 +155,21 @@ public sealed partial class AutomationController
         catch
         {
             throw new InvalidOperationException($"Failed to resolve picked element window handle {windowHandleUsed}.");
+        }
+
+        var deepest = FindDeepestUiaElementAtPoint(window, rawWalker, xScreen, yScreen, maxNodes: 10_000, cancellationToken);
+        if (deepest is null || AreSameElement(deepest, window))
+        {
+            if (!request.ReturnRootOnMiss)
+            {
+                throw new InvalidOperationException($"no_hit_at_point: x={xScreen} y={yScreen}.");
+            }
+
+            element = window;
+        }
+        else
+        {
+            element = deepest;
         }
 
         var xpath = ComputeXPath(window, element, rawWalker);
@@ -266,18 +294,20 @@ public sealed partial class AutomationController
                 Y: yScreen,
                 IncludeAncestors: request.IncludeAncestors,
                 MaxAncestors: request.MaxAncestors,
+                ReturnRootOnMiss: request.ReturnRootOnMiss,
                 ReturnFields: FindReturnFields.Standard),
             cancellationToken).ConfigureAwait(false);
 
         var pickedId = _elementHandles.RegisterWpf(
             windowHandleUsed,
             response.Element.XPath,
+            response.Element.ElementIdWpf,
             response.Element.Type,
             response.Element.AutomationId,
             response.Element.Name,
             response.Element.ClassName);
 
-        var picked = response.Element with { ElementId = pickedId };
+        var picked = response.Element with { ElementId = pickedId, ElementIdWpf = null };
 
         IReadOnlyList<ElementRef>? ancestors = null;
         if (request.IncludeAncestors && response.Ancestors is { Count: > 0 })
@@ -288,12 +318,13 @@ public sealed partial class AutomationController
                     var id = _elementHandles.RegisterWpf(
                         windowHandleUsed,
                         a.XPath,
+                        a.ElementIdWpf,
                         a.Type,
                         a.AutomationId,
                         a.Name,
                         a.ClassName);
 
-                    return a with { ElementId = id };
+                    return a with { ElementId = id, ElementIdWpf = null };
                 })
                 .ToArray();
 
@@ -374,5 +405,90 @@ public sealed partial class AutomationController
         }
 
         return results;
+    }
+
+    private static AutomationElement? FindDeepestUiaElementAtPoint(
+        Window window,
+        ITreeWalker rawWalker,
+        int x,
+        int y,
+        int maxNodes,
+        CancellationToken cancellationToken)
+    {
+        maxNodes = Math.Clamp(maxNodes, 1, 200_000);
+        var point = new System.Drawing.Point(x, y);
+        AutomationElement? best = null;
+        long bestArea = long.MaxValue;
+        var bestDepth = -1;
+        var scanned = 0;
+
+        var stack = new Stack<(AutomationElement Element, int Depth)>();
+        stack.Push((window, 0));
+
+        while (stack.Count > 0 && scanned < maxNodes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var (current, depth) = stack.Pop();
+            scanned++;
+
+            if (TryGetContainingBounds(current, point, out var bounds))
+            {
+                var area = Math.Max(1L, (long)bounds.Width * bounds.Height);
+                if (area < bestArea || (area == bestArea && depth > bestDepth))
+                {
+                    best = current;
+                    bestArea = area;
+                    bestDepth = depth;
+                }
+            }
+
+            AutomationElement? child;
+            try
+            {
+                child = rawWalker.GetFirstChild(current);
+            }
+            catch
+            {
+                child = null;
+            }
+
+            while (child is not null && scanned + stack.Count < maxNodes)
+            {
+                stack.Push((child, depth + 1));
+                try
+                {
+                    child = rawWalker.GetNextSibling(child);
+                }
+                catch
+                {
+                    child = null;
+                }
+            }
+        }
+
+        return best;
+    }
+
+    private static bool TryGetContainingBounds(
+        AutomationElement element,
+        System.Drawing.Point point,
+        out System.Drawing.Rectangle bounds)
+    {
+        bounds = default;
+        try
+        {
+            bounds = element.BoundingRectangle;
+            return bounds.Width > 0 &&
+                   bounds.Height > 0 &&
+                   point.X >= bounds.Left &&
+                   point.X < bounds.Right &&
+                   point.Y >= bounds.Top &&
+                   point.Y < bounds.Bottom;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

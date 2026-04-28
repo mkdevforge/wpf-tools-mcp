@@ -50,9 +50,13 @@ public sealed partial class AutomationController
         CancellationToken cancellationToken)
     {
         var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+        var request = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
+            ? new BringIntoViewWpfRequest(handle.WindowHandle, ElementId: handle.WpfAgentElementId)
+            : new BringIntoViewWpfRequest(handle.WindowHandle, XPath: handle.XPath);
+
         return await client.CallAsync<BringIntoViewWpfResponse>(
             "wpf/bring_into_view",
-            new BringIntoViewWpfRequest(handle.WindowHandle, handle.XPath),
+            request,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -72,11 +76,13 @@ public sealed partial class AutomationController
         Window window,
         ElementHandle handle,
         bool autoScroll,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool fullyVisible = false,
+        bool throwIfScrollFailed = false)
     {
         // First try: resolve even if outside viewport (still "visible" in WPF terms).
         var resolved = await ResolveWpfElementRefAsync(
-            new ElementLocator(XPath: handle.XPath),
+            handle,
             handle.WindowHandle,
             visibleOnly: true,
             includeOffViewport: true,
@@ -95,12 +101,18 @@ public sealed partial class AutomationController
             return bounds;
         }
 
-        if (TryGetClientBoundsScreen(window, out var clientBounds) && !RectIntersects(bounds, clientBounds))
+        if (TryGetClientBoundsScreen(window, out var clientBounds) &&
+            !IsRectVisibleEnough(bounds, clientBounds, fullyVisible))
         {
             var bring = await BringIntoViewWpfAsync(handle, cancellationToken).ConfigureAwait(false);
             if (!bring.BroughtIntoView)
             {
-                // Fall back to returning the original bounds; caller may still choose to act.
+                if (throwIfScrollFailed)
+                {
+                    throw new InvalidOperationException(
+                        $"element_offscreen_after_scroll: wpf_bring_into_view_failed reason={bring.Reason ?? "unknown"} bounds={FormatRect(bounds)} container={FormatRect(clientBounds)}.");
+                }
+
                 return bounds;
             }
 
@@ -108,10 +120,10 @@ public sealed partial class AutomationController
 
             // Re-resolve after BringIntoView to get updated bounds (and to confirm existence).
             resolved = await ResolveWpfElementRefAsync(
-                new ElementLocator(XPath: handle.XPath),
+                handle,
                 handle.WindowHandle,
                 visibleOnly: true,
-                includeOffViewport: false,
+                includeOffViewport: true,
                 interactiveOnly: false,
                 interactiveMode: InteractiveMode.Heuristic,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -121,9 +133,52 @@ public sealed partial class AutomationController
             {
                 throw new InvalidOperationException($"wpf_element_has_no_bounds_after_bring_into_view: '{handle.XPath}'.");
             }
+
+            if (!IsRectVisibleEnough(bounds, clientBounds, fullyVisible) && throwIfScrollFailed)
+            {
+                throw new InvalidOperationException(
+                    $"element_offscreen_after_scroll: bounds={FormatRect(bounds)} container={FormatRect(clientBounds)}.");
+            }
         }
 
         return bounds;
+    }
+
+    private async Task<ElementRef> ResolveWpfElementRefAsync(
+        ElementHandle handle,
+        long windowHandle,
+        bool visibleOnly,
+        bool includeOffViewport,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(handle.WpfAgentElementId))
+        {
+            var request = new ResolveWpfElementRequest(
+                WindowHandle: windowHandle,
+                Locator: null,
+                ElementId: handle.WpfAgentElementId,
+                RootXPath: null,
+                VisibleOnly: visibleOnly,
+                IncludeOffViewport: includeOffViewport,
+                InteractiveOnly: interactiveOnly,
+                InteractiveMode: interactiveMode,
+                MaxNodes: 8000,
+                ReturnFields: FindReturnFields.Standard);
+
+            var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+            return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
+        }
+
+        return await ResolveWpfElementRefAsync(
+            new ElementLocator(XPath: handle.XPath),
+            windowHandle,
+            visibleOnly,
+            includeOffViewport,
+            interactiveOnly,
+            interactiveMode,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static Point GetRectCenterPoint(Rect bounds)

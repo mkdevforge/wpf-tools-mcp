@@ -26,6 +26,7 @@ public sealed partial class AutomationController : IDisposable
     private Application? _application;
     private UIA3Automation? _automation;
     private readonly SemaphoreSlim _toolMutex = new(1, 1);
+    private LastHighlightRequest? _lastHighlight;
 
     private static readonly int UiDelayMs = GetEnvInt("WPFPILOT_UI_DELAY_MS", defaultValue: 0, minValue: 0, maxValue: 1000);
     private static readonly int UiDelayScrollMs = GetEnvInt("WPFPILOT_UI_SCROLL_DELAY_MS", defaultValue: 15, minValue: 0, maxValue: 1000);
@@ -33,6 +34,8 @@ public sealed partial class AutomationController : IDisposable
     private static readonly bool ScreenshotDebugEnabled =
         GetEnvFlag("WPFPILOT_DEBUG_SCREENSHOT") ||
         GetEnvFlag("WPF_PILOT_DEBUG_SCREENSHOT");
+
+    private sealed record LastHighlightRequest(Rect Bounds, string Color, int Thickness, DateTime ExpiresAtUtc);
 
     public bool IsAttached => IsApplicationRunning(_application);
 
@@ -665,13 +668,7 @@ public sealed partial class AutomationController : IDisposable
             var windowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64();
             var includeOverlay = request.IncludeOverlay;
             var autoScroll = request.AutoScroll;
-
-            // PrintWindow capture cannot include external overlays (like our Win32 highlight overlay).
-            // If the caller explicitly asked to include overlays, prefer screen capture when mode=auto.
-            if (includeOverlay && mode == ScreenshotCaptureMode.Auto)
-            {
-                mode = ScreenshotCaptureMode.Screen;
-            }
+            var fullyVisible = request.FullyVisible;
 
             AutomationElement element = window;
             Rect? wpfElementBounds = null;
@@ -714,7 +711,9 @@ public sealed partial class AutomationController : IDisposable
                             window,
                             handle,
                             autoScroll: autoScroll,
-                            cancellationToken).ConfigureAwait(false);
+                            cancellationToken,
+                            fullyVisible: fullyVisible,
+                            throwIfScrollFailed: autoScroll).ConfigureAwait(false);
                     }
                     else
                     {
@@ -738,7 +737,8 @@ public sealed partial class AutomationController : IDisposable
 
                         if (autoScroll && wpfElementBounds is { } wpfBounds)
                         {
-                            if (TryGetClientBoundsScreen(window, out var clientBounds) && !RectIntersects(wpfBounds, clientBounds))
+                            if (TryGetClientBoundsScreen(window, out var clientBounds) &&
+                                !IsRectVisibleEnough(wpfBounds, clientBounds, fullyVisible))
                             {
                                 var bring = await BringIntoViewWpfAsync(windowHandleUsed, resolved.XPath, cancellationToken).ConfigureAwait(false);
                                 if (bring.BroughtIntoView)
@@ -752,7 +752,7 @@ public sealed partial class AutomationController : IDisposable
                                         request.Locator,
                                         windowHandleUsed,
                                         visibleOnly: true,
-                                        includeOffViewport: false,
+                                        includeOffViewport: true,
                                         interactiveOnly: false,
                                         interactiveMode: InteractiveMode.Heuristic,
                                         cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -810,7 +810,7 @@ public sealed partial class AutomationController : IDisposable
                                 ? windowBounds
                                 : ToRect(window.BoundingRectangle);
 
-                    if (!RectIntersects(beforeBounds, containerBounds))
+                    if (!IsRectVisibleEnough(beforeBounds, containerBounds, fullyVisible))
                     {
                         if (elementBackend == InspectionBackend.Uia)
                         {
@@ -859,13 +859,85 @@ public sealed partial class AutomationController : IDisposable
                             {
                                 requestedBounds = ToRect(element.BoundingRectangle);
                             }
+                            if (requestedBounds is { } afterBounds &&
+                                !IsRectVisibleEnough(afterBounds, containerBounds, fullyVisible))
+                            {
+                                throw new InvalidOperationException(
+                                    $"element_offscreen_after_scroll: bounds={FormatRect(afterBounds)} container={FormatRect(containerBounds)}.");
+                            }
+                        }
+                        else if (elementBackend == InspectionBackend.Wpf)
+                        {
+                            if (hasElementId && elementHandle is not null)
+                            {
+                                requestedBounds = await ResolveWpfBoundsForHandleAsync(
+                                    window,
+                                    elementHandle,
+                                    autoScroll: true,
+                                    cancellationToken,
+                                    fullyVisible: fullyVisible,
+                                    throwIfScrollFailed: true).ConfigureAwait(false);
+                            }
+                            else if (request.Locator is not null)
+                            {
+                                var resolved = await ResolveWpfElementRefAsync(
+                                    request.Locator,
+                                    windowHandleUsed,
+                                    visibleOnly: true,
+                                    includeOffViewport: true,
+                                    interactiveOnly: false,
+                                    interactiveMode: InteractiveMode.Heuristic,
+                                    cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                                if (!string.IsNullOrWhiteSpace(resolved.ElementIdWpf))
+                                {
+                                    _ = await BringIntoViewWpfAsync(
+                                        new ElementHandle(
+                                            InspectionBackend.Wpf,
+                                            windowHandleUsed,
+                                            resolved.XPath,
+                                            resolved.ElementIdWpf,
+                                            null,
+                                            resolved.Type,
+                                            resolved.AutomationId,
+                                            resolved.Name,
+                                            resolved.ClassName),
+                                        cancellationToken).ConfigureAwait(false);
+                                }
+                                else
+                                {
+                                    _ = await BringIntoViewWpfAsync(windowHandleUsed, resolved.XPath, cancellationToken).ConfigureAwait(false);
+                                }
+
+                                if (UiDelayScrollMs > 0)
+                                {
+                                    await Task.Delay(UiDelayScrollMs, cancellationToken);
+                                }
+
+                                var after = await ResolveWpfElementRefAsync(
+                                    request.Locator,
+                                    windowHandleUsed,
+                                    visibleOnly: true,
+                                    includeOffViewport: true,
+                                    interactiveOnly: false,
+                                    interactiveMode: InteractiveMode.Heuristic,
+                                    cancellationToken: cancellationToken).ConfigureAwait(false);
+
+                                requestedBounds = after.Bounds;
+                                if (requestedBounds is { } afterBounds &&
+                                    !IsRectVisibleEnough(afterBounds, containerBounds, fullyVisible))
+                                {
+                                    throw new InvalidOperationException(
+                                        $"element_offscreen_after_scroll: bounds={FormatRect(afterBounds)} container={FormatRect(containerBounds)}.");
+                                }
+                            }
                         }
                     }
                 }
 
                 try
                 {
-                    capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay);
+                    capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay: false);
                 }
                 catch (InvalidOperationException ex) when (autoScroll &&
                                                           hasElementTarget &&
@@ -910,7 +982,7 @@ public sealed partial class AutomationController : IDisposable
                         }
                     }
 
-                    capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay);
+                    capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay: false);
                 }
             }
             catch (Exception ex)
@@ -939,7 +1011,8 @@ public sealed partial class AutomationController : IDisposable
 
                         if (autoScroll && wpfElementBounds is { } fallbackBounds)
                         {
-                            if (TryGetClientBoundsScreen(window, out var clientBounds) && !RectIntersects(fallbackBounds, clientBounds))
+                            if (TryGetClientBoundsScreen(window, out var clientBounds) &&
+                                !IsRectVisibleEnough(fallbackBounds, clientBounds, fullyVisible))
                             {
                                 var bring = await BringIntoViewWpfAsync(windowHandleUsed, resolved.XPath, cancellationToken).ConfigureAwait(false);
                                 if (bring.BroughtIntoView)
@@ -963,7 +1036,7 @@ public sealed partial class AutomationController : IDisposable
                             }
                         }
 
-                        capture = CaptureScreenshotWithMetadata(window, wpfElementBounds, mode, area, clip, includeOverlay);
+                        capture = CaptureScreenshotWithMetadata(window, wpfElementBounds, mode, area, clip, includeOverlay: false);
                         recovered = true;
                     }
                     catch (Exception fallbackEx)
@@ -990,6 +1063,11 @@ public sealed partial class AutomationController : IDisposable
             var (bitmap, capturedBounds, requestedBoundsUsed, wasClipped, captureModeUsed) = capture.Value;
 
             using var bitmapToSave = bitmap;
+
+            if (includeOverlay)
+            {
+                DrawActiveHighlightOverlay(bitmapToSave, capturedBounds);
+            }
 
             if (request.Annotate && requestedBoundsUsed is { } annotationBounds)
             {
@@ -4562,10 +4640,13 @@ public sealed partial class AutomationController : IDisposable
             }
 
             var elapsed = Stopwatch.GetElapsedTime(start);
-            if (elapsed.TotalMilliseconds >= timeoutMs)
-            {
-                throw new InvalidOperationException($"timeout: element not found after {timeoutMs}ms.");
-            }
+                if (elapsed.TotalMilliseconds >= timeoutMs)
+                {
+                    var hint = visibleOnly && !includeOffViewport
+                        ? " Retry with includeOffViewport=true, visibleOnly=false for hidden elements, or call scroll_to_element first."
+                        : "";
+                    throw new InvalidOperationException($"timeout: element not found after {timeoutMs}ms.{hint}");
+                }
 
             await Task.Delay(pollIntervalMs, cancellationToken);
         }
@@ -7080,7 +7161,7 @@ public sealed partial class AutomationController : IDisposable
         ElementLocator? root = null,
         FindElementsQuery? query = null,
         bool visibleOnly = true,
-        bool includeOffViewport = false,
+        bool includeOffViewport = true,
         bool interactiveOnly = false,
         InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         int maxResults = 25,
@@ -7247,7 +7328,26 @@ public sealed partial class AutomationController : IDisposable
 
             if (handle.Backend == InspectionBackend.Wpf)
             {
-                var wpfResponse = new GetPathToElementResponse(InspectionBackend.Wpf, handle.XPath);
+                var request = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
+                    ? new GetWpfPathRequest(
+                        WindowHandle: handle.WindowHandle,
+                        Locator: null,
+                        ElementId: handle.WpfAgentElementId,
+                        RootXPath: null,
+                        VisibleOnly: true,
+                        IncludeOffViewport: true,
+                        MaxNodes: 8000)
+                    : new GetWpfPathRequest(
+                        WindowHandle: handle.WindowHandle,
+                        Locator: new ElementLocator(XPath: handle.XPath),
+                        ElementId: null,
+                        RootXPath: null,
+                        VisibleOnly: true,
+                        IncludeOffViewport: true,
+                        MaxNodes: 8000);
+
+                var wpfResponse = await GetWpfPathAsync(request, injectIfMissing: true, cancellationToken).ConfigureAwait(false);
+                _elementHandles.TryUpdateWpfPath(id, wpfResponse.XPath);
                 trace?.SetSummary($"{wpfResponse.BackendUsed} {wpfResponse.XPath}");
                 return wpfResponse;
             }
@@ -9767,6 +9867,32 @@ public sealed partial class AutomationController : IDisposable
 
         return a.X < bx2 && ax2 > b.X && a.Y < by2 && ay2 > b.Y;
     }
+
+    private static bool RectContains(Rect outer, Rect inner)
+    {
+        if (outer.Width <= 0 || outer.Height <= 0 || inner.Width <= 0 || inner.Height <= 0)
+        {
+            return false;
+        }
+
+        var outerRight = (long)outer.X + outer.Width;
+        var outerBottom = (long)outer.Y + outer.Height;
+        var innerRight = (long)inner.X + inner.Width;
+        var innerBottom = (long)inner.Y + inner.Height;
+
+        return inner.X >= outer.X &&
+               inner.Y >= outer.Y &&
+               innerRight <= outerRight &&
+               innerBottom <= outerBottom;
+    }
+
+    private static bool IsRectVisibleEnough(Rect bounds, Rect containerBounds, bool fullyVisible) =>
+        fullyVisible ? RectContains(containerBounds, bounds) : RectIntersects(bounds, containerBounds);
+
+    private static string FormatRect(Rect rect) =>
+        rect.Width <= 0 && rect.Height <= 0
+            ? "empty"
+            : $"x={rect.X},y={rect.Y},w={rect.Width},h={rect.Height}";
 
     private static JsonNode? ToJsonNode(object? value)
     {

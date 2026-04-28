@@ -1,4 +1,4 @@
-{
+﻿{
   Resolve: {
     BackendUsed: Wpf,
     Element: {
@@ -8,7 +8,7 @@
       ClassName: System.Windows.Controls.Button,
       Bounds: {
         X: 290,
-        Y: 259,
+        Y: 291,
         Width: 200,
         Height: 20
       },
@@ -19,5 +19,5 @@
     Clicked: true,
     MethodUsed: mouse
   },
-  Error: Tool 'get_data_context' failed: An error occurred invoking 'get_data_context': stale_element: not_found for '<element>'. Call resolve_element again.
+  Error: Tool 'get_data_context' failed: An error occurred invoking 'get_data_context': tool=GetDataContext: stale_element: not_found for '<element>'. Call resolve_element again.
 }

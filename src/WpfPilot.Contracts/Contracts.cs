@@ -162,6 +162,7 @@ public sealed record TakeScreenshotRequest(
     string? OutputPath = null,
     bool IncludeOverlay = false,
     bool AutoScroll = true,
+    bool FullyVisible = true,
     bool Annotate = false,
     string AnnotationColor = "#3B82F6",
     int AnnotationThickness = 3,
@@ -187,7 +188,8 @@ public sealed record PickElementAtPointRequest(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WindowHandle = null,
     InspectionBackend Backend = InspectionBackend.Auto,
     bool IncludeAncestors = false,
-    int MaxAncestors = 8);
+    int MaxAncestors = 8,
+    bool ReturnRootOnMiss = false);
 
 public sealed record PickElementAtPointResponse(
     InspectionBackend BackendUsed,
@@ -204,6 +206,7 @@ public sealed record PickWpfElementAtPointRequest(
     int Y = 0,
     bool IncludeAncestors = false,
     int MaxAncestors = 8,
+    bool ReturnRootOnMiss = false,
     FindReturnFields ReturnFields = FindReturnFields.Standard);
 
 public sealed record PickWpfElementAtPointResponse(
@@ -530,7 +533,7 @@ public sealed record FindElementsWpfRequest(
     string? RootXPath = null,
     FindElementsQuery? Query = null,
     bool VisibleOnly = true,
-    bool IncludeOffViewport = false,
+    bool IncludeOffViewport = true,
     bool InteractiveOnly = false,
     InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     int MaxResults = 25,
@@ -540,6 +543,7 @@ public sealed record FindElementsWpfRequest(
 public sealed record GetWpfPathRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     string? RootXPath = null,
     bool VisibleOnly = true,
     bool IncludeOffViewport = false,
@@ -548,9 +552,10 @@ public sealed record GetWpfPathRequest(
 public sealed record ResolveWpfElementRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     string? RootXPath = null,
     bool VisibleOnly = true,
-    bool IncludeOffViewport = false,
+    bool IncludeOffViewport = true,
     bool InteractiveOnly = false,
     InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     int MaxNodes = 2000,
@@ -558,7 +563,8 @@ public sealed record ResolveWpfElementRequest(
 
 public sealed record BringIntoViewWpfRequest(
     long WindowHandle,
-    string XPath);
+    string? XPath = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null);
 
 public sealed record BringIntoViewWpfResponse(
     bool BroughtIntoView,
@@ -568,6 +574,7 @@ public sealed record BringIntoViewWpfResponse(
 public sealed record HighlightWpfElementRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     string? RootXPath = null,
     int DurationMs = 1500,
     string Color = "#3B82F6",
@@ -580,9 +587,13 @@ public sealed record HighlightWpfElementResponse(
 public sealed record GetBindingInfoRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     bool IncludeUnbound = false,
     int MaxProperties = 2000,
     string ValueFormat = "string");
+
+public sealed record ReleaseWpfElementRequest(
+    [property: JsonPropertyName("elementId")] string ElementId);
 
 public sealed record BindingInfo(
     string TargetProperty,
@@ -681,6 +692,7 @@ public sealed record GetUiaCoverageReportResponse(
 public sealed record GetDataContextRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     DataContextMode Mode = DataContextMode.Summary,
     int MaxDepth = 2,
     int MaxPropertiesPerObject = 50,
@@ -708,6 +720,7 @@ public enum DataContextMode
 public sealed record GetComputedPropertiesRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     IReadOnlyList<string>? PropertyNames = null,
     bool IncludeSources = true,
     bool IncludeDefault = false,
@@ -747,6 +760,7 @@ public enum StyleChainKind
 public sealed record GetStyleChainRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     bool IncludeThemeStyle = true,
     bool IncludeResourceKeys = false,
     int MaxBasedOnDepth = 10);
@@ -789,6 +803,7 @@ public enum TemplateKind
 public sealed record GetTemplateInfoRequest(
     long? WindowHandle = null,
     ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     bool IncludeNamedElements = false,
     int MaxNamedElements = 50,
     bool IncludeResourceKeys = false,

@@ -18,6 +18,9 @@ $env:DisableGitVersionTask = "true"
 $env:GitVersion_NoFetchEnabled = "true"
 $env:GitVersion_NoNormalizeEnabled = "true"
 $env:GitVersion_AllowShallowEnabled = "true"
+$env:GetVersion = "false"
+$env:GenerateGitVersionInformation = "false"
+$env:WriteVersionInfoToBuildLog = "false"
 
 $injectorLauncherProj = Join-Path $snoopRoot "Snoop.InjectorLauncher\\Snoop.InjectorLauncher.csproj"
 $genericInjectorProj = Join-Path $snoopRoot "Snoop.GenericInjector\\Snoop.GenericInjector.vcxproj"
@@ -26,8 +29,33 @@ $gitVersionProps = @(
     "-p:DisableGitVersionTask=true",
     "-p:GitVersion_NoFetchEnabled=true",
     "-p:GitVersion_NoNormalizeEnabled=true",
-    "-p:GitVersion_AllowShallowEnabled=true"
+    "-p:GitVersion_AllowShallowEnabled=true",
+    "-p:GetVersion=false",
+    "-p:GenerateGitVersionInformation=false",
+    "-p:WriteVersionInfoToBuildLog=false"
 )
+
+$gitVersionMsBuildProps = @(
+    "/p:DisableGitVersionTask=true",
+    "/p:GitVersion_NoFetchEnabled=true",
+    "/p:GitVersion_NoNormalizeEnabled=true",
+    "/p:GitVersion_AllowShallowEnabled=true",
+    "/p:GetVersion=false",
+    "/p:GenerateGitVersionInformation=false",
+    "/p:WriteVersionInfoToBuildLog=false"
+)
+
+if ($env:CI -eq "true") {
+    Write-Host "Checking Snoop GitVersion suppression..." -ForegroundColor Cyan
+    $disableGitVersion = & dotnet msbuild $injectorLauncherProj -nologo -p:RootBuild=False -p:PlatformTarget=x86 @gitVersionProps -getProperty:DisableGitVersionTask
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
+    if (($disableGitVersion | Select-Object -Last 1).Trim() -ne "true") {
+        throw "Expected DisableGitVersionTask=true for Snoop projects."
+    }
+}
 
 Write-Host "Building Snoop.InjectorLauncher ($Configuration)..." -ForegroundColor Cyan
 foreach ($platformTarget in @("x86", "x64")) {
@@ -56,11 +84,11 @@ if (-not $msbuild) {
 }
 
 if ($msbuild) {
-    & $msbuild.Path $genericInjectorProj /m /p:Configuration=$Configuration /p:Platform=Win32 /p:RunCodeAnalysis=false /p:EnableMicrosoftCodeAnalysis=false
+    & $msbuild.Path $genericInjectorProj /m /p:Configuration=$Configuration /p:Platform=Win32 /p:RunCodeAnalysis=false /p:EnableMicrosoftCodeAnalysis=false @gitVersionMsBuildProps
 }
 else {
     Write-Warning "Could not find MSBuild.exe from Visual Studio. Falling back to 'dotnet msbuild' (may not build C++ projects)."
-    & dotnet msbuild $genericInjectorProj /m /p:Configuration=$Configuration /p:Platform=Win32 /p:RunCodeAnalysis=false /p:EnableMicrosoftCodeAnalysis=false
+    & dotnet msbuild $genericInjectorProj /m /p:Configuration=$Configuration /p:Platform=Win32 /p:RunCodeAnalysis=false /p:EnableMicrosoftCodeAnalysis=false @gitVersionMsBuildProps
 }
 
 if ($LASTEXITCODE -ne 0) {

@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Automation;
@@ -10,6 +12,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Media3D;
 using System.Windows.Threading;
 using Snoop.Data.Tree;
 using Snoop.Infrastructure.Helpers;
@@ -26,6 +29,196 @@ internal static class WpfVisualTreeInspector
     private static Brush? _savedHighlightBorderBrush;
     private static double? _savedHighlightBorderThickness;
     private static bool? _savedHighlightEnabled;
+    private static readonly WpfElementHandleStore ElementHandles = new();
+
+    private sealed class WpfElementHandleStore
+    {
+        private readonly object _sync = new();
+        private readonly ConditionalWeakTable<DependencyObject, HandleEntry> _byObject = new();
+        private readonly Dictionary<string, WeakReference<DependencyObject>> _byId = new(StringComparer.Ordinal);
+        private readonly LinkedList<string> _lru = new();
+        private readonly Dictionary<string, LinkedListNode<string>> _lruNodes = new(StringComparer.Ordinal);
+        private readonly int _capacity = GetHandleCapacity();
+
+        public string Register(DependencyObject element)
+        {
+            ArgumentNullException.ThrowIfNull(element);
+
+            lock (_sync)
+            {
+                if (_byObject.TryGetValue(element, out var existing) &&
+                    existing.Active &&
+                    _byId.ContainsKey(existing.Id))
+                {
+                    Touch(existing.Id);
+                    return existing.Id;
+                }
+
+                var entry = existing ?? new HandleEntry();
+                if (existing is null)
+                {
+                    _byObject.Add(element, entry);
+                }
+
+                EvictIfNeeded();
+
+                for (var attempt = 0; attempt < 5; attempt++)
+                {
+                    var id = "wpfobj_" + CreateRandomId();
+                    if (_byId.ContainsKey(id))
+                    {
+                        continue;
+                    }
+
+                    entry.Id = id;
+                    entry.Active = true;
+                    _byId[id] = new WeakReference<DependencyObject>(element);
+                    _lruNodes[id] = _lru.AddFirst(id);
+                    return id;
+                }
+            }
+
+            throw new InvalidOperationException("Failed to allocate unique WPF element handle.");
+        }
+
+        public DependencyObject Resolve(long windowHandle, string elementId)
+        {
+            if (windowHandle == 0)
+            {
+                throw new ArgumentException("WindowHandle is required when resolving a WPF element handle.");
+            }
+
+            if (string.IsNullOrWhiteSpace(elementId))
+            {
+                throw new ArgumentException("elementId is required.");
+            }
+
+            var id = elementId.Trim();
+            WeakReference<DependencyObject>? reference;
+            lock (_sync)
+            {
+                if (!_byId.TryGetValue(id, out reference))
+                {
+                    throw new InvalidOperationException($"wpf_handle_stale:not_found: '{id}'.");
+                }
+
+                Touch(id);
+            }
+
+            if (!reference.TryGetTarget(out var element))
+            {
+                Release(id);
+                throw new InvalidOperationException($"wpf_handle_stale:collected: '{id}'.");
+            }
+
+            var window = GetContainingWindow(element);
+            if (window is null)
+            {
+                Release(id);
+                throw new InvalidOperationException($"wpf_handle_stale:detached: '{id}'.");
+            }
+
+            var actualHandle = new WindowInteropHelper(window).Handle;
+            if (actualHandle == IntPtr.Zero || actualHandle.ToInt64() != windowHandle)
+            {
+                throw new InvalidOperationException(
+                    $"wpf_handle_stale:window_mismatch: '{id}' expected={windowHandle} actual={actualHandle.ToInt64()}.");
+            }
+
+            return element;
+        }
+
+        public bool Release(string elementId)
+        {
+            if (string.IsNullOrWhiteSpace(elementId))
+            {
+                return false;
+            }
+
+            var id = elementId.Trim();
+            lock (_sync)
+            {
+                if (!_byId.Remove(id, out var reference))
+                {
+                    return false;
+                }
+
+                if (_lruNodes.Remove(id, out var node))
+                {
+                    _lru.Remove(node);
+                }
+
+                if (reference.TryGetTarget(out var element) &&
+                    _byObject.TryGetValue(element, out var entry) &&
+                    string.Equals(entry.Id, id, StringComparison.Ordinal))
+                {
+                    entry.Active = false;
+                }
+
+                return true;
+            }
+        }
+
+        private void Touch(string id)
+        {
+            if (_lruNodes.TryGetValue(id, out var node))
+            {
+                _lru.Remove(node);
+                _lru.AddFirst(node);
+            }
+        }
+
+        private void EvictIfNeeded()
+        {
+            while (_byId.Count >= _capacity && _lru.Last is { } last)
+            {
+                var id = last.Value;
+                _lru.RemoveLast();
+                _lruNodes.Remove(id);
+
+                if (_byId.Remove(id, out var reference) &&
+                    reference.TryGetTarget(out var element) &&
+                    _byObject.TryGetValue(element, out var entry) &&
+                    string.Equals(entry.Id, id, StringComparison.Ordinal))
+                {
+                    entry.Active = false;
+                }
+            }
+        }
+
+        private static string CreateRandomId()
+        {
+            Span<byte> bytes = stackalloc byte[12];
+            RandomNumberGenerator.Fill(bytes);
+            return Convert.ToBase64String(bytes)
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_');
+        }
+
+        private static int GetHandleCapacity()
+        {
+            try
+            {
+                var raw = Environment.GetEnvironmentVariable("WPFPILOT_AGENT_MAX_WPF_HANDLES");
+                if (int.TryParse(raw, out var value))
+                {
+                    return Math.Clamp(value, 1, 200_000);
+                }
+            }
+            catch
+            {
+            }
+
+            return 20_000;
+        }
+
+        private sealed class HandleEntry
+        {
+            public string Id { get; set; } = "";
+            public bool Active { get; set; }
+        }
+    }
 
     private readonly record struct WpfTreeFieldSet(
         bool IncludeClassName,
@@ -521,6 +714,76 @@ internal static class WpfVisualTreeInspector
         throw new InvalidOperationException("No WPF windows found to inspect.");
     }
 
+    private static Window? GetContainingWindow(DependencyObject element)
+    {
+        if (element is Window window)
+        {
+            return window;
+        }
+
+        if (element is FrameworkElement fe)
+        {
+            var directWindow = Window.GetWindow(fe);
+            if (directWindow is not null)
+            {
+                return directWindow;
+            }
+        }
+
+        DependencyObject? current = element;
+        var safety = 0;
+        while (current is not null && safety++ < 2048)
+        {
+            if (current is Window currentWindow)
+            {
+                return currentWindow;
+            }
+
+            if (current is FrameworkElement currentFe)
+            {
+                var currentFeWindow = Window.GetWindow(currentFe);
+                if (currentFeWindow is not null)
+                {
+                    return currentFeWindow;
+                }
+            }
+
+            DependencyObject? parent = null;
+            try
+            {
+                if (current is Visual or Visual3D)
+                {
+                    parent = VisualTreeHelper.GetParent(current);
+                }
+            }
+            catch
+            {
+                parent = null;
+            }
+
+            if (parent is null)
+            {
+                try
+                {
+                    parent = current switch
+                    {
+                        FrameworkContentElement fce => fce.Parent,
+                        FrameworkElement frameworkElement => frameworkElement.Parent,
+                        _ => LogicalTreeHelper.GetParent(current)
+                    };
+                }
+                catch
+                {
+                    parent = null;
+                }
+            }
+
+            current = parent;
+        }
+
+        return null;
+    }
+
     private static bool IsVisibleWpf(DependencyObject element)
     {
         try
@@ -923,6 +1186,8 @@ internal static class WpfVisualTreeInspector
 
     private static ElementRef BuildElementRefWpf(DependencyObject element, string xpath, FindReturnFields returnFields)
     {
+        var elementIdWpf = ElementHandles.Register(element);
+
         if (returnFields == FindReturnFields.Standard)
         {
             return new ElementRef(
@@ -931,14 +1196,16 @@ internal static class WpfVisualTreeInspector
                 Name: GetName(element),
                 XPath: xpath,
                 ClassName: element.GetType().FullName,
-                Bounds: GetBoundsWpf(element));
+                Bounds: GetBoundsWpf(element),
+                ElementIdWpf: elementIdWpf);
         }
 
         return new ElementRef(
             Type: element.GetType().Name,
             AutomationId: GetAutomationId(element),
             Name: GetName(element),
-            XPath: xpath);
+            XPath: xpath,
+            ElementIdWpf: elementIdWpf);
     }
 
     public static GetVisualTreeResponse GetVisualTree(GetWpfVisualTreeRequestV2 request, CancellationToken cancellationToken)
@@ -1330,7 +1597,8 @@ internal static class WpfVisualTreeInspector
                     var viewportBounds = TryGetClientBoundsScreen(window);
                     if (viewportBounds is not null && !IsInViewportWpf(element, viewportBounds))
                     {
-                        throw new InvalidOperationException("Element is outside the current viewport (visibleOnly=true).");
+                        throw new InvalidOperationException(
+                            "Element is outside the current viewport (visibleOnly=true). Retry with includeOffViewport=true or call scroll_to_element.");
                     }
                 }
                 return (element, normalized);
@@ -1373,6 +1641,71 @@ internal static class WpfVisualTreeInspector
             .ToArray();
 
         return SelectMatchForLocator(matches, locator);
+    }
+
+    private static (DependencyObject Element, string XPath) ResolveTargetElement(
+        Window window,
+        VisualTreeService treeService,
+        DependencyObject rootObject,
+        string rootXPath,
+        ElementLocator? locator,
+        string? elementId,
+        long? windowHandle,
+        bool visibleOnly,
+        bool includeOffViewport,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode,
+        int maxNodes,
+        CancellationToken cancellationToken,
+        string targetName = "elementId|locator")
+    {
+        var hasLocator = locator is not null;
+        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+        if (hasLocator == hasElementId)
+        {
+            throw new ArgumentException($"invalid_request: provide exactly one of {targetName}.");
+        }
+
+        if (hasElementId)
+        {
+            if (windowHandle is not long hwnd || hwnd == 0)
+            {
+                throw new ArgumentException("invalid_request: windowHandle is required with elementId.");
+            }
+
+            var element = ElementHandles.Resolve(hwnd, elementId!.Trim());
+            var chain = BuildXPathChainForElement(
+                treeService,
+                window,
+                element,
+                visibleOnly: false,
+                maxNodes,
+                cancellationToken);
+
+            var resolved = chain.Count > 0 && ReferenceEquals(chain[^1].Element, element)
+                ? chain[^1]
+                : throw new InvalidOperationException($"wpf_handle_stale:detached: '{elementId!.Trim()}'.");
+
+            if (visibleOnly && !ShouldIncludeWpfElement(resolved.Element, visibleOnly, includeOffViewport, TryGetClientBoundsScreen(window)))
+            {
+                throw new InvalidOperationException("wpf_handle_stale:not_visible: element is not visible under the requested filters.");
+            }
+
+            return resolved;
+        }
+
+        return ResolveLocatorOrThrow(
+            window,
+            treeService,
+            rootObject,
+            rootXPath,
+            locator!,
+            visibleOnly,
+            includeOffViewport,
+            interactiveOnly,
+            interactiveMode,
+            maxNodes,
+            cancellationToken);
     }
 
     private static bool IsIndexOnlyLocator(ElementLocator locator)
@@ -1605,7 +1938,6 @@ internal static class WpfVisualTreeInspector
 
     public static GetPathToElementResponse GetPath(GetWpfPathRequest request, CancellationToken cancellationToken)
     {
-        var locator = request.Locator ?? throw new ArgumentException("get_path requires a locator.");
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
 
         var window = ResolveWindow(request.WindowHandle);
@@ -1620,12 +1952,14 @@ internal static class WpfVisualTreeInspector
             rootObject = ResolveByXPath(treeService, window, rootXPath, request.VisibleOnly, cancellationToken);
         }
 
-        var resolved = ResolveLocatorOrThrow(
+        var resolved = ResolveTargetElement(
             window,
             treeService,
             rootObject,
             rootXPath,
-            locator,
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
             request.VisibleOnly,
             request.IncludeOffViewport,
             interactiveOnly: false,
@@ -1638,7 +1972,6 @@ internal static class WpfVisualTreeInspector
 
     public static ElementRef ResolveElement(ResolveWpfElementRequest request, CancellationToken cancellationToken)
     {
-        var locator = request.Locator ?? throw new ArgumentException("resolve_element requires a locator.");
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
 
         var window = ResolveWindow(request.WindowHandle);
@@ -1653,12 +1986,14 @@ internal static class WpfVisualTreeInspector
             rootObject = ResolveByXPath(treeService, window, rootXPath, request.VisibleOnly, cancellationToken);
         }
 
-        var resolved = ResolveLocatorOrThrow(
+        var resolved = ResolveTargetElement(
             window,
             treeService,
             rootObject,
             rootXPath,
-            locator,
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
             request.VisibleOnly,
             request.IncludeOffViewport,
             request.InteractiveOnly,
@@ -1676,19 +2011,22 @@ internal static class WpfVisualTreeInspector
             throw new ArgumentException("WindowHandle is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(request.XPath))
+        var hasXPath = !string.IsNullOrWhiteSpace(request.XPath);
+        var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
+        if (hasXPath == hasElementId)
         {
-            throw new ArgumentException("XPath is required.");
+            throw new ArgumentException("invalid_request: provide exactly one of elementId|xpath.");
         }
 
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
 
-        var xpath = NormalizeXPath(request.XPath);
         DependencyObject element;
         try
         {
-            element = ResolveByXPath(treeService, window, xpath, visibleOnly: false, cancellationToken);
+            element = hasElementId
+                ? ElementHandles.Resolve(request.WindowHandle, request.ElementId!.Trim())
+                : ResolveByXPath(treeService, window, NormalizeXPath(request.XPath!), visibleOnly: false, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1736,9 +2074,14 @@ internal static class WpfVisualTreeInspector
         }
     }
 
+    public static ReleaseElementResponse ReleaseElement(ReleaseWpfElementRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return new ReleaseElementResponse(ElementHandles.Release(request.ElementId));
+    }
+
     public static HighlightWpfElementResponse HighlightElement(HighlightWpfElementRequest request, CancellationToken cancellationToken)
     {
-        var locator = request.Locator ?? throw new ArgumentException("highlight_element requires a locator.");
         var maxNodes = 2000;
 
         var window = ResolveWindow(request.WindowHandle);
@@ -1753,12 +2096,14 @@ internal static class WpfVisualTreeInspector
             rootObject = ResolveByXPath(treeService, window, rootXPath, visibleOnly: true, cancellationToken);
         }
 
-        var resolved = ResolveLocatorOrThrow(
+        var resolved = ResolveTargetElement(
             window,
             treeService,
             rootObject,
             rootXPath,
-            locator,
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
             visibleOnly: true,
             includeOffViewport: false,
             interactiveOnly: false,
@@ -1914,6 +2259,10 @@ internal static class WpfVisualTreeInspector
 
         var hit = PickWpfDependencyObjectAtPoint(window, request.X, request.Y);
         hit = PromotePickedWpfElement(hit, window);
+        if (ReferenceEquals(hit, window) && !request.ReturnRootOnMiss)
+        {
+            throw new InvalidOperationException($"no_hit_at_point: x={request.X} y={request.Y}.");
+        }
 
         var chain = BuildXPathChainForElement(treeService, window, hit, visibleOnly: true, maxNodes: 200_000, cancellationToken);
         var (pickedElement, pickedXPath) = chain[^1];
@@ -2322,19 +2671,20 @@ internal static class WpfVisualTreeInspector
 
     public static GetBindingInfoResponse GetBindingInfo(GetBindingInfoRequest request, CancellationToken cancellationToken)
     {
-        var locator = request.Locator ?? throw new ArgumentException("get_binding_info requires a locator.");
         var maxProperties = Math.Clamp(request.MaxProperties, 1, 50_000);
         var valueFormat = string.IsNullOrWhiteSpace(request.ValueFormat) ? "string" : request.ValueFormat;
 
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
 
-        var resolved = ResolveLocatorOrThrow(
+        var resolved = ResolveTargetElement(
             window,
             treeService,
             rootObject: window,
             rootXPath: "/Window",
-            locator,
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
             visibleOnly: true,
             includeOffViewport: true,
             interactiveOnly: false,
@@ -2345,13 +2695,7 @@ internal static class WpfVisualTreeInspector
         var element = resolved.Element;
         var xpath = resolved.XPath;
 
-        var elementRef = new ElementRef(
-            Type: element.GetType().Name,
-            AutomationId: GetAutomationId(element),
-            Name: GetName(element),
-            XPath: xpath,
-            ClassName: element.GetType().FullName,
-            Bounds: GetBoundsWpf(element));
+        var elementRef = BuildElementRefWpf(element, xpath, FindReturnFields.Standard);
 
         var properties = new HashSet<DependencyProperty>(GetDependencyPropertiesCached(element.GetType()));
         try
@@ -2764,13 +3108,7 @@ internal static class WpfVisualTreeInspector
 
                 consideredNodes++;
 
-                var elementRef = new ElementRef(
-                    Type: element.GetType().Name,
-                    AutomationId: GetAutomationId(element),
-                    Name: GetName(element),
-                    XPath: xpath,
-                    ClassName: element.GetType().FullName,
-                    Bounds: GetBoundsWpf(element));
+                var elementRef = BuildElementRefWpf(element, xpath, FindReturnFields.Standard);
 
                 var elementFindings = AnalyzeCoverageForElement(element, elementRef, isInteractive);
                 foreach (var finding in elementFindings)
@@ -3522,7 +3860,6 @@ internal static class WpfVisualTreeInspector
 
     public static GetDataContextResponse GetDataContext(GetDataContextRequest request, CancellationToken cancellationToken)
     {
-        var locator = request.Locator ?? throw new ArgumentException("get_data_context requires a locator.");
         var maxDepth = Math.Clamp(request.MaxDepth, 0, 25);
         var maxPropertiesPerObject = Math.Clamp(request.MaxPropertiesPerObject, 1, 5000);
         var maxStringLength = Math.Clamp(request.MaxStringLength, 0, 200_000);
@@ -3530,12 +3867,14 @@ internal static class WpfVisualTreeInspector
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
 
-        var resolved = ResolveLocatorOrThrow(
+        var resolved = ResolveTargetElement(
             window,
             treeService,
             rootObject: window,
             rootXPath: "/Window",
-            locator,
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
             visibleOnly: true,
             includeOffViewport: true,
             interactiveOnly: false,
@@ -3634,7 +3973,6 @@ internal static class WpfVisualTreeInspector
 
     public static GetComputedPropertiesResponse GetComputedProperties(GetComputedPropertiesRequest request, CancellationToken cancellationToken)
     {
-        var locator = request.Locator ?? throw new ArgumentException("get_computed_properties requires a locator.");
         var includeSources = request.IncludeSources;
         var includeDefault = request.IncludeDefault;
         var includeUnset = request.IncludeUnset;
@@ -3644,12 +3982,14 @@ internal static class WpfVisualTreeInspector
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
 
-        var resolved = ResolveLocatorOrThrow(
+        var resolved = ResolveTargetElement(
             window,
             treeService,
             rootObject: window,
             rootXPath: "/Window",
-            locator,
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
             visibleOnly: true,
             includeOffViewport: true,
             interactiveOnly: false,
@@ -3660,13 +4000,7 @@ internal static class WpfVisualTreeInspector
         var element = resolved.Element;
         var xpath = resolved.XPath;
 
-        var elementRef = new ElementRef(
-            Type: element.GetType().Name,
-            AutomationId: GetAutomationId(element),
-            Name: GetName(element),
-            XPath: xpath,
-            ClassName: element.GetType().FullName,
-            Bounds: GetBoundsWpf(element));
+        var elementRef = BuildElementRefWpf(element, xpath, FindReturnFields.Standard);
 
         var propertyNames = request.PropertyNames?
             .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -3794,7 +4128,6 @@ internal static class WpfVisualTreeInspector
 
     public static GetStyleChainResponse GetStyleChain(GetStyleChainRequest request, CancellationToken cancellationToken)
     {
-        var locator = request.Locator ?? throw new ArgumentException("get_style_chain requires a locator.");
         var includeThemeStyle = request.IncludeThemeStyle;
         var includeResourceKeys = request.IncludeResourceKeys;
         var maxBasedOnDepth = Math.Clamp(request.MaxBasedOnDepth, 0, 50);
@@ -3802,12 +4135,14 @@ internal static class WpfVisualTreeInspector
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
 
-        var resolved = ResolveLocatorOrThrow(
+        var resolved = ResolveTargetElement(
             window,
             treeService,
             rootObject: window,
             rootXPath: "/Window",
-            locator,
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
             visibleOnly: true,
             includeOffViewport: true,
             interactiveOnly: false,
@@ -3818,13 +4153,7 @@ internal static class WpfVisualTreeInspector
         var element = resolved.Element;
         var xpath = resolved.XPath;
 
-        var elementRef = new ElementRef(
-            Type: element.GetType().Name,
-            AutomationId: GetAutomationId(element),
-            Name: GetName(element),
-            XPath: xpath,
-            ClassName: element.GetType().FullName,
-            Bounds: GetBoundsWpf(element));
+        var elementRef = BuildElementRefWpf(element, xpath, FindReturnFields.Standard);
 
         var warnings = new List<string>();
         var styles = new List<StyleChainEntry>();
@@ -3911,7 +4240,6 @@ internal static class WpfVisualTreeInspector
 
     public static GetTemplateInfoResponse GetTemplateInfo(GetTemplateInfoRequest request, CancellationToken cancellationToken)
     {
-        var locator = request.Locator ?? throw new ArgumentException("get_template_info requires a locator.");
         var includeNamedElements = request.IncludeNamedElements;
         var includeResourceKeys = request.IncludeResourceKeys;
         var includePartElementRefs = request.IncludePartElementRefs;
@@ -3920,12 +4248,14 @@ internal static class WpfVisualTreeInspector
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
 
-        var resolved = ResolveLocatorOrThrow(
+        var resolved = ResolveTargetElement(
             window,
             treeService,
             rootObject: window,
             rootXPath: "/Window",
-            locator,
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
             visibleOnly: true,
             includeOffViewport: true,
             interactiveOnly: false,
@@ -3936,13 +4266,7 @@ internal static class WpfVisualTreeInspector
         var element = resolved.Element;
         var xpath = resolved.XPath;
 
-        var elementRef = new ElementRef(
-            Type: element.GetType().Name,
-            AutomationId: GetAutomationId(element),
-            Name: GetName(element),
-            XPath: xpath,
-            ClassName: element.GetType().FullName,
-            Bounds: GetBoundsWpf(element));
+        var elementRef = BuildElementRefWpf(element, xpath, FindReturnFields.Standard);
 
         var warnings = new List<string>();
 

@@ -19,7 +19,7 @@ public sealed partial class AutomationController
         int pollIntervalMs = 100,
         int stableMs = 0,
         bool visibleOnly = true,
-        bool includeOffViewport = false,
+        bool includeOffViewport = true,
         bool interactiveOnly = false,
         InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         CancellationToken cancellationToken = default)
@@ -78,15 +78,38 @@ public sealed partial class AutomationController
         }
     }
 
-    public Task<ReleaseElementResponse> ReleaseElementAsync(string elementId)
+    public async Task<ReleaseElementResponse> ReleaseElementAsync(string elementId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(elementId);
         var trace = BeginTraceSpan("release_element");
         try
         {
-            var released = _elementHandles.Release(elementId.Trim());
+            var id = elementId.Trim();
+            _elementHandles.TryGet(id, out var handle);
+            var released = _elementHandles.Release(id);
+            if (released &&
+                handle?.Backend == InspectionBackend.Wpf &&
+                !string.IsNullOrWhiteSpace(handle.WpfAgentElementId))
+            {
+                try
+                {
+                    var client = await EnsureAgentConnectedOrNullAsync(CancellationToken.None).ConfigureAwait(false);
+                    if (client is not null)
+                    {
+                        _ = await client.CallAsync<ReleaseElementResponse>(
+                            "wpf/release_element",
+                            new ReleaseWpfElementRequest(handle.WpfAgentElementId),
+                            CancellationToken.None).ConfigureAwait(false);
+                    }
+                }
+                catch
+                {
+                    // Public handle release should not fail if the in-proc weak handle already disappeared.
+                }
+            }
+
             trace?.SetSummary($"released={released}");
-            return Task.FromResult(new ReleaseElementResponse(released));
+            return new ReleaseElementResponse(released);
         }
         catch (Exception ex)
         {
@@ -238,12 +261,13 @@ public sealed partial class AutomationController
         var elementId = _elementHandles.RegisterWpf(
             hwnd,
             element.XPath,
+            element.ElementIdWpf,
             element.Type,
             element.AutomationId,
             element.Name,
             element.ClassName);
 
-        var elementRef = element with { ElementId = elementId };
+        var elementRef = element with { ElementId = elementId, ElementIdWpf = null };
         return new ResolveElementResponse(InspectionBackend.Wpf, elementRef, hwnd);
     }
 
@@ -288,7 +312,10 @@ public sealed partial class AutomationController
                 var elapsed = Stopwatch.GetElapsedTime(start);
                 if (elapsed.TotalMilliseconds >= timeoutMs)
                 {
-                    throw new InvalidOperationException($"timeout: element not found after {timeoutMs}ms.");
+                    var hint = visibleOnly && !includeOffViewport
+                        ? " Retry with includeOffViewport=true, visibleOnly=false for hidden elements, or call scroll_to_element first."
+                        : "";
+                    throw new InvalidOperationException($"timeout: element not found after {timeoutMs}ms.{hint}");
                 }
 
                 await Task.Delay(pollIntervalMs, cancellationToken);
@@ -405,12 +432,13 @@ public sealed partial class AutomationController
                 var elementId = _elementHandles.RegisterWpf(
                     windowHandle,
                     m.XPath,
+                    m.ElementIdWpf,
                     m.Type,
                     m.AutomationId,
                     m.Name,
                     m.ClassName);
 
-                return m with { ElementId = elementId };
+                return m with { ElementId = elementId, ElementIdWpf = null };
             })
             .ToArray();
 
@@ -458,6 +486,7 @@ public sealed partial class AutomationController
         InspectionBackend Backend,
         long WindowHandle,
         string XPath,
+        string? WpfAgentElementId,
         int[]? UiaRuntimeId,
         string? Type,
         string? AutomationId,
@@ -533,6 +562,29 @@ public sealed partial class AutomationController
             }
         }
 
+        public bool TryUpdateWpfPath(string elementId, string xpath)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(elementId);
+            ArgumentException.ThrowIfNullOrWhiteSpace(xpath);
+
+            lock (_sync)
+            {
+                if (!_entries.TryGetValue(elementId, out var existing))
+                {
+                    return false;
+                }
+
+                if (existing.Backend != InspectionBackend.Wpf)
+                {
+                    return false;
+                }
+
+                _entries[elementId] = existing with { XPath = xpath };
+                Touch(elementId);
+                return true;
+            }
+        }
+
         public string RegisterUia(
             long windowHandle,
             string xpath,
@@ -546,6 +598,7 @@ public sealed partial class AutomationController
                 Backend: InspectionBackend.Uia,
                 WindowHandle: windowHandle,
                 XPath: xpath,
+                WpfAgentElementId: null,
                 UiaRuntimeId: runtimeId,
                 Type: type,
                 AutomationId: automationId,
@@ -558,6 +611,7 @@ public sealed partial class AutomationController
         public string RegisterWpf(
             long windowHandle,
             string xpath,
+            string? wpfAgentElementId,
             string type,
             string? automationId,
             string? name,
@@ -567,6 +621,7 @@ public sealed partial class AutomationController
                 Backend: InspectionBackend.Wpf,
                 WindowHandle: windowHandle,
                 XPath: xpath,
+                WpfAgentElementId: wpfAgentElementId,
                 UiaRuntimeId: null,
                 Type: type,
                 AutomationId: automationId,

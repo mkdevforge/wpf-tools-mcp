@@ -1,0 +1,22 @@
+﻿{
+  Resolve: {
+    BackendUsed: Wpf,
+    Element: {
+      Type: TextBlock,
+      AutomationId: Dynamic_Status,
+      Name: DynamicStatus,
+      XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/TextBlock,
+      ClassName: System.Windows.Controls.TextBlock,
+      Bounds: {
+        X: 290,
+        Y: 303,
+        Width: 520,
+        Height: 16
+      },
+      ElementId: <element>
+    }
+  },
+  InitialPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/TextBlock,
+  CurrentPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/TextBlock[2],
+  DataContextSucceeded: true
+}

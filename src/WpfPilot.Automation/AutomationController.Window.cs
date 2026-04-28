@@ -48,23 +48,14 @@ public sealed partial class AutomationController
             if (request.ClampToVirtualScreen)
             {
                 var virtualScreen = DisplayDiagnostics.GetVirtualScreenBounds();
-                if (virtualScreen.Width > 0 && virtualScreen.Height > 0)
-                {
-                    var clampedW = Math.Min(desiredW, virtualScreen.Width);
-                    var clampedH = Math.Min(desiredH, virtualScreen.Height);
-                    wasClamped |= clampedW != desiredW || clampedH != desiredH;
-                    desiredW = clampedW;
-                    desiredH = clampedH;
-
-                    var maxX = virtualScreen.X + virtualScreen.Width - desiredW;
-                    var maxY = virtualScreen.Y + virtualScreen.Height - desiredH;
-
-                    var clampedX = Math.Clamp(desiredX, virtualScreen.X, maxX);
-                    var clampedY = Math.Clamp(desiredY, virtualScreen.Y, maxY);
-                    wasClamped |= clampedX != desiredX || clampedY != desiredY;
-                    desiredX = clampedX;
-                    desiredY = clampedY;
-                }
+                var clamped = DisplayDiagnostics.ClampBoundsToVirtualScreen(
+                    new Rect(desiredX, desiredY, desiredW, desiredH),
+                    virtualScreen,
+                    out wasClamped);
+                desiredX = clamped.X;
+                desiredY = clamped.Y;
+                desiredW = clamped.Width;
+                desiredH = clamped.Height;
             }
 
             // Restore before resizing if minimized/maximized.

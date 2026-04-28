@@ -254,4 +254,42 @@ public sealed class ScrollSnapshots
             await CloseAppAsync();
         }
     }
+
+    [Test]
+    public async Task TakeScreenshot_element_auto_scrolls_fully_visible_target()
+    {
+        await LaunchScrollAppAsync();
+        try
+        {
+            var resolved = await _mcp.CallToolAsync<ResolveElementResponse>("resolve_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["backend"] = "uia",
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Scroll_TargetButton"
+                },
+                ["includeOffViewport"] = true
+            });
+
+            Assert.That(resolved.Element.ElementId, Is.Not.Null.And.Not.Empty);
+
+            var screenshot = await _mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["elementId"] = resolved.Element.ElementId,
+                ["autoScroll"] = true,
+                ["fullyVisible"] = true
+            });
+
+            Assert.That(File.Exists(screenshot.Path), Is.True, $"Screenshot file was not created: {screenshot.Path}");
+            Assert.That(screenshot.RequestedBounds, Is.Not.Null);
+            Assert.That(screenshot.Width, Is.GreaterThan(0));
+            Assert.That(screenshot.Height, Is.GreaterThan(0));
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
 }

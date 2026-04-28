@@ -193,6 +193,18 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case "wpf/release_element":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<ReleaseWpfElementRequest>(JsonOptions)
+                            ?? throw new InvalidOperationException("Missing request params.");
+
+                        var response = WpfVisualTreeInspector.ReleaseElement(typedRequest);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
                 case "wpf/highlight_element":
                     return await RunOnUiAsync(() =>
                     {
