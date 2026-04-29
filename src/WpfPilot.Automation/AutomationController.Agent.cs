@@ -6,11 +6,13 @@ namespace WpfPilot.Automation;
 
 public sealed partial class AutomationController
 {
+    private static readonly TimeSpan AutoAgentFailureRetryDelay = TimeSpan.FromSeconds(10);
     private readonly object _agentSync = new();
     private AgentClient? _agentClient;
     private string? _agentPipeName;
     private int? _agentPid;
     private string? _agentAutoConnectFailure;
+    private DateTimeOffset? _agentAutoConnectFailureAtUtc;
 
     public bool IsAgentConnected
     {
@@ -822,7 +824,16 @@ public sealed partial class AutomationController
 
             if (!string.IsNullOrWhiteSpace(_agentAutoConnectFailure))
             {
-                return null;
+                var failureAge = _agentAutoConnectFailureAtUtc is { } recordedAt
+                    ? DateTimeOffset.UtcNow - recordedAt
+                    : AutoAgentFailureRetryDelay;
+                if (failureAge < AutoAgentFailureRetryDelay)
+                {
+                    return null;
+                }
+
+                _agentAutoConnectFailure = null;
+                _agentAutoConnectFailureAtUtc = null;
             }
         }
 
@@ -871,6 +882,7 @@ public sealed partial class AutomationController
         lock (_agentSync)
         {
             _agentAutoConnectFailure = null;
+            _agentAutoConnectFailureAtUtc = null;
         }
     }
 
@@ -882,6 +894,7 @@ public sealed partial class AutomationController
             _agentAutoConnectFailure = string.IsNullOrWhiteSpace(message)
                 ? ex.GetType().Name
                 : message.Trim();
+            _agentAutoConnectFailureAtUtc = DateTimeOffset.UtcNow;
         }
     }
 
@@ -967,6 +980,7 @@ public sealed partial class AutomationController
             _agentPipeName = null;
             _agentPid = null;
             _agentAutoConnectFailure = null;
+            _agentAutoConnectFailureAtUtc = null;
         }
 
         if (client is not null)

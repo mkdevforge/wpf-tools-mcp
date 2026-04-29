@@ -72,7 +72,7 @@ public sealed partial class AutomationController
             catch (InvalidOperationException ex) when (hasElementId &&
                                                       resolvedElementId is not null &&
                                                       backend == InspectionBackend.Wpf &&
-                                                      ex.Message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase))
+                                                      IsWpfAgentStaleOrNotFound(ex))
             {
                 throw new InvalidOperationException($"stale_element: not_found for '{resolvedElementId}'. Call resolve_element again.");
             }
