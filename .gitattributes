@@ -1,0 +1,19 @@
+* text=auto eol=lf
+
+# Binary files
+*.bmp binary
+*.dll binary
+*.exe binary
+*.gif binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.png binary
+*.pdb binary
+*.snk binary
+*.zip binary
+
+# Windows command scripts are safest with CRLF when added later.
+*.bat text eol=crlf
+*.cmd text eol=crlf
