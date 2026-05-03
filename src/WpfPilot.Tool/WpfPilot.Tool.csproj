@@ -11,14 +11,15 @@
     <Nullable>enable</Nullable>
 
     <PackAsTool>true</PackAsTool>
-    <ToolCommandName>wpfpilot</ToolCommandName>
+    <ToolCommandName>wpf-tools-mcp</ToolCommandName>
 
-    <PackageId>MkDevForge.WpfPilot</PackageId>
+    <PackageId>MkDevForge.WpfToolsMcp</PackageId>
     <Authors>mkdevforge</Authors>
-    <Description>MCP server for inspecting and controlling .NET 8+ WPF apps (Snoop sees, FlaUI acts).</Description>
+    <Title>WPF Tools MCP</Title>
+    <Description>WPF Tools MCP server for inspecting and controlling .NET 8+ WPF apps (Snoop sees, FlaUI acts).</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryType>git</RepositoryType>
-    <RepositoryUrl>https://github.com/mkdevforge/wpf-pilot</RepositoryUrl>
+    <RepositoryUrl>https://github.com/mkdevforge/wpf-tools-mcp</RepositoryUrl>
     <PackageTags>wpf;automation;uia;flaui;snoop;mcp;dotnet-tool</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
 

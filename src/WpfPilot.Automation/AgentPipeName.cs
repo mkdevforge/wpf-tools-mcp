@@ -14,12 +14,11 @@ internal static class AgentPipeName
         {
             var startTimeUtc = process.StartTime.ToUniversalTime();
             var startStamp = startTimeUtc.ToFileTimeUtc();
-            return $"WpfPilot.Agent.{pid}.{startStamp}";
+            return $"WpfToolsMcp.Agent.{pid}.{startStamp}";
         }
         catch
         {
-            return $"WpfPilot.Agent.{pid}";
+            return $"WpfToolsMcp.Agent.{pid}";
         }
     }
 }
-

@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-WpfPilot is MIT-licensed for original project code (`LICENSE`), and it redistributes third-party components under their own licenses.
+WPF Tools MCP is MIT-licensed for original project code (`LICENSE`), and it redistributes third-party components under their own licenses.
 
 ## Snoop (Phase 2 inspection/injection payload)
 

@@ -6,7 +6,7 @@ Goal: make sure `highlight_element` works reliably (incl. multi-monitor), and th
 
 - Windows 10/11
 - A WPF app to test against (recommended: any of the `src/WpfPilot.TestApp.*` projects, or your own app)
-- An MCP client wired up to the `wpfpilot` MCP server (e.g., Codex/Claude Desktop/etc.)
+- An MCP client wired up to the `wpf-tools-mcp` MCP server (e.g., Codex/Claude Desktop/etc.)
 
 ## 1) Baseline: UIA overlay highlight (no agent)
 
@@ -58,4 +58,3 @@ Expected:
 Expected:
 - No failures due to negative coordinates
 - `MethodUsed` remains consistent (`wpf_agent_mapped` when agent is connected; `win32_overlay` otherwise)
-

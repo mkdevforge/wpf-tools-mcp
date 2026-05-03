@@ -68,7 +68,7 @@ public sealed partial class AutomationController
 
         var stoppedAt = DateTime.UtcNow;
         var path = string.IsNullOrWhiteSpace(outputPath)
-            ? Path.Combine(Path.GetTempPath(), $"wpfpilot-trace-{traceId}.json")
+            ? Path.Combine(Path.GetTempPath(), $"wpf-tools-mcp-trace-{traceId}.json")
             : outputPath.Trim();
 
         var directory = Path.GetDirectoryName(path);

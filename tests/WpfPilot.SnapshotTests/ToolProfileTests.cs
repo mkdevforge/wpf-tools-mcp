@@ -661,7 +661,7 @@ public sealed class ToolProfileTests
     private static string CopyServerWithoutPhase2Payload(string serverExe)
     {
         var sourceDir = Path.GetDirectoryName(serverExe)!;
-        var destinationDir = Path.Combine(Path.GetTempPath(), "wpfpilot-no-agent-" + Guid.NewGuid().ToString("N"));
+        var destinationDir = Path.Combine(Path.GetTempPath(), "wpf-tools-mcp-no-agent-" + Guid.NewGuid().ToString("N"));
         CopyDirectory(sourceDir, destinationDir, skipPhase2Payload: true);
         return Path.Combine(destinationDir, Path.GetFileName(serverExe));
     }

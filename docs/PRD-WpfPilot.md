@@ -1,4 +1,4 @@
-# WpfPilot — WPF UI Agent MCP Server
+# WPF Tools MCP — WPF UI Agent MCP Server
 
 ## Problem
 
@@ -32,7 +32,7 @@ The injected agent (`WpfPilot.Agent`) is a thin assembly that:
 4. Calls Snoop.Core's inspection classes, wraps results in DTOs
 5. Serializes and returns results over the pipe
 
-## Repository: `wpf-pilot`
+## Repository: `wpf-tools-mcp`
 
 **Organization:** mkdevforge  
 **License:** MIT  

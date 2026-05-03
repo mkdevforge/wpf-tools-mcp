@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 if (!OperatingSystem.IsWindows())
 {
-    Console.Error.WriteLine("wpfpilot is only supported on Windows.");
+    Console.Error.WriteLine("wpf-tools-mcp is only supported on Windows.");
     return 1;
 }
 
@@ -47,4 +47,3 @@ static int Run(string fileName, string workingDirectory, string[] args)
     process.WaitForExit();
     return process.ExitCode;
 }
-

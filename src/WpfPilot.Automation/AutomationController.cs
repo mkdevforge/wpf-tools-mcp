@@ -1717,7 +1717,7 @@ public sealed partial class AutomationController : IDisposable
 
         if (string.IsNullOrWhiteSpace(screenshotDirectory))
         {
-            screenshotDirectory = Path.Combine(Path.GetTempPath(), "wpfpilot", "screenshots");
+            screenshotDirectory = Path.Combine(Path.GetTempPath(), "wpf-tools-mcp", "screenshots");
         }
 
         Directory.CreateDirectory(screenshotDirectory);
@@ -6928,7 +6928,7 @@ public sealed partial class AutomationController : IDisposable
 
         try
         {
-            Console.Error.WriteLine($"[WpfPilot:screenshot] {message}");
+            Console.Error.WriteLine($"[WpfToolsMcp:screenshot] {message}");
         }
         catch
         {

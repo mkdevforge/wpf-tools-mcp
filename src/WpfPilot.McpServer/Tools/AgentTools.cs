@@ -8,7 +8,7 @@ namespace WpfPilot.McpServer.Tools;
 [McpServerToolType]
 public static class AgentTools
 {
-    [McpServerTool(Name = "inject_agent"), Description("Inject the WpfPilot in-process inspection agent (Snoop-based) into the attached application.")]
+    [McpServerTool(Name = "inject_agent"), Description("Inject the WPF Tools MCP in-process inspection agent (Snoop-based) into the attached application.")]
     public static Task<InjectAgentResponse> InjectAgent(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

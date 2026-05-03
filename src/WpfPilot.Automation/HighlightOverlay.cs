@@ -86,7 +86,7 @@ internal static class HighlightOverlay
             var thread = new Thread(ThreadMain)
             {
                 IsBackground = true,
-                Name = "WpfPilot.HighlightOverlay"
+                Name = "WpfToolsMcp.HighlightOverlay"
             };
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
@@ -185,7 +185,7 @@ internal static class HighlightOverlay
             {
                 TryEnablePerMonitorDpiAwareness();
 
-                var className = "WpfPilotHighlightOverlay_" + GetStableRandomSuffix();
+                var className = "WpfToolsMcpHighlightOverlay_" + GetStableRandomSuffix();
                 var windowClass = new WNDCLASSEX
                 {
                     cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
@@ -203,7 +203,7 @@ internal static class HighlightOverlay
                 var hwnd = CreateWindowEx(
                     WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
                     className,
-                    "WpfPilot Highlight Overlay",
+                    "WPF Tools MCP Highlight Overlay",
                     WS_POPUP,
                     0,
                     0,

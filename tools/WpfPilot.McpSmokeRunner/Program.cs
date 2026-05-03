@@ -276,7 +276,7 @@ try
                 {
                     ["sessionId"] = sessionId,
                     ["locator"] = new JsonObject { ["xpath"] = node.XPath },
-                    ["text"] = $"WpfPilotSmoke {DateTimeOffset.Now:HHmmss}",
+                    ["text"] = $"WpfToolsMcpSmoke {DateTimeOffset.Now:HHmmss}",
                     ["windowHandle"] = main.Handle
                 },
                 opts,
@@ -897,7 +897,7 @@ static class Options
     {
         Console.WriteLine(
             """
-WpfPilot MCP smoke runner (black-box)
+WPF Tools MCP smoke runner (black-box)
 
 Usage:
   dotnet run --project tools/WpfPilot.McpSmokeRunner -- [options]
@@ -985,7 +985,7 @@ sealed class McpWrapper : IAsyncDisposable
         {
             Command = serverExePath,
             Arguments = ["--tool-profile", "diagnostics"],
-            Name = "WpfPilot.McpSmokeRunner",
+            Name = "WpfToolsMcp.McpSmokeRunner",
             StandardErrorLines = line =>
             {
                 if (!string.IsNullOrWhiteSpace(line))

@@ -1,6 +1,6 @@
-# WpfPilot
+# WPF Tools MCP
 
-WpfPilot is an **MCP server** that gives AI assistants the ability to **inspect and control running WPF applications**.
+WPF Tools MCP is an **MCP server** that gives AI assistants the ability to **inspect and control running WPF applications**.
 
 - **Interaction (out-of-process):** FlaUI (UIA3)
 - **Deep WPF inspection (in-process):** an injected agent powered by Snoop
@@ -8,14 +8,14 @@ WpfPilot is an **MCP server** that gives AI assistants the ability to **inspect 
 ## Install (dotnet tool)
 
 ```powershell
-dotnet tool install -g MkDevForge.WpfPilot --version 0.1.0-preview.18
-dotnet tool update -g MkDevForge.WpfPilot --version 0.1.0-preview.18
+dotnet tool install -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.19
+dotnet tool update -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.19
 ```
 
 ## Run
 
 ```powershell
-wpfpilot
+wpf-tools-mcp
 ```
 
 The server speaks MCP over **stdio**.
@@ -35,8 +35,8 @@ Example (generic MCP config):
 ```json
 {
   "mcpServers": {
-    "wpfpilot": {
-      "command": "wpfpilot"
+    "wpf-tools-mcp": {
+      "command": "wpf-tools-mcp"
     }
   }
 }
@@ -52,7 +52,7 @@ Example (generic MCP config):
 
 ## Licensing
 
-- WpfPilot source code is licensed under MIT (`LICENSE`).
+- WPF Tools MCP source code is licensed under MIT (`LICENSE`).
 - The packaged Phase 2 payload redistributes Snoop components under Ms-PL.
 - See `THIRD_PARTY_NOTICES.md` and `references/snoopwpf/License.txt`.
 
