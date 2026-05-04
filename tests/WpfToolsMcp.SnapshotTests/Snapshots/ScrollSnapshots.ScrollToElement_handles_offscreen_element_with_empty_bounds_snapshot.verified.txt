@@ -7,7 +7,7 @@
   BeforeBounds: {},
   Scroll: {
     Scrolled: true,
-    MethodUsed: scrollPattern
+    MethodUsed: wpf_bringIntoView
   },
   AfterIsOffscreen: false,
   AfterBounds: {

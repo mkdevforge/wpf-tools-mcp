@@ -11,6 +11,10 @@ public sealed partial class AutomationController
 {
     private readonly ElementHandleStore _elementHandles = new();
 
+    private sealed record ResolvedWpfLocatorTarget(
+        string ElementId,
+        ElementHandle Handle);
+
     public async Task<ResolveElementResponse> ResolveElementAsync(
         InspectionBackend backend,
         ElementLocator locator,
@@ -378,6 +382,102 @@ public sealed partial class AutomationController
 
         var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
         return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ResolvedWpfLocatorTarget?> TryResolveWpfLocatorTargetForAutoAsync(
+        Window window,
+        ElementLocator locator,
+        int timeoutMs,
+        int pollIntervalMs,
+        int stableMs,
+        bool visibleOnly,
+        bool includeOffViewport,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode,
+        CancellationToken cancellationToken)
+    {
+        if (await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false) is null)
+        {
+            return null;
+        }
+
+        var windowHandle = window.Properties.NativeWindowHandle.Value.ToInt64();
+        ElementRef element;
+        try
+        {
+            element = timeoutMs > 0
+                ? await ResolveWpfElementRefWithWaitAsync(
+                    locator,
+                    windowHandle,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    visibleOnly,
+                    includeOffViewport,
+                    interactiveOnly,
+                    interactiveMode,
+                    cancellationToken).ConfigureAwait(false)
+                : await ResolveWpfElementRefAsync(
+                    locator,
+                    windowHandle,
+                    visibleOnly,
+                    includeOffViewport,
+                    interactiveOnly,
+                    interactiveMode,
+                    cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex) when (IsAutoWpfLocatorAmbiguous(ex))
+        {
+            throw new InvalidOperationException(CleanAutoWpfResolveMessage(ex));
+        }
+        catch (InvalidOperationException ex) when (IsAutoWpfLocatorMiss(ex))
+        {
+            return null;
+        }
+
+        var elementId = _elementHandles.RegisterWpf(
+            windowHandle,
+            element.XPath,
+            element.ElementIdWpf,
+            element.Type,
+            element.AutomationId,
+            element.Name,
+            element.ClassName);
+
+        return new ResolvedWpfLocatorTarget(elementId, RequireHandle(elementId));
+    }
+
+    private static bool IsAutoWpfLocatorMiss(InvalidOperationException ex)
+    {
+        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        return message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("timeout: element not found", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAutoWpfLocatorAmbiguous(InvalidOperationException ex)
+    {
+        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        return message.Contains("wpf_resolve:ambiguous:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string CleanAutoWpfResolveMessage(InvalidOperationException ex)
+    {
+        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        var firstLine = message
+            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
+            .FirstOrDefault() ?? message;
+
+        const string prefix = "wpf_resolve:ambiguous:";
+        var index = firstLine.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+        return index >= 0
+            ? firstLine[(index + prefix.Length)..].Trim()
+            : firstLine.Trim();
+    }
+
+    private static bool IsWpfToUiaMappingAmbiguous(InvalidOperationException ex)
+    {
+        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        return message.Contains("maps ambiguously to UIA", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<string?> ResolveWpfRootXPathAsync(

@@ -1,6 +1,1 @@
-﻿Tool 'click_element' failed: An error occurred invoking 'click_element': tool=ClickElement: Locator is ambiguous (found 4). Provide 'index' to disambiguate.
-Candidates:
-  - Button, name='OK', automationId='PrimaryOkButton', bounds=340,215 120x20, enabled=true, offscreen=false
-  - Button, name='OK', bounds=468,215 120x20, enabled=true, offscreen=false
-  - TextBlock, name='OK', bounds=392,217 16x16, enabled=true, offscreen=false
-  - TextBlock, name='OK', bounds=520,217 16x16, enabled=true, offscreen=false
+Tool 'click_element' failed: An error occurred invoking 'click_element': tool=ClickElement: Locator is ambiguous (found 4). Provide 'index' to disambiguate.

@@ -1019,6 +1019,81 @@ internal static class WpfVisualTreeInspector
         }
     }
 
+    private static IEnumerable<string> GetNameSearchValues(DependencyObject target)
+    {
+        return DistinctNonEmpty(GetNameSearchValuesCore(target));
+    }
+
+    private static IEnumerable<string?> GetNameSearchValuesCore(DependencyObject target)
+    {
+        yield return GetName(target);
+
+        string? automationName = null;
+        try
+        {
+            automationName = AutomationProperties.GetName(target);
+        }
+        catch
+        {
+        }
+        yield return automationName;
+
+        switch (target)
+        {
+            case TextBlock textBlock:
+                yield return textBlock.Text;
+                break;
+            case TextBox textBox:
+                yield return textBox.Text;
+                break;
+            case HeaderedContentControl headered:
+                yield return headered.Header as string;
+                yield return headered.Content as string;
+                break;
+            case ContentControl contentControl:
+                yield return contentControl.Content as string;
+                break;
+        }
+
+        var peer = TryCreateAutomationPeer(target);
+        if (peer is not null)
+        {
+            string? peerName = null;
+            try
+            {
+                peerName = peer.GetName();
+            }
+            catch
+            {
+            }
+            yield return peerName;
+        }
+    }
+
+    private static IEnumerable<string> DistinctNonEmpty(IEnumerable<string?> values)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var value in values)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var trimmed = value.Trim();
+            if (seen.Add(trimmed))
+            {
+                yield return trimmed;
+            }
+        }
+    }
+
+    private static bool NameMatches(DependencyObject element, string expected, StringComparison comparison) =>
+        GetNameSearchValues(element).Any(value => string.Equals(value, expected, comparison));
+
+    private static bool NameContains(DependencyObject element, string expected) =>
+        GetNameSearchValues(element).Any(value => value.IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0);
+
     private static string? GetAutomationId(DependencyObject target)
     {
         try
@@ -1165,8 +1240,7 @@ internal static class WpfVisualTreeInspector
 
         if (!string.IsNullOrWhiteSpace(query.NameEquals))
         {
-            var name = GetName(element);
-            if (!string.Equals(name, query.NameEquals, StringComparison.OrdinalIgnoreCase))
+            if (!NameMatches(element, query.NameEquals, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
@@ -1174,8 +1248,7 @@ internal static class WpfVisualTreeInspector
 
         if (!string.IsNullOrWhiteSpace(query.NameContains))
         {
-            var name = GetName(element) ?? string.Empty;
-            if (name.IndexOf(query.NameContains, StringComparison.OrdinalIgnoreCase) < 0)
+            if (!NameContains(element, query.NameContains))
             {
                 return false;
             }
@@ -1866,7 +1939,7 @@ internal static class WpfVisualTreeInspector
         }
 
         if (!string.IsNullOrWhiteSpace(locator.Name) &&
-            !string.Equals(GetName(element), locator.Name, StringComparison.Ordinal))
+            !NameMatches(element, locator.Name, StringComparison.Ordinal))
         {
             return false;
         }
@@ -1876,8 +1949,7 @@ internal static class WpfVisualTreeInspector
             var expected = locator.NameContains.Trim();
             if (expected.Length > 0)
             {
-                var actual = GetName(element) ?? "";
-                if (actual.IndexOf(expected, StringComparison.OrdinalIgnoreCase) < 0)
+                if (!NameContains(element, expected))
                 {
                     return false;
                 }

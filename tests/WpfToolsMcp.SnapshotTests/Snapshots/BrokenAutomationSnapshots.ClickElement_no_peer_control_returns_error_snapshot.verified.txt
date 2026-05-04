@@ -1,1 +1,0 @@
-﻿Tool 'click_element' failed: An error occurred invoking 'click_element': tool=ClickElement: timeout: element not found after 250ms.

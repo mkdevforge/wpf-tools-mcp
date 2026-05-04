@@ -9,7 +9,7 @@
   },
   Scroll: {
     Scrolled: true,
-    MethodUsed: scrollPattern
+    MethodUsed: wpf_bringIntoView
   },
   AfterBounds: {
     Width: 200,

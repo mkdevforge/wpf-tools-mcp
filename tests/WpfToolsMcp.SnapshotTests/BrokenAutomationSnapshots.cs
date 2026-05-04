@@ -102,33 +102,23 @@ public sealed class BrokenAutomationSnapshots
     }
 
     [Test]
-    public async Task ClickElement_no_peer_control_returns_error_snapshot()
+    public async Task ClickElement_no_peer_control_uses_wpf_locator_snapshot()
     {
         await LaunchBrokenAppAsync();
         try
         {
-            InvalidOperationException? ex = null;
-            try
+            var click = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
             {
-                _ = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
                 {
-                    ["sessionId"] = _sessionId,
-                    ["locator"] = new Dictionary<string, object?>
-                    {
-                        ["className"] = "NoPeerControl"
-                    },
-                    ["timeoutMs"] = 250,
-                    ["pollIntervalMs"] = 50,
-                });
-                Assert.Fail("Expected click_element to fail because NoPeerControl is not exposed via UIA.");
-            }
-            catch (InvalidOperationException caught)
-            {
-                ex = caught;
-            }
+                    ["classNameContains"] = "NoPeerControl"
+                },
+                ["timeoutMs"] = 250,
+                ["pollIntervalMs"] = 50,
+            });
 
-            var message = ex!.Message.Split("--- server stderr", StringSplitOptions.None)[0].TrimEnd();
-            await Verifier.Verify(message);
+            await Verifier.Verify(click);
         }
         finally
         {

@@ -1,0 +1,4 @@
+{
+  Clicked: true,
+  MethodUsed: mouse
+}

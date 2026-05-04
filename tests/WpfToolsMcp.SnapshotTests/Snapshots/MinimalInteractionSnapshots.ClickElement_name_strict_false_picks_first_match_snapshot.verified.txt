@@ -1,7 +1,7 @@
 ﻿{
   Click: {
     Clicked: true,
-    MethodUsed: invoke
+    MethodUsed: mouse
   },
   Status: Clicks: 1
 }

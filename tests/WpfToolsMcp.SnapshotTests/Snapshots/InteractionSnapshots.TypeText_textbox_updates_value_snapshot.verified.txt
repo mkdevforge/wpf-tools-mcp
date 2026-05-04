@@ -1,7 +1,7 @@
 ﻿{
   Typed: {
     Typed: true,
-    MethodUsed: valuePattern
+    MethodUsed: keyboard
   },
   Value: Hello from tests
 }

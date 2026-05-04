@@ -1,18 +1,16 @@
-﻿{
+{
   Succeeded: true,
   State: visible,
   ElapsedMs: -1,
   Attempts: -1,
   LastObservation: {
     Type: TextBlock,
-    AutomationId: ClickStatus,
-    Name: Clicks: 0,
-    XPath: /Window/TextBlock[3],
+    Name: ClickStatus,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/TextBlock[2],
     Bounds: {
       Width: 420,
       Height: 16
     },
-    IsEnabled: true,
-    IsOffscreen: false
+    IsEnabled: true
   }
 }
