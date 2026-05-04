@@ -2198,6 +2198,7 @@ public sealed partial class AutomationController : IDisposable
 
             Window window;
             AutomationElement element;
+            ElementHandle? wpfSourceHandle = null;
 
             var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
@@ -2224,6 +2225,7 @@ public sealed partial class AutomationController : IDisposable
 
                 if (handle.Backend == InspectionBackend.Wpf)
                 {
+                    wpfSourceHandle = handle;
                     element = ResolveUiaElementByWpfHandle(window, controlWalker, rawWalker, elementId, handle, out _);
                 }
                 else if (handle.Backend == InspectionBackend.Uia)
@@ -2257,6 +2259,7 @@ public sealed partial class AutomationController : IDisposable
 
                 if (wpfTarget is not null)
                 {
+                    wpfSourceHandle = wpfTarget.Handle;
                     element = ResolveUiaElementByWpfHandle(window, controlWalker, rawWalker, wpfTarget.ElementId, wpfTarget.Handle, out _);
                 }
                 else
@@ -2307,8 +2310,7 @@ public sealed partial class AutomationController : IDisposable
             var invoke = element.Patterns.Invoke.PatternOrDefault;
             if (invoke is null)
             {
-                throw new InvalidOperationException(
-                    $"InvokePattern not supported for element (ControlType={element.ControlType}, AutomationId={GetAutomationId(element)}, Name={GetName(element)}).");
+                throw CreateInvokePatternNotSupportedException(element, wpfSourceHandle);
             }
 
             try
@@ -2337,6 +2339,24 @@ public sealed partial class AutomationController : IDisposable
         {
             trace?.Dispose();
         }
+    }
+
+    private static InvalidOperationException CreateInvokePatternNotSupportedException(
+        AutomationElement element,
+        ElementHandle? wpfSourceHandle)
+    {
+        var uiaDescription =
+            $"ControlType={element.ControlType}, AutomationId={GetAutomationId(element)}, Name={GetName(element)}";
+
+        if (wpfSourceHandle is null)
+        {
+            return new InvalidOperationException($"InvokePattern not supported for element ({uiaDescription}).");
+        }
+
+        var wpfDescription =
+            $"WpfType={wpfSourceHandle.Type}, AutomationId={wpfSourceHandle.AutomationId}, Name={wpfSourceHandle.Name}";
+        return new InvalidOperationException(
+            $"InvokePattern not supported for WPF element ({wpfDescription}); resolved UIA peer ({uiaDescription}).");
     }
 
     public async Task<TypeTextResponse> TypeTextAsync(

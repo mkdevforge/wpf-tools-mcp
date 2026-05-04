@@ -1,1 +1,1 @@
-﻿Tool 'invoke' failed: An error occurred invoking 'invoke': tool=Invoke: InvokePattern not supported for element (ControlType=Slider, AutomationId=Basic_Slider, Name=).
+Tool 'invoke' failed: An error occurred invoking 'invoke': tool=Invoke: InvokePattern not supported for WPF element (WpfType=Slider, AutomationId=Basic_Slider, Name=); resolved UIA peer (ControlType=Slider, AutomationId=Basic_Slider, Name=).

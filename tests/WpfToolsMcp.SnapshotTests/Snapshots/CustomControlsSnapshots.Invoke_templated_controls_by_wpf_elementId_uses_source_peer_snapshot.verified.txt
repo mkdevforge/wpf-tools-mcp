@@ -1,0 +1,43 @@
+{
+  Button: {
+    Type: Button,
+    AutomationId: Custom_TemplatedButton,
+    Name: TemplatedInvokeButton,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/StackPanel/Button,
+    ClassName: <class>,
+    Bounds: {},
+    ElementId: <element>
+  },
+  Toggle: {
+    Type: ToggleButton,
+    AutomationId: Custom_TemplatedToggleButton,
+    Name: TemplatedInvokeToggleButton,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/StackPanel/ToggleButton,
+    ClassName: <class>,
+    Bounds: {},
+    ElementId: <element>
+  },
+  Radio: {
+    Type: RadioButton,
+    AutomationId: Custom_TemplatedRadioButton,
+    Name: TemplatedInvokeRadioButton,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/StackPanel/RadioButton,
+    ClassName: <class>,
+    Bounds: {},
+    ElementId: <element>
+  },
+  Invokes: {
+    Button: {
+      Invoked: true
+    },
+    Toggle: {
+      Invoked: false,
+      Error: Tool 'invoke' failed: An error occurred invoking 'invoke': tool=Invoke: InvokePattern not supported for WPF element (WpfType=ToggleButton, AutomationId=Custom_TemplatedToggleButton, Name=TemplatedInvokeToggleButton); resolved UIA peer (ControlType=Button, AutomationId=Custom_TemplatedToggleButton, Name=Templated toggle).
+    },
+    Radio: {
+      Invoked: false,
+      Error: Tool 'invoke' failed: An error occurred invoking 'invoke': tool=Invoke: InvokePattern not supported for WPF element (WpfType=RadioButton, AutomationId=Custom_TemplatedRadioButton, Name=TemplatedInvokeRadioButton); resolved UIA peer (ControlType=RadioButton, AutomationId=Custom_TemplatedRadioButton, Name=Templated radio).
+    }
+  },
+  Status: Templated invokes: button=1, toggle=0, radio=0
+}

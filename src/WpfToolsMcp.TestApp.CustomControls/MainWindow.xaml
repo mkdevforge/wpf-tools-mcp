@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:WpfToolsMcp.TestApp.CustomControls"
+        xmlns:primitives="clr-namespace:System.Windows.Controls.Primitives;assembly=PresentationFramework"
         mc:Ignorable="d"
         Title="WPF Tools MCP CustomControls TestApp"
         Width="900"
@@ -16,6 +17,35 @@
         Background="White"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True">
+    <Window.Resources>
+        <ControlTemplate x:Key="TextBlockButtonTemplate" TargetType="{x:Type Button}">
+            <Border Background="#FFEAF7ED"
+                    BorderBrush="#FF3A7D44"
+                    BorderThickness="1"
+                    Padding="10,6">
+                <TextBlock Text="{TemplateBinding Content}" />
+            </Border>
+        </ControlTemplate>
+
+        <ControlTemplate x:Key="TextBlockToggleButtonTemplate" TargetType="{x:Type primitives:ToggleButton}">
+            <Border Background="#FFFFF4D6"
+                    BorderBrush="#FF9C6B14"
+                    BorderThickness="1"
+                    Padding="10,6">
+                <TextBlock Text="{TemplateBinding Content}" />
+            </Border>
+        </ControlTemplate>
+
+        <ControlTemplate x:Key="TextBlockRadioButtonTemplate" TargetType="{x:Type RadioButton}">
+            <Border Background="#FFF4E7FF"
+                    BorderBrush="#FF7040A0"
+                    BorderThickness="1"
+                    Padding="10,6">
+                <TextBlock Text="{TemplateBinding Content}" />
+            </Border>
+        </ControlTemplate>
+    </Window.Resources>
+
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -39,8 +69,33 @@
                        Margin="0,0,0,12" />
 
             <TextBlock Text="This is a UserControl without InvokePattern. click_element should fall back to mouse clicks."
+                       Margin="0,0,0,18"
                        Foreground="Gray" />
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                <Button x:Name="TemplatedInvokeButton"
+                        AutomationProperties.AutomationId="Custom_TemplatedButton"
+                        Content="Templated button"
+                        Template="{StaticResource TextBlockButtonTemplate}"
+                        Click="TemplatedInvokeButton_Click"
+                        Margin="0,0,8,0" />
+                <primitives:ToggleButton x:Name="TemplatedInvokeToggleButton"
+                                         AutomationProperties.AutomationId="Custom_TemplatedToggleButton"
+                                         Content="Templated toggle"
+                                         Template="{StaticResource TextBlockToggleButtonTemplate}"
+                                         Click="TemplatedInvokeToggleButton_Click"
+                                         Margin="0,0,8,0" />
+                <RadioButton x:Name="TemplatedInvokeRadioButton"
+                             AutomationProperties.AutomationId="Custom_TemplatedRadioButton"
+                             Content="Templated radio"
+                             GroupName="TemplatedInvokeControls"
+                             Template="{StaticResource TextBlockRadioButtonTemplate}"
+                             Click="TemplatedInvokeRadioButton_Click" />
+            </StackPanel>
+
+            <TextBlock x:Name="TemplatedStatusText"
+                       AutomationProperties.AutomationId="Custom_TemplatedStatus"
+                       Text="Templated invokes: button=0, toggle=0, radio=0" />
         </StackPanel>
     </Grid>
 </Window>
-
