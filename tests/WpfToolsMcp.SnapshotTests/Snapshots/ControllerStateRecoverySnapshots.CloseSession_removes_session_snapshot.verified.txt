@@ -12,7 +12,18 @@
       ActiveWindowTitle: WPF Tools MCP TestApp,
       CreatedAtUtc: <time>,
       BackendCapabilities: [
-        uia
+        uia,
+        wpf
+      ],
+      BackendCapabilityStates: [
+        {
+          Backend: uia,
+          State: ready
+        },
+        {
+          Backend: wpf,
+          State: ready
+        }
       ]
     }
   ],

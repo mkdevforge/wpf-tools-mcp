@@ -25,6 +25,24 @@ public sealed partial class AutomationController
         }
     }
 
+    public string WpfBackendCapabilityState
+    {
+        get
+        {
+            lock (_agentSync)
+            {
+                if (_agentClient is not null && _agentClient.IsConnected)
+                {
+                    return "ready";
+                }
+
+                return string.IsNullOrWhiteSpace(_agentAutoConnectFailure)
+                    ? "not_initialized"
+                    : "unavailable";
+            }
+        }
+    }
+
     private sealed record WpfAgentTarget(
         long? WindowHandle,
         ElementLocator? Locator,
@@ -354,6 +372,12 @@ public sealed partial class AutomationController
         {
             trace?.Dispose();
         }
+    }
+
+    public async Task<bool> RefreshWpfBackendCapabilityAsync(CancellationToken cancellationToken = default)
+    {
+        var client = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
+        return client is not null;
     }
 
     public async Task<GetBindingInfoResponse> GetBindingInfoAsync(

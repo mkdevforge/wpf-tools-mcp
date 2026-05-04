@@ -20,6 +20,8 @@ public sealed record CloseAppRequest(bool Force = false, int TimeoutMs = 5000);
 
 public sealed record CloseAppResponse(bool Closed);
 
+public sealed record BackendCapabilityState(string Backend, string State);
+
 public sealed record SessionInfo(
     string SessionId,
     int Pid,
@@ -27,7 +29,8 @@ public sealed record SessionInfo(
     long ActiveWindowHandle,
     string ActiveWindowTitle,
     string CreatedAtUtc,
-    IReadOnlyList<string> BackendCapabilities);
+    IReadOnlyList<string> BackendCapabilities,
+    IReadOnlyList<BackendCapabilityState> BackendCapabilityStates);
 
 public sealed record ListSessionsResponse(IReadOnlyList<SessionInfo> Sessions);
 

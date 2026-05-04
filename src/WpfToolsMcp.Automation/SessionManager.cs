@@ -64,14 +64,18 @@ public sealed class SessionManager : IDisposable
         _sessions.Clear();
     }
 
-    public ListSessionsResponse ListSessions()
+    public async Task<ListSessionsResponse> ListSessionsAsync(CancellationToken cancellationToken = default)
     {
         var sessions = _sessions.Values
             .OrderBy(s => s.CreatedAtUtc, StringComparer.Ordinal)
-            .Select(ToSessionInfo)
             .ToArray();
 
-        return new ListSessionsResponse(sessions);
+        foreach (var session in sessions)
+        {
+            await RefreshBackendCapabilitiesAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+
+        return new ListSessionsResponse(sessions.Select(ToSessionInfo).ToArray());
     }
 
     public async Task<LaunchAppResponse> LaunchAppAsync(LaunchAppRequest request, CancellationToken cancellationToken)
@@ -241,10 +245,17 @@ public sealed class SessionManager : IDisposable
         var (handle, title) = session.GetActiveWindow();
 
         var capabilities = new List<string> { "uia" };
+        var wpfState = session.Controller.WpfBackendCapabilityState;
         if (session.Controller.IsAgentConnected)
         {
             capabilities.Add("wpf");
         }
+
+        var capabilityStates = new[]
+        {
+            new BackendCapabilityState("uia", "ready"),
+            new BackendCapabilityState("wpf", wpfState)
+        };
 
         return new SessionInfo(
             SessionId: session.SessionId,
@@ -253,7 +264,25 @@ public sealed class SessionManager : IDisposable
             ActiveWindowHandle: handle,
             ActiveWindowTitle: title,
             CreatedAtUtc: session.CreatedAtUtc,
-            BackendCapabilities: capabilities);
+            BackendCapabilities: capabilities,
+            BackendCapabilityStates: capabilityStates);
+    }
+
+    private static async Task RefreshBackendCapabilitiesAsync(SessionState session, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _ = await session.Controller.RunExclusiveAsync(
+                () => session.Controller.RefreshWpfBackendCapabilityAsync(cancellationToken),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+        }
     }
 
     private static async Task InitializeActiveWindowAsync(SessionState session, CancellationToken cancellationToken)

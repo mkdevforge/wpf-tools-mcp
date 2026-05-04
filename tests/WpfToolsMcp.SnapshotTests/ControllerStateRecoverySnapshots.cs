@@ -90,6 +90,37 @@ public sealed class ControllerStateRecoverySnapshots
     }
 
     [Test]
+    public async Task ListSessions_reports_wpf_backend_immediately_after_launch_snapshot()
+    {
+        var launch = await LaunchTestAppAsync();
+        try
+        {
+            var sessions = await _mcp.CallToolAsync<ListSessionsResponse>("list_sessions");
+            var session = sessions.Sessions.Single(s => s.SessionId == launch.SessionId);
+
+            Assert.That(session.BackendCapabilities, Does.Contain("uia"));
+            Assert.That(session.BackendCapabilities, Does.Contain("wpf"));
+            Assert.That(session.BackendCapabilityStates.Single(s => s.Backend == "wpf").State, Is.EqualTo("ready"));
+
+            await Verifier.Verify(new
+            {
+                Launch = launch with { SessionId = "<session>", Pid = -1 },
+                Session = session with
+                {
+                    SessionId = "<session>",
+                    Pid = -1,
+                    ActiveWindowHandle = 0,
+                    CreatedAtUtc = "<time>"
+                }
+            });
+        }
+        finally
+        {
+            await CloseSessionAsync(launch.SessionId);
+        }
+    }
+
+    [Test]
     public async Task Attach_by_process_name_accepts_dotted_name_with_or_without_exe_suffix()
     {
         var withoutExeSuffix = await AttachByProcessNameAsync(includeExeSuffix: false);

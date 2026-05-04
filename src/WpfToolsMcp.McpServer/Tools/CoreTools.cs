@@ -89,11 +89,11 @@ public static class CoreAppTools
             return sessions.CloseSessionAsync(sessionId, new CloseAppRequest(force), cancellationToken);
         });
 
-    [McpServerTool(Name = "list_sessions"), Description("List active sessions.")]
+    [McpServerTool(Name = "list_sessions"), Description("List active sessions; BackendCapabilities lists confirmed-ready backends, and BackendCapabilityStates reports ready/unavailable/not_initialized.")]
     public static Task<ListSessionsResponse> ListSessions(
         SessionManager sessions,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() => Task.FromResult(sessions.ListSessions()));
+        McpToolErrors.RunAsync(() => sessions.ListSessionsAsync(cancellationToken));
 
     [McpServerTool(Name = "list_windows"), Description("Enumerate top-level windows of the attached process.")]
     public static Task<ListWindowsResponse> ListWindows(

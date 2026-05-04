@@ -58,11 +58,11 @@ public static class AppTools
             return sessions.CloseSessionAsync(sessionId, new CloseAppRequest(force, timeoutMs), cancellationToken);
         });
 
-    [McpServerTool(Name = "list_sessions"), Description("List active sessions.")]
+    [McpServerTool(Name = "list_sessions"), Description("List active sessions; BackendCapabilities lists confirmed-ready backends, and BackendCapabilityStates reports ready/unavailable/not_initialized.")]
     public static Task<ListSessionsResponse> ListSessions(
         SessionManager sessions,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() => Task.FromResult(sessions.ListSessions()));
+        McpToolErrors.RunAsync(() => sessions.ListSessionsAsync(cancellationToken));
 
     [McpServerTool(Name = "list_displays"), Description("List connected displays and the virtual screen bounds (multi-monitor diagnostics).")]
     public static Task<ListDisplaysResponse> ListDisplays(

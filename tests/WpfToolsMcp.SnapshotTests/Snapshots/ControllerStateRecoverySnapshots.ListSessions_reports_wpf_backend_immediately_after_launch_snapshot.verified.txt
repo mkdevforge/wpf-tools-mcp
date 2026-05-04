@@ -1,0 +1,28 @@
+{
+  Launch: {
+    SessionId: <session>,
+    Pid: -1,
+    ProcessName: WpfToolsMcp.TestApp
+  },
+  Session: {
+    SessionId: <session>,
+    Pid: -1,
+    ProcessName: WpfToolsMcp.TestApp,
+    ActiveWindowTitle: WPF Tools MCP TestApp,
+    CreatedAtUtc: <time>,
+    BackendCapabilities: [
+      uia,
+      wpf
+    ],
+    BackendCapabilityStates: [
+      {
+        Backend: uia,
+        State: ready
+      },
+      {
+        Backend: wpf,
+        State: ready
+      }
+    ]
+  }
+}
