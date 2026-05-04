@@ -1,4 +1,4 @@
-{
+﻿{
   Wpf: {
     Type: Button,
     AutomationId: Custom_TemplatedButton,
@@ -17,7 +17,8 @@
     IsEnabled: true,
     IsOffscreen: false,
     IsControlElement: true,
-    IsContentElement: true
+    IsContentElement: true,
+    FlaUiXPath: /Button[1]
   },
   LocatorSuggestions: {
     ByAutomationId: cf.ByAutomationId("Custom_TemplatedButton"),
@@ -26,10 +27,11 @@
     ByControlType: cf.ByControlType(ControlType.Button),
     ByXPath: /Window/Button[1],
     Recommended: byAutomationId,
-    RecommendedReason: AutomationId is present and unique in the UIA tree.
+    RecommendedReason: AutomationId is present and unique in the UIA tree.,
+    ByFlaUiXPath: /Button[1]
   },
   FlaUi: {
     FindFirst: window.FindFirstDescendant(cf => cf.ByAutomationId("Custom_TemplatedButton")),
-    FindFirstByXPath: window.FindFirstByXPath("/Window/Button[1]")
+    FindFirstByXPath: window.FindFirstByXPath("/Button[1]")
   }
 }

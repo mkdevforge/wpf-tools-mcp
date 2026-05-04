@@ -1,4 +1,4 @@
-{
+﻿{
   Wpf: {
     Type: Button,
     AutomationId: Basic_Button,
@@ -16,7 +16,8 @@
     IsEnabled: true,
     IsOffscreen: false,
     IsControlElement: true,
-    IsContentElement: true
+    IsContentElement: true,
+    FlaUiXPath: /Button[1]
   },
   LocatorSuggestions: {
     ByAutomationId: cf.ByAutomationId("Basic_Button"),
@@ -25,10 +26,11 @@
     ByControlType: cf.ByControlType(ControlType.Button),
     ByXPath: /Window/Button[1],
     Recommended: byAutomationId,
-    RecommendedReason: AutomationId is present and unique in the UIA tree.
+    RecommendedReason: AutomationId is present and unique in the UIA tree.,
+    ByFlaUiXPath: /Button[1]
   },
   FlaUi: {
     FindFirst: window.FindFirstDescendant(cf => cf.ByAutomationId("Basic_Button")),
-    FindFirstByXPath: window.FindFirstByXPath("/Window/Button[1]")
+    FindFirstByXPath: window.FindFirstByXPath("/Button[1]")
   }
 }

@@ -177,7 +177,8 @@ public sealed record UiaLocatorIdentity(
     bool IsOffscreen,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HelpText = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsControlElement = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsContentElement = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsContentElement = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FlaUiXPath = null);
 
 public sealed record UiaLocatorSuggestions(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ByAutomationId,
@@ -186,7 +187,8 @@ public sealed record UiaLocatorSuggestions(
     string ByControlType,
     string ByXPath,
     string Recommended,
-    string RecommendedReason);
+    string RecommendedReason,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ByFlaUiXPath = null);
 
 public sealed record FlaUiLocatorSnippets(string FindFirst, string FindFirstByXPath);
 

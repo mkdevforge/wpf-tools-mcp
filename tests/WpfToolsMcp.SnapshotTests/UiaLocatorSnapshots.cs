@@ -1,4 +1,5 @@
 using System.Threading;
+using FlaUI.UIA3;
 using NUnit.Framework;
 using VerifyNUnit;
 using WpfToolsMcp.Contracts;
@@ -12,6 +13,7 @@ public sealed class UiaLocatorSnapshots
 {
     private McpTestContext _mcp = null!;
     private string _sessionId = "";
+    private int _pid;
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -46,6 +48,7 @@ public sealed class UiaLocatorSnapshots
                 }
             });
 
+            AssertFlaUiXPathResolves(result);
             await Verifier.Verify(Scrub(result));
         }
         finally
@@ -69,6 +72,7 @@ public sealed class UiaLocatorSnapshots
                 }
             });
 
+            AssertFlaUiXPathResolves(result);
             await Verifier.Verify(Scrub(result));
         }
         finally
@@ -91,6 +95,7 @@ public sealed class UiaLocatorSnapshots
                 ["elementId"] = button.ElementId
             });
 
+            AssertFlaUiXPathResolves(result);
             await Verifier.Verify(Scrub(result));
         }
         finally
@@ -143,6 +148,7 @@ public sealed class UiaLocatorSnapshots
         });
 
         _sessionId = launch.SessionId;
+        _pid = launch.Pid;
     }
 
     private async Task CloseAppAsync()
@@ -162,6 +168,32 @@ public sealed class UiaLocatorSnapshots
         finally
         {
             _sessionId = "";
+            _pid = 0;
+        }
+    }
+
+    private void AssertFlaUiXPathResolves(GetUiaLocatorsResponse result)
+    {
+        Assert.That(_pid, Is.GreaterThan(0));
+        Assert.That(result.LocatorSuggestions.ByFlaUiXPath, Is.Not.Null.And.Not.Empty);
+
+        using var automation = new UIA3Automation();
+        var app = FlaUI.Core.Application.Attach(_pid);
+        var window = app.GetMainWindow(automation);
+        Assert.That(window, Is.Not.Null);
+
+        var found = window!.FindFirstByXPath(result.LocatorSuggestions.ByFlaUiXPath!);
+        Assert.That(found, Is.Not.Null);
+        var resolved = found!;
+        Assert.That(resolved.ControlType.ToString(), Is.EqualTo(result.Uia.ControlType));
+        if (!string.IsNullOrWhiteSpace(result.Uia.AutomationId))
+        {
+            Assert.That(resolved.Properties.AutomationId.ValueOrDefault, Is.EqualTo(result.Uia.AutomationId));
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.Uia.Name))
+        {
+            Assert.That(resolved.Properties.Name.ValueOrDefault, Is.EqualTo(result.Uia.Name));
         }
     }
 

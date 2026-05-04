@@ -90,6 +90,45 @@ public sealed class ControllerStateRecoverySnapshots
     }
 
     [Test]
+    public async Task ListSessions_marks_externally_exited_session_unavailable_snapshot()
+    {
+        var launch = await LaunchTestAppAsync();
+        try
+        {
+            KillProcessIfRunning(launch.Pid);
+            Assert.That(IsProcessAlive(launch.Pid), Is.False);
+
+            var sessions = await _mcp.CallToolAsync<ListSessionsResponse>("list_sessions");
+            var session = sessions.Sessions.Single(s => s.SessionId == launch.SessionId);
+            var close = await CloseSessionAsync(launch.SessionId);
+
+            Assert.That(session.BackendCapabilities, Does.Not.Contain("uia"));
+            Assert.That(session.BackendCapabilities, Does.Not.Contain("wpf"));
+            Assert.That(session.BackendCapabilityStates.Single(s => s.Backend == "uia").State, Is.EqualTo("unavailable"));
+            Assert.That(session.BackendCapabilityStates.Single(s => s.Backend == "wpf").State, Is.EqualTo("unavailable"));
+            Assert.That(close, Is.Not.Null);
+
+            await Verifier.Verify(new
+            {
+                Launch = launch with { SessionId = "<session>", Pid = -1 },
+                Session = session with
+                {
+                    SessionId = "<session>",
+                    Pid = -1,
+                    ActiveWindowHandle = 0,
+                    CreatedAtUtc = "<time>"
+                },
+                Close = close
+            });
+        }
+        finally
+        {
+            KillProcessIfRunning(launch.Pid);
+            _ = await CloseSessionAsync(launch.SessionId);
+        }
+    }
+
+    [Test]
     public async Task CloseSession_unknown_session_reports_error_snapshot()
     {
         InvalidOperationException? ex = null;

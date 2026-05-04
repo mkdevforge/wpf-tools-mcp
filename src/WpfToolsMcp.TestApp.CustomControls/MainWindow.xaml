@@ -56,6 +56,13 @@
                         IsHitTestVisible="False" />
             </Border>
         </ControlTemplate>
+
+        <ControlTemplate x:Key="EqualBoundsNestedButtonTemplate" TargetType="{x:Type Button}">
+            <Button AutomationProperties.AutomationId="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(AutomationProperties.AutomationId)}"
+                    Content="{TemplateBinding Content}"
+                    Focusable="False"
+                    IsHitTestVisible="False" />
+        </ControlTemplate>
     </Window.Resources>
 
     <Grid Margin="16">
@@ -114,6 +121,10 @@
                     AutomationProperties.AutomationId="Custom_AmbiguousTemplateButton"
                     Content="Ambiguous template button"
                     Template="{StaticResource NestedButtonTemplate}" />
+            <Button x:Name="EqualBoundsAmbiguousTemplateButton"
+                    AutomationProperties.AutomationId="Custom_EqualBoundsAmbiguousTemplateButton"
+                    Content="Equal bounds ambiguous template button"
+                    Template="{StaticResource EqualBoundsNestedButtonTemplate}" />
         </StackPanel>
     </Grid>
 </Window>

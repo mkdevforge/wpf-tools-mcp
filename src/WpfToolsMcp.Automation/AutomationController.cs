@@ -512,16 +512,20 @@ public sealed partial class AutomationController : IDisposable
 
     public Task<CloseAppResponse> CloseAsync(CloseAppRequest request, CancellationToken cancellationToken = default)
     {
-        if (_application is null)
-        {
-            throw new InvalidOperationException("No application is attached. Call launch_app or attach_to_app first.");
-        }
-
         var trace = BeginTraceSpan("close_session");
         try
         {
         var timeout = request.TimeoutMs <= 0 ? 5000 : request.TimeoutMs;
         var application = _application;
+        if (application is null)
+        {
+            var response = new CloseAppResponse(
+                Closed: true,
+                ProcessExited: true,
+                ProcessAlreadyExited: true);
+            trace?.SetSummary($"closed={response.Closed} already_exited=true");
+            return Task.FromResult(response);
+        }
 
         if (!IsApplicationRunning(application))
         {
@@ -1877,9 +1881,10 @@ public sealed partial class AutomationController : IDisposable
         var stableMs = Math.Clamp(request.StableMs, 0, 5000);
 
         Window window;
-        AutomationElement element;
+        AutomationElement? element = null;
 
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+        var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         if (hasElementId)
         {
             var elementId = request.ElementId!.Trim();
@@ -1905,43 +1910,33 @@ public sealed partial class AutomationController : IDisposable
             {
                 await EnsureWpfHandleEnabledOrThrowAsync(elementId, "click_element", cancellationToken).ConfigureAwait(false);
 
-                var bounds = await ResolveWpfBoundsForHandleAsync(
-                    window,
-                    handle,
-                    autoScroll: request.AutoWait,
-                    cancellationToken).ConfigureAwait(false);
-
-                var clickPoint = GetRectCenterPoint(bounds);
-                switch (request.ClickType)
+                if (ShouldUseDirectWpfMouseClick(request))
                 {
-                    case ClickType.Single:
-                        Mouse.LeftClick(clickPoint);
-                        break;
-                    case ClickType.Double:
-                        Mouse.LeftDoubleClick(clickPoint);
-                        break;
-                    case ClickType.Right:
-                        Mouse.RightClick(clickPoint);
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException(nameof(request), $"Unknown clickType '{request.ClickType}'.");
+                    var response = await ClickWpfHandleWithMouseAsync(window, handle, request, cancellationToken).ConfigureAwait(false);
+                    trace?.SetSummary("method=mouse_wpf");
+                    return response;
                 }
 
-                if (UiDelayMs > 0)
+                try
                 {
-                    await Task.Delay(UiDelayMs, cancellationToken);
+                    element = ResolveUiaElementByWpfHandle(window, controlWalker, rawWalker, elementId, handle, out _);
                 }
-
-                trace?.SetSummary("method=mouse_wpf");
-                return new ClickElementResponse(Clicked: true, MethodUsed: "mouse");
+                catch (InvalidOperationException)
+                {
+                    var response = await ClickWpfHandleWithMouseAsync(window, handle, request, cancellationToken).ConfigureAwait(false);
+                    trace?.SetSummary("method=mouse_wpf");
+                    return response;
+                }
             }
 
-            if (handle.Backend != InspectionBackend.Uia)
+            if (handle.Backend == InspectionBackend.Uia)
+            {
+                element = ResolveUiaElementById(window, rawWalker, elementId, out _);
+            }
+            else if (handle.Backend != InspectionBackend.Wpf)
             {
                 throw new InvalidOperationException($"elementId '{elementId}' has unsupported backend '{handle.Backend}'.");
             }
-
-            element = ResolveUiaElementById(window, rawWalker, elementId, out _);
         }
         else
         {
@@ -1967,49 +1962,44 @@ public sealed partial class AutomationController : IDisposable
             {
                 await EnsureWpfHandleEnabledOrThrowAsync(wpfTarget.ElementId, "click_element", cancellationToken).ConfigureAwait(false);
 
-                var bounds = await ResolveWpfBoundsForHandleAsync(
-                    window,
-                    wpfTarget.Handle,
-                    autoScroll: request.AutoWait,
-                    cancellationToken).ConfigureAwait(false);
-
-                var clickPoint = GetRectCenterPoint(bounds);
-                switch (request.ClickType)
+                if (ShouldUseDirectWpfMouseClick(request))
                 {
-                    case ClickType.Single:
-                        Mouse.LeftClick(clickPoint);
-                        break;
-                    case ClickType.Double:
-                        Mouse.LeftDoubleClick(clickPoint);
-                        break;
-                    case ClickType.Right:
-                        Mouse.RightClick(clickPoint);
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException(nameof(request), $"Unknown clickType '{request.ClickType}'.");
+                    var response = await ClickWpfHandleWithMouseAsync(window, wpfTarget.Handle, request, cancellationToken).ConfigureAwait(false);
+                    trace?.SetSummary("method=mouse_wpf");
+                    return response;
                 }
 
-                if (UiDelayMs > 0)
+                try
                 {
-                    await Task.Delay(UiDelayMs, cancellationToken);
+                    element = ResolveUiaElementByWpfHandle(window, controlWalker, rawWalker, wpfTarget.ElementId, wpfTarget.Handle, out _);
                 }
-
-                trace?.SetSummary("method=mouse_wpf");
-                return new ClickElementResponse(Clicked: true, MethodUsed: "mouse");
+                catch (InvalidOperationException)
+                {
+                    var response = await ClickWpfHandleWithMouseAsync(window, wpfTarget.Handle, request, cancellationToken).ConfigureAwait(false);
+                    trace?.SetSummary("method=mouse_wpf");
+                    return response;
+                }
             }
 
-            var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
-            element = request.AutoWait
-                ? await ResolveUiaElementWithWaitAsync(
-                    window,
-                    request.Locator!,
-                    controlWalker,
-                    rawWalker,
-                    timeoutMs,
-                    pollIntervalMs,
-                    ActionKind.Click,
-                    cancellationToken)
-                : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.Click);
+            if (wpfTarget is null)
+            {
+                element = request.AutoWait
+                    ? await ResolveUiaElementWithWaitAsync(
+                        window,
+                        request.Locator!,
+                        controlWalker,
+                        rawWalker,
+                        timeoutMs,
+                        pollIntervalMs,
+                        ActionKind.Click,
+                        cancellationToken)
+                    : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.Click);
+            }
+        }
+
+        if (element is null)
+        {
+            throw new InvalidOperationException("Failed to resolve target element.");
         }
 
         TryScrollIntoView(element);
@@ -2135,6 +2125,46 @@ public sealed partial class AutomationController : IDisposable
             trace?.Dispose();
         }
     }
+
+    private async Task<ClickElementResponse> ClickWpfHandleWithMouseAsync(
+        Window window,
+        ElementHandle handle,
+        ClickElementRequest request,
+        CancellationToken cancellationToken)
+    {
+        var bounds = await ResolveWpfBoundsForHandleAsync(
+            window,
+            handle,
+            autoScroll: request.AutoWait,
+            cancellationToken,
+            throwIfScrollFailed: request.AutoWait).ConfigureAwait(false);
+
+        var clickPoint = GetRectCenterPoint(bounds);
+        switch (request.ClickType)
+        {
+            case ClickType.Single:
+                Mouse.LeftClick(clickPoint);
+                break;
+            case ClickType.Double:
+                Mouse.LeftDoubleClick(clickPoint);
+                break;
+            case ClickType.Right:
+                Mouse.RightClick(clickPoint);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(request), $"Unknown clickType '{request.ClickType}'.");
+        }
+
+        if (UiDelayMs > 0)
+        {
+            await Task.Delay(UiDelayMs, cancellationToken);
+        }
+
+        return new ClickElementResponse(Clicked: true, MethodUsed: "mouse");
+    }
+
+    private static bool ShouldUseDirectWpfMouseClick(ClickElementRequest request) =>
+        request.ClickType != ClickType.Single || request.ClickMode == ClickMode.MouseAlways;
 
     private static bool ShouldAutoPreferInvoke(AutomationElement element)
     {
@@ -2503,7 +2533,8 @@ public sealed partial class AutomationController : IDisposable
                     window,
                     handle,
                     autoScroll: request.AutoWait,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    throwIfScrollFailed: request.AutoWait).ConfigureAwait(false);
 
                 var point = GetRectCenterPoint(bounds);
                 Mouse.LeftClick(point);
@@ -2560,7 +2591,8 @@ public sealed partial class AutomationController : IDisposable
                     window,
                     wpfTarget.Handle,
                     autoScroll: request.AutoWait,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    throwIfScrollFailed: request.AutoWait).ConfigureAwait(false);
 
                 var point = GetRectCenterPoint(bounds);
                 Mouse.LeftClick(point);
@@ -3051,7 +3083,8 @@ public sealed partial class AutomationController : IDisposable
                     window,
                     handle,
                     autoScroll: request.AutoWait,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    throwIfScrollFailed: request.AutoWait).ConfigureAwait(false);
 
                 var point = GetRectCenterPoint(bounds);
                 container = automation.FromPoint(point)
@@ -3148,7 +3181,8 @@ public sealed partial class AutomationController : IDisposable
                     window,
                     itemHandle,
                     autoScroll: request.AutoWait,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    throwIfScrollFailed: request.AutoWait).ConfigureAwait(false);
 
                 var point = GetRectCenterPoint(bounds);
                 item = automation.FromPoint(point)
@@ -3465,7 +3499,8 @@ public sealed partial class AutomationController : IDisposable
                     window,
                     containerHandle,
                     autoScroll: request.AutoWait,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    throwIfScrollFailed: request.AutoWait).ConfigureAwait(false);
 
                 var containerPoint = GetRectCenterPoint(bounds);
                 container = automation.FromPoint(containerPoint)
@@ -3742,7 +3777,8 @@ public sealed partial class AutomationController : IDisposable
                     window,
                     handle,
                     autoScroll: request.AutoWait,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    throwIfScrollFailed: request.AutoWait).ConfigureAwait(false);
                 start = GetRectCenterPoint(bounds);
             }
             else if (handle.Backend == InspectionBackend.Uia)
@@ -3839,7 +3875,8 @@ public sealed partial class AutomationController : IDisposable
                     window,
                     handle,
                     autoScroll: request.AutoWait,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    throwIfScrollFailed: request.AutoWait).ConfigureAwait(false);
                 end = GetRectCenterPoint(bounds);
             }
             else if (handle.Backend == InspectionBackend.Uia)
@@ -8104,21 +8141,31 @@ public sealed partial class AutomationController : IDisposable
 
                     if (HasStableWpfLocator(locator!))
                     {
-                        var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
-                            window,
-                            locator!,
-                            timeoutMs: 0,
-                            pollIntervalMs: 100,
-                            stableMs: 0,
-                            visibleOnly: false,
-                            includeOffViewport: true,
-                            interactiveOnly: false,
-                            interactiveMode: InteractiveMode.Heuristic,
-                            cancellationToken).ConfigureAwait(false);
-
-                        if (wpfTarget is not null)
+                        try
                         {
-                            wpf = CreateWpfLocatorIdentity(wpfTarget.Handle, wpfTarget.ElementId);
+                            var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
+                                window,
+                                locator!,
+                                timeoutMs: 0,
+                                pollIntervalMs: 100,
+                                stableMs: 0,
+                                visibleOnly: false,
+                                includeOffViewport: true,
+                                interactiveOnly: false,
+                                interactiveMode: InteractiveMode.Heuristic,
+                                cancellationToken).ConfigureAwait(false);
+
+                            if (wpfTarget is not null)
+                            {
+                                wpf = CreateWpfLocatorIdentity(wpfTarget.Handle, wpfTarget.ElementId);
+                            }
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch
+                        {
                         }
                     }
                 }
@@ -8150,8 +8197,9 @@ public sealed partial class AutomationController : IDisposable
             }
 
             var allElements = EnumerateSelfAndDescendantsDepthFirst(window, controlWalker).ToArray();
-            var uia = CreateUiaLocatorIdentity(element, uiaXPath);
-            var suggestions = CreateUiaLocatorSuggestions(element, uiaXPath, allElements);
+            var flaUiXPath = ComputeFlaUiXPath(window, element, controlWalker);
+            var uia = CreateUiaLocatorIdentity(element, uiaXPath, flaUiXPath);
+            var suggestions = CreateUiaLocatorSuggestions(element, uiaXPath, flaUiXPath, allElements);
             var flaui = CreateFlaUiSnippets(suggestions);
             var response = new GetUiaLocatorsResponse(wpf, uia, suggestions, flaui, uiaMapping);
             trace?.SetSummary($"{uia.ControlType} {uia.UiaXPath} recommended={suggestions.Recommended}");
@@ -8191,7 +8239,7 @@ public sealed partial class AutomationController : IDisposable
         !string.IsNullOrWhiteSpace(locator.AutomationId) ||
         !string.IsNullOrWhiteSpace(locator.XPath);
 
-    private static UiaLocatorIdentity CreateUiaLocatorIdentity(AutomationElement element, string uiaXPath) =>
+    private static UiaLocatorIdentity CreateUiaLocatorIdentity(AutomationElement element, string uiaXPath, string flaUiXPath) =>
         new(
             ControlType: element.ControlType.ToString(),
             AutomationId: GetAutomationId(element),
@@ -8203,11 +8251,13 @@ public sealed partial class AutomationController : IDisposable
             IsOffscreen: element.IsOffscreen,
             HelpText: NullIfWhiteSpace(TryGetUiaProperty<string>(element, "HelpText")),
             IsControlElement: TryGetUiaProperty<bool>(element, "IsControlElement"),
-            IsContentElement: TryGetUiaProperty<bool>(element, "IsContentElement"));
+            IsContentElement: TryGetUiaProperty<bool>(element, "IsContentElement"),
+            FlaUiXPath: flaUiXPath);
 
     private static UiaLocatorSuggestions CreateUiaLocatorSuggestions(
         AutomationElement element,
         string uiaXPath,
+        string flaUiXPath,
         IReadOnlyCollection<AutomationElement> allElements)
     {
         var controlType = element.ControlType.ToString();
@@ -8276,7 +8326,8 @@ public sealed partial class AutomationController : IDisposable
             ByControlType: byControlType,
             ByXPath: uiaXPath,
             Recommended: recommended,
-            RecommendedReason: reason);
+            RecommendedReason: reason,
+            ByFlaUiXPath: flaUiXPath);
     }
 
     private static FlaUiLocatorSnippets CreateFlaUiSnippets(UiaLocatorSuggestions suggestions)
@@ -8290,7 +8341,7 @@ public sealed partial class AutomationController : IDisposable
             _ => null
         };
 
-        var xpathLiteral = EscapeCSharpString(suggestions.ByXPath);
+        var xpathLiteral = EscapeCSharpString(suggestions.ByFlaUiXPath ?? suggestions.ByXPath);
         return new FlaUiLocatorSnippets(
             FindFirst: condition is null
                 ? $"window.FindFirstByXPath(\"{xpathLiteral}\")"
@@ -9755,6 +9806,65 @@ public sealed partial class AutomationController : IDisposable
         segments.Reverse();
         return "/Window/" + string.Join('/', segments);
     }
+
+    private static string ComputeFlaUiXPath(Window window, AutomationElement element, ITreeWalker walker)
+    {
+        if (AreSameElement(window, element))
+        {
+            return "/";
+        }
+
+        var segments = new List<string>();
+        AutomationElement? current = element;
+
+        while (current is not null && !AreSameElement(current, window))
+        {
+            AutomationElement? parent;
+            try
+            {
+                parent = walker.GetParent(current);
+            }
+            catch
+            {
+                parent = null;
+            }
+
+            if (parent is null)
+            {
+                break;
+            }
+
+            segments.Add(ComputeFlaUiXPathSegment(parent, current, walker));
+            current = parent;
+        }
+
+        segments.Reverse();
+        return segments.Count == 0 ? "/" : "/" + string.Join('/', segments);
+    }
+
+    private static string ComputeFlaUiXPathSegment(AutomationElement parent, AutomationElement child, ITreeWalker walker)
+    {
+        var label = GetFlaUiXPathLabel(child);
+        var siblings = GetChildren(parent, walker)
+            .Where(c => string.Equals(GetFlaUiXPathLabel(c), label, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (siblings.Length <= 1)
+        {
+            return label;
+        }
+
+        var oneBasedIndex = Array.FindIndex(siblings, s => AreSameElement(s, child)) + 1;
+        if (oneBasedIndex <= 0)
+        {
+            return label;
+        }
+
+        return $"{label}[{oneBasedIndex}]";
+    }
+
+    private static string GetFlaUiXPathLabel(AutomationElement element) =>
+        element.ControlType.ToString();
 
     private static string ComputeXPathSegment(AutomationElement parent, AutomationElement child, ITreeWalker walker)
     {

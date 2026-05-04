@@ -1,4 +1,4 @@
-{
+﻿{
   Uia: {
     ControlType: Text,
     Name: TextBox:,
@@ -8,7 +8,8 @@
     IsEnabled: true,
     IsOffscreen: false,
     IsControlElement: true,
-    IsContentElement: true
+    IsContentElement: true,
+    FlaUiXPath: /Text[3]
   },
   LocatorSuggestions: {
     ByName: cf.ByName("TextBox:"),
@@ -16,10 +17,11 @@
     ByControlType: cf.ByControlType(ControlType.Text),
     ByXPath: /Window/TextBlock[3],
     Recommended: byNameAndControlType,
-    RecommendedReason: AutomationId is missing or not unique; Name is unique for this ControlType.
+    RecommendedReason: AutomationId is missing or not unique; Name is unique for this ControlType.,
+    ByFlaUiXPath: /Text[3]
   },
   FlaUi: {
     FindFirst: window.FindFirstDescendant(cf => cf.ByName("TextBox:").And(cf.ByControlType(ControlType.Text))),
-    FindFirstByXPath: window.FindFirstByXPath("/Window/TextBlock[3]")
+    FindFirstByXPath: window.FindFirstByXPath("/Text[3]")
   }
 }

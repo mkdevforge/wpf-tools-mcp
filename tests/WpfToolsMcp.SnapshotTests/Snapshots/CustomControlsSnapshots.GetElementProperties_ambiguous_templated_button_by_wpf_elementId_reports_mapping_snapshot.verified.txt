@@ -1,9 +1,9 @@
-{
+﻿{
   Button: {
     Type: Button,
-    AutomationId: Custom_AmbiguousTemplateButton,
-    Name: AmbiguousTemplateButton,
-    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button,
+    AutomationId: Custom_EqualBoundsAmbiguousTemplateButton,
+    Name: EqualBoundsAmbiguousTemplateButton,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button[2],
     ClassName: <class>,
     Bounds: {},
     ElementId: <element>
@@ -11,13 +11,13 @@
   Properties: {
     Element: {
       ElementType: Button,
-      AutomationId: Custom_AmbiguousTemplateButton,
-      Name: Ambiguous template button,
+      AutomationId: Custom_EqualBoundsAmbiguousTemplateButton,
+      Name: Equal bounds ambiguous template button,
       ClassName: Button,
       Bounds: {},
       IsEnabled: true,
       IsOffscreen: false,
-      XPath: /Window/Button[3]
+      XPath: /Window/Button[4]
     },
     PatternNames: [
       Invoke,
@@ -26,25 +26,25 @@
     ],
     UiaMapping: {
       Ambiguous: true,
-      SelectedXPath: /Window/Button[3],
+      SelectedXPath: /Window/Button[4],
       Candidates: [
         {
           ElementType: Button,
-          AutomationId: Custom_AmbiguousTemplateButton,
-          Name: Ambiguous template button,
+          AutomationId: Custom_EqualBoundsAmbiguousTemplateButton,
+          Name: Equal bounds ambiguous template button,
           ClassName: Button,
           Bounds: {},
-          XPath: /Window/Button[3],
-          Score: 260
+          XPath: /Window/Button[4],
+          Score: 280
         },
         {
           ElementType: Button,
-          AutomationId: Custom_AmbiguousTemplateButton,
-          Name: Ambiguous template button,
+          AutomationId: Custom_EqualBoundsAmbiguousTemplateButton,
+          Name: Equal bounds ambiguous template button,
           ClassName: Button,
           Bounds: {},
-          XPath: /Window/Button[3]/Button,
-          Score: 260
+          XPath: /Window/Button[4]/Button,
+          Score: 280
         }
       ]
     }

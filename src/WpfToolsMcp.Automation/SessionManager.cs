@@ -251,16 +251,25 @@ public sealed class SessionManager : IDisposable
     {
         var (handle, title) = session.GetActiveWindow();
 
-        var capabilities = new List<string> { "uia" };
-        var wpfState = session.Controller.WpfBackendCapabilityState;
-        if (session.Controller.IsAgentConnected)
+        var uiaState = session.Controller.IsAttached ? "ready" : "unavailable";
+        var wpfState = session.Controller.IsAttached
+            ? session.Controller.WpfBackendCapabilityState
+            : "unavailable";
+
+        var capabilities = new List<string>();
+        if (session.Controller.IsAttached)
+        {
+            capabilities.Add("uia");
+        }
+
+        if (session.Controller.IsAttached && session.Controller.IsAgentConnected)
         {
             capabilities.Add("wpf");
         }
 
         var capabilityStates = new[]
         {
-            new BackendCapabilityState("uia", "ready"),
+            new BackendCapabilityState("uia", uiaState),
             new BackendCapabilityState("wpf", wpfState)
         };
 

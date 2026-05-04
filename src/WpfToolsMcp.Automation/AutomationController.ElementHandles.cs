@@ -479,18 +479,16 @@ public sealed partial class AutomationController
     private static ElementLocator CreateWpfHandleRecoveryLocator(ElementHandle handle)
     {
         var typeEquals = string.IsNullOrWhiteSpace(handle.Type) ? null : handle.Type;
-        if (!string.IsNullOrWhiteSpace(handle.AutomationId))
-        {
-            return new ElementLocator(
-                AutomationId: handle.AutomationId,
-                TypeEquals: typeEquals,
-                Strict: true);
-        }
+        var automationId = string.IsNullOrWhiteSpace(handle.AutomationId) ? null : handle.AutomationId;
+        var name = string.IsNullOrWhiteSpace(handle.Name) ? null : handle.Name;
+        var className = string.IsNullOrWhiteSpace(handle.ClassName) ? null : handle.ClassName;
 
-        if (!string.IsNullOrWhiteSpace(handle.Name))
+        if (automationId is not null || name is not null || className is not null)
         {
             return new ElementLocator(
-                Name: handle.Name,
+                AutomationId: automationId,
+                Name: name,
+                ClassName: className,
                 TypeEquals: typeEquals,
                 Strict: true);
         }
@@ -823,10 +821,31 @@ public sealed partial class AutomationController
         if (right > left && bottom > top)
         {
             var intersection = (right - left) * (bottom - top);
-            var smallerArea = Math.Min(candidate.Width * candidate.Height, expected.Width * expected.Height);
-            if (smallerArea > 0 && intersection >= smallerArea * 0.6)
+            var candidateArea = candidate.Width * candidate.Height;
+            var expectedArea = expected.Width * expected.Height;
+            var union = candidateArea + expectedArea - intersection;
+            var iou = union > 0 ? intersection / union : 0;
+            var expectedCoverage = expectedArea > 0 ? intersection / expectedArea : 0;
+            var candidateCoverage = candidateArea > 0 ? intersection / candidateArea : 0;
+
+            if (iou >= 0.85)
             {
-                return 120;
+                return 140;
+            }
+
+            if (iou >= 0.6)
+            {
+                return 100;
+            }
+
+            if (expectedCoverage >= 0.9 && candidateCoverage >= 0.7)
+            {
+                return 80;
+            }
+
+            if (expectedCoverage >= 0.9 || candidateCoverage >= 0.9)
+            {
+                return 25;
             }
         }
 
@@ -837,14 +856,26 @@ public sealed partial class AutomationController
         var distance = Math.Sqrt(
             Math.Pow(candidateCenterX - expectedCenterX, 2) +
             Math.Pow(candidateCenterY - expectedCenterY, 2));
+        var widthSimilarity = Math.Min(candidate.Width, expected.Width) / Math.Max(candidate.Width, expected.Width);
+        var heightSimilarity = Math.Min(candidate.Height, expected.Height) / Math.Max(candidate.Height, expected.Height);
+        var sizeSimilarity = Math.Min(widthSimilarity, heightSimilarity);
 
-        return distance switch
+        if (distance <= 4 && sizeSimilarity >= 0.8)
         {
-            <= 4 => 100,
-            <= 16 => 60,
-            <= 48 => 20,
-            _ => 0
-        };
+            return 100;
+        }
+
+        if (distance <= 16 && sizeSimilarity >= 0.6)
+        {
+            return 60;
+        }
+
+        if (distance <= 48 && sizeSimilarity >= 0.4)
+        {
+            return 20;
+        }
+
+        return 0;
     }
 
     private static bool HasUsableBounds(Rect bounds) =>

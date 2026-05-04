@@ -202,8 +202,8 @@ public sealed class CustomControlsSnapshots
         try
         {
             var button = await FindWpfElementByAutomationIdAndNameAsync(
-                automationId: "Custom_AmbiguousTemplateButton",
-                name: "AmbiguousTemplateButton");
+                automationId: "Custom_EqualBoundsAmbiguousTemplateButton",
+                name: "EqualBoundsAmbiguousTemplateButton");
 
             var properties = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {
@@ -212,7 +212,7 @@ public sealed class CustomControlsSnapshots
             });
 
             Assert.That(properties.Element.ElementType, Is.EqualTo("Button"));
-            Assert.That(properties.Element.AutomationId, Is.EqualTo("Custom_AmbiguousTemplateButton"));
+            Assert.That(properties.Element.AutomationId, Is.EqualTo("Custom_EqualBoundsAmbiguousTemplateButton"));
             Assert.That(properties.UiaMapping, Is.Not.Null);
             Assert.That(properties.UiaMapping!.Ambiguous, Is.True);
             Assert.That(properties.UiaMapping.Candidates, Has.Count.GreaterThan(1));
