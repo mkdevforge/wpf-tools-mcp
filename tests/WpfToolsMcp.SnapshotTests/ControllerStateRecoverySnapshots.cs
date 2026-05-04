@@ -90,6 +90,28 @@ public sealed class ControllerStateRecoverySnapshots
     }
 
     [Test]
+    public async Task CloseSession_unknown_session_reports_error_snapshot()
+    {
+        InvalidOperationException? ex = null;
+        try
+        {
+            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
+            {
+                ["sessionId"] = "missing-session",
+                ["force"] = true,
+                ["timeoutMs"] = 2000
+            });
+        }
+        catch (InvalidOperationException caught)
+        {
+            ex = caught;
+        }
+
+        Assert.That(ex, Is.Not.Null);
+        await Verifier.Verify(ex!.Message.Split("--- server stderr", StringSplitOptions.None)[0].TrimEnd());
+    }
+
+    [Test]
     public async Task ListSessions_reports_wpf_backend_immediately_after_launch_snapshot()
     {
         var launch = await LaunchTestAppAsync();

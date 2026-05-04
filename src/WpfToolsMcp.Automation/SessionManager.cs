@@ -142,7 +142,14 @@ public sealed class SessionManager : IDisposable
 
         try
         {
-            return await session.Controller.RunExclusiveAsync(() => session.Controller.CloseAsync(request, cancellationToken), cancellationToken);
+            var response = await session.Controller.RunExclusiveAsync(
+                () => session.Controller.CloseAsync(request, cancellationToken),
+                cancellationToken).ConfigureAwait(false);
+            return response with
+            {
+                Closed = true,
+                SessionRemoved = true
+            };
         }
         finally
         {

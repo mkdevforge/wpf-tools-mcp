@@ -526,7 +526,10 @@ public sealed partial class AutomationController : IDisposable
         if (!IsApplicationRunning(application))
         {
             Cleanup();
-            var response = new CloseAppResponse(Closed: true);
+            var response = new CloseAppResponse(
+                Closed: true,
+                ProcessExited: true,
+                ProcessAlreadyExited: true);
             trace?.SetSummary($"closed={response.Closed}");
             return Task.FromResult(response);
         }
@@ -540,7 +543,10 @@ public sealed partial class AutomationController : IDisposable
         catch (InvalidOperationException)
         {
             Cleanup();
-            return Task.FromResult(new CloseAppResponse(Closed: true));
+            return Task.FromResult(new CloseAppResponse(
+                Closed: true,
+                ProcessExited: true,
+                ProcessAlreadyExited: true));
         }
 
         if (!closedGracefully && request.Force)
@@ -554,9 +560,12 @@ public sealed partial class AutomationController : IDisposable
             }
         }
 
-        var closed = !IsApplicationRunning(application);
+        var closed = WaitForApplicationExit(application, Math.Max(timeout, 1000));
         Cleanup();
-        var result = new CloseAppResponse(closed);
+        var result = new CloseAppResponse(
+            Closed: closed,
+            ProcessExited: closed,
+            ProcessAlreadyExited: false);
         trace?.SetSummary($"closed={result.Closed} graceful={closedGracefully} force={request.Force}");
         return Task.FromResult(result);
         }
@@ -8026,6 +8035,38 @@ public sealed partial class AutomationController : IDisposable
         {
             return false;
         }
+    }
+
+    private static bool WaitForApplicationExit(Application application, int timeoutMs)
+    {
+        if (!IsApplicationRunning(application))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(application.ProcessId);
+            if (process.HasExited)
+            {
+                return true;
+            }
+
+            if (process.WaitForExit(Math.Clamp(timeoutMs, 50, 60_000)))
+            {
+                return true;
+            }
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
+
+        return !IsApplicationRunning(application);
     }
 
     private UIA3Automation EnsureAutomation() =>

@@ -1,0 +1,1 @@
+Tool 'close_session' failed: An error occurred invoking 'close_session': tool=CloseSession: Unknown sessionId 'missing-session'.

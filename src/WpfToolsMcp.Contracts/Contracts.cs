@@ -18,7 +18,11 @@ public sealed record AttachToAppResponse(string SessionId, int Pid, string Proce
 
 public sealed record CloseAppRequest(bool Force = false, int TimeoutMs = 5000);
 
-public sealed record CloseAppResponse(bool Closed);
+public sealed record CloseAppResponse(
+    bool Closed,
+    bool SessionRemoved = false,
+    bool ProcessExited = false,
+    bool ProcessAlreadyExited = false);
 
 public sealed record BackendCapabilityState(string Backend, string State);
 

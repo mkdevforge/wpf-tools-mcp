@@ -29,7 +29,10 @@
   ],
   FirstProcessAliveBeforeClose: true,
   Close: {
-    Closed: true
+    Closed: true,
+    SessionRemoved: true,
+    ProcessExited: true,
+    ProcessAlreadyExited: false
   },
   FirstProcessAliveAfterClose: false
 }

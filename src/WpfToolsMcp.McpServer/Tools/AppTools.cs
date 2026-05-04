@@ -44,7 +44,7 @@ public static class AppTools
             sessions.AttachToAppAsync(new AttachToAppRequest(pid, processName), cancellationToken));
     }
 
-    [McpServerTool(Name = "close_session"), Description("Close and dispose a session (and close the attached application).")]
+    [McpServerTool(Name = "close_session"), Description("Remove a session and close the attached application; Closed means the session was removed, with process state reported separately.")]
     public static Task<CloseAppResponse> CloseSession(
         SessionManager sessions,
         SubscriptionManager subscriptions,
