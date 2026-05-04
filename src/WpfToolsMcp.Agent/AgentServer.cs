@@ -181,6 +181,18 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case "wpf/set_value":
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<SetWpfValueRequest>(JsonOptions)
+                            ?? new SetWpfValueRequest();
+
+                        var response = WpfVisualTreeInspector.SetValue(typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
                 case "wpf/bring_into_view":
                     return await RunOnUiAsync(() =>
                     {

@@ -1,0 +1,18 @@
+{
+  Resolve: {
+    BackendUsed: Wpf,
+    Element: {
+      Type: Slider,
+      AutomationId: Basic_Slider,
+      XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Slider,
+      ClassName: <class>,
+      Bounds: {},
+      ElementId: <element>
+    }
+  },
+  Set: {
+    Set: true,
+    MethodUsed: wpf_rangeBaseValue
+  },
+  Value: 65.0
+}

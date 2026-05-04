@@ -380,7 +380,8 @@ public sealed record TypeTextResponse(bool Typed, string MethodUsed);
 
 public sealed record SetValueRequest(
     ElementLocator? Locator = null,
-    double Value = 0,
+    double? Value = null,
+    string? Text = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
     long? WindowHandle = null,
     int TimeoutMs = 5000,
@@ -570,6 +571,16 @@ public sealed record BringIntoViewWpfResponse(
     bool BroughtIntoView,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? Bounds = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null);
+
+public sealed record SetWpfValueRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    string? Text = null,
+    double? Value = null,
+    bool VisibleOnly = true,
+    bool IncludeOffViewport = true,
+    int MaxNodes = 2000);
 
 public sealed record HighlightWpfElementRequest(
     long? WindowHandle = null,

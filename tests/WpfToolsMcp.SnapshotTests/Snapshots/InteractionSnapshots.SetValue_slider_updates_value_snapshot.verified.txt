@@ -1,7 +1,7 @@
 ﻿{
   Set: {
     Set: true,
-    MethodUsed: rangeValue
+    MethodUsed: wpf_rangeBaseValue
   },
   Value: 70.0
 }

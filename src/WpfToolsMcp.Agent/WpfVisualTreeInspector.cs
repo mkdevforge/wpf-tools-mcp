@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -2074,6 +2075,75 @@ internal static class WpfVisualTreeInspector
             cancellationToken);
 
         return BuildElementRefWpf(resolved.Element, resolved.XPath, request.ReturnFields);
+    }
+
+    public static SetValueResponse SetValue(SetWpfValueRequest request, CancellationToken cancellationToken)
+    {
+        var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
+        var hasText = request.Text is not null;
+        var hasNumericValue = request.Value.HasValue;
+        if (hasText == hasNumericValue)
+        {
+            throw new ArgumentException("invalid_request: set_value requires exactly one of text OR value.");
+        }
+
+        var window = ResolveWindow(request.WindowHandle);
+        using var treeService = new VisualTreeService();
+
+        var resolved = ResolveTargetElement(
+            window,
+            treeService,
+            rootObject: window,
+            rootXPath: "/Window",
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
+            request.VisibleOnly,
+            request.IncludeOffViewport,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
+            maxNodes,
+            cancellationToken);
+
+        var element = resolved.Element;
+        if (GetIsEnabledWpf(element) is false)
+        {
+            throw new InvalidOperationException($"element_disabled: set_value target WPF type '{element.GetType().Name}' is disabled.");
+        }
+
+        var textValue = hasText
+            ? request.Text!
+            : request.Value!.Value.ToString(CultureInfo.InvariantCulture);
+
+        switch (element)
+        {
+            case TextBox textBox:
+                textBox.Text = textValue;
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_textBoxText");
+            case PasswordBox passwordBox:
+                passwordBox.Password = textValue;
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_passwordBoxPassword");
+            case ComboBox { IsEditable: true } comboBox:
+                comboBox.Text = textValue;
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_comboBoxText");
+            case RangeBase rangeBase when hasNumericValue:
+                var value = request.Value!.Value;
+                if (value < rangeBase.Minimum || value > rangeBase.Maximum)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(request),
+                        $"value {value.ToString(CultureInfo.InvariantCulture)} is outside range [{rangeBase.Minimum.ToString(CultureInfo.InvariantCulture)}, {rangeBase.Maximum.ToString(CultureInfo.InvariantCulture)}] for WPF type '{element.GetType().Name}'.");
+                }
+
+                rangeBase.Value = value;
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_rangeBaseValue");
+        }
+
+        var supported = hasText
+            ? "TextBox.Text, PasswordBox.Password, or editable ComboBox.Text"
+            : "TextBox.Text, PasswordBox.Password, editable ComboBox.Text, or RangeBase.Value";
+        throw new InvalidOperationException(
+            $"set_value_unsupported_wpf_target: WPF type '{element.GetType().Name}' does not expose a supported value target for this input. Supported WPF targets: {supported}.");
     }
 
     public static BringIntoViewWpfResponse BringIntoView(BringIntoViewWpfRequest request, CancellationToken cancellationToken)

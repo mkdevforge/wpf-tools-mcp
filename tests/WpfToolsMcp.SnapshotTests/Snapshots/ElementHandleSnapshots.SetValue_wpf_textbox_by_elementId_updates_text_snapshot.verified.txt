@@ -1,0 +1,18 @@
+{
+  Resolve: {
+    BackendUsed: Wpf,
+    Element: {
+      Type: TextBox,
+      AutomationId: Basic_TextBox,
+      XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/TextBox,
+      ClassName: <class>,
+      Bounds: {},
+      ElementId: <element>
+    }
+  },
+  Set: {
+    Set: true,
+    MethodUsed: wpf_textBoxText
+  },
+  Value: Updated via set_value
+}

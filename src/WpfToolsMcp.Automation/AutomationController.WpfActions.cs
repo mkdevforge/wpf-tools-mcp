@@ -60,6 +60,60 @@ public sealed partial class AutomationController
             cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task<SetValueResponse?> TrySetWpfValueAsync(
+        string publicElementId,
+        ElementHandle handle,
+        SetValueRequest valueRequest,
+        CancellationToken cancellationToken)
+    {
+        var request = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
+            ? new SetWpfValueRequest(
+                WindowHandle: handle.WindowHandle,
+                ElementId: handle.WpfAgentElementId,
+                Text: valueRequest.Text,
+                Value: valueRequest.Value,
+                MaxNodes: 8000)
+            : new SetWpfValueRequest(
+                WindowHandle: handle.WindowHandle,
+                Locator: CreateWpfHandleRecoveryLocator(handle),
+                Text: valueRequest.Text,
+                Value: valueRequest.Value,
+                MaxNodes: 8000);
+
+        var fallbackRequest = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
+            ? request with { Locator = CreateWpfHandleRecoveryLocator(handle), ElementId = null }
+            : null;
+        var target = new WpfAgentTarget(
+            handle.WindowHandle,
+            request.Locator,
+            handle.WpfAgentElementId,
+            publicElementId,
+            fallbackRequest?.Locator,
+            handle);
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await CallWpfAgentTargetAsync<SetValueResponse>(
+                client,
+                "wpf/set_value",
+                request,
+                fallbackRequest,
+                target,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex) when (IsWpfSetValueUnsupported(ex))
+        {
+            return null;
+        }
+    }
+
+    private static bool IsWpfSetValueUnsupported(Exception ex)
+    {
+        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        return message.Contains("set_value_unsupported_wpf_target:", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<BringIntoViewWpfResponse> BringIntoViewWpfAsync(
         long windowHandle,
         string xpath,

@@ -2633,6 +2633,17 @@ public sealed partial class AutomationController : IDisposable
             var timeoutMs = Math.Clamp(request.TimeoutMs, 0, 60_000);
             var pollIntervalMs = Math.Clamp(request.PollIntervalMs, 25, 2000);
             var stableMs = Math.Clamp(request.StableMs, 0, 5000);
+            var hasNumericValue = request.Value.HasValue;
+            var hasTextValue = request.Text is not null;
+            if (hasNumericValue == hasTextValue)
+            {
+                throw new ArgumentException("set_value requires exactly one of: value OR text.");
+            }
+
+            var valueText = hasTextValue
+                ? request.Text!
+                : request.Value!.Value.ToString(CultureInfo.InvariantCulture);
+            var numericValue = request.Value.GetValueOrDefault();
 
             Window window;
             AutomationElement element;
@@ -2661,6 +2672,13 @@ public sealed partial class AutomationController : IDisposable
                 await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
                 if (handle.Backend == InspectionBackend.Wpf)
                 {
+                    var wpfSet = await TrySetWpfValueAsync(elementId, handle, request, cancellationToken).ConfigureAwait(false);
+                    if (wpfSet is not null)
+                    {
+                        trace?.SetSummary($"method={wpfSet.MethodUsed}");
+                        return wpfSet;
+                    }
+
                     element = ResolveUiaElementByWpfHandle(window, controlWalker, rawWalker, elementId, handle, out _);
                 }
                 else if (handle.Backend == InspectionBackend.Uia)
@@ -2692,9 +2710,20 @@ public sealed partial class AutomationController : IDisposable
                     interactiveMode: InteractiveMode.Heuristic,
                     cancellationToken).ConfigureAwait(false);
 
-                element = wpfTarget is not null
-                    ? ResolveUiaElementByWpfHandle(window, controlWalker, rawWalker, wpfTarget.ElementId, wpfTarget.Handle, out _)
-                    : request.AutoWait
+                if (wpfTarget is not null)
+                {
+                    var wpfSet = await TrySetWpfValueAsync(wpfTarget.ElementId, wpfTarget.Handle, request, cancellationToken).ConfigureAwait(false);
+                    if (wpfSet is not null)
+                    {
+                        trace?.SetSummary($"method={wpfSet.MethodUsed}");
+                        return wpfSet;
+                    }
+
+                    element = ResolveUiaElementByWpfHandle(window, controlWalker, rawWalker, wpfTarget.ElementId, wpfTarget.Handle, out _);
+                }
+                else
+                {
+                    element = request.AutoWait
                         ? await ResolveUiaElementWithWaitAsync(
                             window,
                             request.Locator!,
@@ -2705,14 +2734,16 @@ public sealed partial class AutomationController : IDisposable
                             ActionKind.SetValue,
                             cancellationToken)
                         : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.SetValue);
+                }
             }
 
             TryScrollIntoView(element);
             EnsureEnabledOrThrow(element, "set_value");
 
             var triedDrag = false;
-            var preferDrag = element.ControlType == ControlType.Thumb ||
-                             HasMultipleThumbDescendants(element, rawWalker, maxNodesToScan: 5000);
+            var preferDrag = hasNumericValue &&
+                             (element.ControlType == ControlType.Thumb ||
+                              HasMultipleThumbDescendants(element, rawWalker, maxNodesToScan: 5000));
 
             if (request.AutoWait)
             {
@@ -2746,7 +2777,7 @@ public sealed partial class AutomationController : IDisposable
                 if (await TrySetValueByDraggingAsync(
                         element,
                         rawWalker,
-                        request.Value,
+                        numericValue,
                         request.AutoWait,
                         timeoutMs,
                         pollIntervalMs,
@@ -2759,11 +2790,11 @@ public sealed partial class AutomationController : IDisposable
             }
 
             var rangeValue = element.Patterns.RangeValue.PatternOrDefault;
-            if (rangeValue is not null && rangeValue.IsReadOnly == false)
+            if (hasNumericValue && rangeValue is not null && rangeValue.IsReadOnly == false)
             {
                 try
                 {
-                    rangeValue.SetValue(request.Value);
+                    rangeValue.SetValue(numericValue);
                 }
                 catch (COMException ex)
                 {
@@ -2771,7 +2802,7 @@ public sealed partial class AutomationController : IDisposable
                         await TrySetValueByDraggingAsync(
                             element,
                             rawWalker,
-                            request.Value,
+                            numericValue,
                             request.AutoWait,
                             timeoutMs,
                             pollIntervalMs,
@@ -2787,7 +2818,7 @@ public sealed partial class AutomationController : IDisposable
                 {
                     try
                     {
-                        await WaitForRangeValueAsync(rangeValue, expected: request.Value, timeoutMs, pollIntervalMs, cancellationToken);
+                        await WaitForRangeValueAsync(rangeValue, expected: numericValue, timeoutMs, pollIntervalMs, cancellationToken);
                     }
                     catch
                     {
@@ -2795,7 +2826,7 @@ public sealed partial class AutomationController : IDisposable
                             await TrySetValueByDraggingAsync(
                                 element,
                                 rawWalker,
-                                request.Value,
+                                numericValue,
                                 request.AutoWait,
                                 timeoutMs,
                                 pollIntervalMs,
@@ -2823,7 +2854,7 @@ public sealed partial class AutomationController : IDisposable
             {
                 try
                 {
-                    valuePattern.SetValue(request.Value.ToString(CultureInfo.InvariantCulture));
+                    valuePattern.SetValue(valueText);
                 }
                 catch (COMException ex)
                 {
@@ -2833,7 +2864,7 @@ public sealed partial class AutomationController : IDisposable
                 {
                     await WaitForValuePatternTextAsync(
                         valuePattern,
-                        expected: request.Value.ToString(CultureInfo.InvariantCulture),
+                        expected: valueText,
                         timeoutMs,
                         pollIntervalMs,
                         cancellationToken);
@@ -2848,7 +2879,7 @@ public sealed partial class AutomationController : IDisposable
             }
 
             throw new InvalidOperationException(
-                "Element supports neither writable RangeValuePattern nor writable ValuePattern.");
+                $"set_value unsupported for element (ControlType={element.ControlType}, AutomationId={GetAutomationId(element)}, Name={GetName(element)}): supports neither writable RangeValuePattern nor writable ValuePattern for the requested input.");
         }
         catch (Exception ex)
         {

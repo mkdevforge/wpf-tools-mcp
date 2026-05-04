@@ -438,11 +438,12 @@ public static class CoreInteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "set_value"), Description("Set a control value by locator or elementId.")]
+    [McpServerTool(Name = "set_value"), Description("Set a numeric or text value by locator or elementId.")]
     public static Task<SetValueResponse> SetValue(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
-        [Description("Value to set")] double value,
+        [Description("Numeric value to set for range/numeric controls")] double? value = null,
+        [Description("Text value to set for string-valued controls")] string? text = null,
         [Description("Element locator")] CoreElementLocator? locator = null,
         [Description("Element ID")] string? elementId = null,
         CancellationToken cancellationToken = default) =>
@@ -455,6 +456,7 @@ public static class CoreInteractionTools
                     new SetValueRequest(
                         Locator: locator?.ToElementLocator(),
                         Value: value,
+                        Text: text,
                         ElementId: elementId,
                         WindowHandle: hasElementId ? null : effectiveWindowHandle),
                     cancellationToken),

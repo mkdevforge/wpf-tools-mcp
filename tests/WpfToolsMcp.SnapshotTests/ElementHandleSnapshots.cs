@@ -349,6 +349,112 @@ public sealed class ElementHandleSnapshots
     }
 
     [Test]
+    public async Task SetValue_wpf_textbox_by_elementId_updates_text_snapshot()
+    {
+        await LaunchTestAppAsync();
+        try
+        {
+            var textbox = await _mcp.CallToolAsync<ResolveElementResponse>("resolve_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["backend"] = "wpf",
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_TextBox"
+                }
+            });
+
+            Assert.That(textbox.Element.ElementId, Does.StartWith("wpf_"));
+
+            var set = await _mcp.CallToolAsync<SetValueResponse>("set_value", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["elementId"] = textbox.Element.ElementId,
+                ["text"] = "Updated via set_value"
+            });
+
+            var after = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_TextBox"
+                }
+            });
+
+            var value = GetPatternValue(after, "Value", "Value")?.GetValue<string>();
+
+            await Verifier.Verify(new
+            {
+                Resolve = textbox with
+                {
+                    WindowHandleUsed = 0,
+                    Element = ScrubElementRefForSnapshot(textbox.Element)
+                },
+                Set = set,
+                Value = value
+            });
+        }
+        finally
+        {
+            await CloseTestAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task SetValue_wpf_slider_by_elementId_updates_value_snapshot()
+    {
+        await LaunchTestAppAsync();
+        try
+        {
+            var slider = await _mcp.CallToolAsync<ResolveElementResponse>("resolve_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["backend"] = "wpf",
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_Slider"
+                }
+            });
+
+            Assert.That(slider.Element.ElementId, Does.StartWith("wpf_"));
+
+            var set = await _mcp.CallToolAsync<SetValueResponse>("set_value", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["elementId"] = slider.Element.ElementId,
+                ["value"] = 65
+            });
+
+            var after = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_Slider"
+                }
+            });
+
+            var value = GetPatternValue(after, "RangeValue", "Value")?.GetValue<double>();
+
+            await Verifier.Verify(new
+            {
+                Resolve = slider with
+                {
+                    WindowHandleUsed = 0,
+                    Element = ScrubElementRefForSnapshot(slider.Element)
+                },
+                Set = set,
+                Value = value
+            });
+        }
+        finally
+        {
+            await CloseTestAppAsync();
+        }
+    }
+
+    [Test]
     public async Task GetPathToElement_infers_backend_from_elementId_snapshot()
     {
         await LaunchDataGridTestAppAsync();

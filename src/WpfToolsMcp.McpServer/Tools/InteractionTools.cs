@@ -207,11 +207,12 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "set_value"), Description("Set a numeric value (RangeValue/ValuePattern) by locator or elementId.")]
+    [McpServerTool(Name = "set_value"), Description("Set a numeric or text value by locator or elementId.")]
     public static Task<SetValueResponse> SetValue(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
-        [Description("Numeric value to set")] double value,
+        [Description("Numeric value to set for range/numeric controls")] double? value = null,
+        [Description("Text value to set for string-valued controls")] string? text = null,
         [Description("Element locator")] ElementLocator? locator = null,
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
@@ -229,6 +230,7 @@ public static class InteractionTools
                     new SetValueRequest(
                         Locator: locator,
                         Value: value,
+                        Text: text,
                         ElementId: elementId,
                         WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
                         TimeoutMs: timeoutMs,
