@@ -1,0 +1,24 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WpfToolsMcp.Automation/WpfToolsMcp.Automation.csproj" />
+    <Project Path="src/WpfToolsMcp.Agent/WpfToolsMcp.Agent.csproj" />
+    <Project Path="src/WpfToolsMcp.AgentProtocol/WpfToolsMcp.AgentProtocol.csproj" />
+    <Project Path="src/WpfToolsMcp.Contracts/WpfToolsMcp.Contracts.csproj" />
+    <Project Path="src/WpfToolsMcp.McpServer/WpfToolsMcp.McpServer.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp/WpfToolsMcp.TestApp.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.Minimal/WpfToolsMcp.TestApp.Minimal.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.BrokenAutomation/WpfToolsMcp.TestApp.BrokenAutomation.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.CustomControls/WpfToolsMcp.TestApp.CustomControls.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.DataGrid/WpfToolsMcp.TestApp.DataGrid.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.DeeplyNested/WpfToolsMcp.TestApp.DeeplyNested.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.Dialogs/WpfToolsMcp.TestApp.Dialogs.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.DynamicContent/WpfToolsMcp.TestApp.DynamicContent.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.Scroll/WpfToolsMcp.TestApp.Scroll.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.Tabs/WpfToolsMcp.TestApp.Tabs.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.TreeView/WpfToolsMcp.TestApp.TreeView.csproj" />
+    <Project Path="src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj" />
+  </Folder>
+</Solution>

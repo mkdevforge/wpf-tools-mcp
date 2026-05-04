@@ -82,7 +82,7 @@ The main “return later” items are about:
 
 ### Screenshot capture modes (Screen vs PrintWindow vs Auto)
 
-- **Current:** Screenshot capture supports `screen`, `printWindow`, and `auto` (PrintWindow-first then screen fallback). There’s a manual dump test that writes both captures for comparison when `WPF_PILOT_DUMP_SCREENSHOTS=1`.
+- **Current:** Screenshot capture supports `screen`, `printWindow`, and `auto` (PrintWindow-first then screen fallback). There’s a manual dump test that writes both captures for comparison when `WPF_TOOLS_MCP_DUMP_SCREENSHOTS=1`.
 - **Follow-ups:**
   - Decide on default capture mode for “real world” usage (likely `auto`) and ensure documentation/tool schema reflect that expectation.
 

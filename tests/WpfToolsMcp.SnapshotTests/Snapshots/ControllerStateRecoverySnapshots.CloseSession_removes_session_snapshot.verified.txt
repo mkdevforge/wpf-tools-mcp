@@ -1,0 +1,24 @@
+{
+  FirstLaunch: {
+    SessionId: <session>,
+    Pid: -1,
+    ProcessName: WpfToolsMcp.TestApp
+  },
+  SessionsBeforeClose: [
+    {
+      SessionId: <session>,
+      Pid: -1,
+      ProcessName: WpfToolsMcp.TestApp,
+      ActiveWindowTitle: WPF Tools MCP TestApp,
+      CreatedAtUtc: <time>,
+      BackendCapabilities: [
+        uia
+      ]
+    }
+  ],
+  FirstProcessAliveBeforeClose: true,
+  Close: {
+    Closed: true
+  },
+  FirstProcessAliveAfterClose: false
+}

@@ -1,0 +1,4 @@
+{
+  Focused: true,
+  Title: WPF Tools MCP TestApp
+}

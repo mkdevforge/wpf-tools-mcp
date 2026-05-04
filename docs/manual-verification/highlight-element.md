@@ -5,7 +5,7 @@ Goal: make sure `highlight_element` works reliably (incl. multi-monitor), and th
 ## Preconditions
 
 - Windows 10/11
-- A WPF app to test against (recommended: any of the `src/WpfPilot.TestApp.*` projects, or your own app)
+- A WPF app to test against (recommended: any of the `src/WpfToolsMcp.TestApp.*` projects, or your own app)
 - An MCP client wired up to the `wpf-tools-mcp` MCP server (e.g., Codex/Claude Desktop/etc.)
 
 ## 1) Baseline: UIA overlay highlight (no agent)

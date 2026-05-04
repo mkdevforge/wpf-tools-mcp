@@ -26,20 +26,20 @@ jobs:
 
       - name: Restore
         run: |
-          dotnet restore src/WpfPilot.Tool/WpfPilot.Tool.csproj
-          dotnet restore tests/WpfPilot.SnapshotTests/WpfPilot.SnapshotTests.csproj
+          dotnet restore src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj
+          dotnet restore tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj
 
       - name: Build Snoop payloads (Release)
         run: pwsh scripts/build-snoop.ps1 -Configuration Release
 
       - name: Build
-        run: dotnet build src/WpfPilot.Tool/WpfPilot.Tool.csproj -c Release --no-restore
+        run: dotnet build src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj -c Release --no-restore
 
       - name: Test
-        run: dotnet test tests/WpfPilot.SnapshotTests/WpfPilot.SnapshotTests.csproj -c Release --no-restore
+        run: dotnet test tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore
 
       - name: Pack
-        run: dotnet pack src/WpfPilot.Tool/WpfPilot.Tool.csproj -c Release --no-build -o artifacts
+        run: dotnet pack src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj -c Release --no-build -o artifacts
 
       - name: NuGet login (Trusted Publishing / OIDC)
         id: nuget-login

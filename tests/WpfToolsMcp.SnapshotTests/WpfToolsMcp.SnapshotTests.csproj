@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="0.8.0-preview.1" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit.Analyzers" Version="3.9.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+    <PackageReference Include="Verify.ImageMagick" Version="3.8.3" />
+    <PackageReference Include="Verify.NUnit" Version="31.12.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="NUnit.Framework" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WpfToolsMcp.Contracts\WpfToolsMcp.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.AgentProtocol\WpfToolsMcp.AgentProtocol.csproj" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.Automation\WpfToolsMcp.Automation.csproj" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.McpServer\WpfToolsMcp.McpServer.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp\WpfToolsMcp.TestApp.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Minimal\WpfToolsMcp.TestApp.Minimal.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.BrokenAutomation\WpfToolsMcp.TestApp.BrokenAutomation.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.CustomControls\WpfToolsMcp.TestApp.CustomControls.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.DataGrid\WpfToolsMcp.TestApp.DataGrid.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.DeeplyNested\WpfToolsMcp.TestApp.DeeplyNested.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Dialogs\WpfToolsMcp.TestApp.Dialogs.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.DynamicContent\WpfToolsMcp.TestApp.DynamicContent.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Scroll\WpfToolsMcp.TestApp.Scroll.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Tabs\WpfToolsMcp.TestApp.Tabs.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.TreeView\WpfToolsMcp.TestApp.TreeView.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.BindingErrors\WpfToolsMcp.TestApp.BindingErrors.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

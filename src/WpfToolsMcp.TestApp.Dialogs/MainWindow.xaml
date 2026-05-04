@@ -1,0 +1,47 @@
+<Window x:Class="WpfToolsMcp.TestApp.Dialogs.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="WPF Tools MCP Dialogs TestApp"
+        Width="900"
+        Height="650"
+        ResizeMode="NoResize"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        Left="100"
+        Top="100"
+        Background="White"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="WpfToolsMcp.TestApp.Dialogs — Dialogs"
+                   FontSize="24"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <StackPanel Grid.Row="1" Width="520">
+            <Button AutomationProperties.AutomationId="Dialogs_OpenDialog"
+                    Content="Open confirm dialog"
+                    Width="200"
+                    Margin="0,0,0,12"
+                    HorizontalAlignment="Left"
+                    Click="OpenDialog_Click" />
+
+            <TextBlock x:Name="DialogsStatus"
+                       AutomationProperties.AutomationId="Dialogs_Status"
+                       Text="Dialog: (none)"
+                       Margin="0,0,0,12" />
+
+            <TextBlock Text="The confirm dialog is a separate window. Use list_windows + set_active_window + windowHandle to interact."
+                       Foreground="Gray" />
+        </StackPanel>
+    </Grid>
+</Window>

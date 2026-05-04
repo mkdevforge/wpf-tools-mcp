@@ -1,0 +1,15 @@
+{
+  ProcessId: -1,
+  ProcessName: WpfToolsMcp.TestApp,
+  Windows: [
+    {
+      Title: WPF Tools MCP TestApp,
+      Bounds: {
+        Width: 900,
+        Height: 650
+      },
+      IsVisible: true,
+      IsEnabled: true
+    }
+  ]
+}

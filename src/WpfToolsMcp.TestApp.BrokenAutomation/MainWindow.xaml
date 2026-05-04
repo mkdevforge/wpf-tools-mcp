@@ -1,0 +1,46 @@
+<Window x:Class="WpfToolsMcp.TestApp.BrokenAutomation.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:WpfToolsMcp.TestApp.BrokenAutomation"
+        mc:Ignorable="d"
+        Title="WPF Tools MCP BrokenAutomation TestApp"
+        Width="900"
+        Height="650"
+        ResizeMode="NoResize"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        Left="100"
+        Top="100"
+        Background="White"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="WpfToolsMcp.TestApp.BrokenAutomation — UIA Missing Peer"
+                   FontSize="24"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <StackPanel Grid.Row="1" Width="520">
+            <TextBlock Text="The control below intentionally returns null from OnCreateAutomationPeer()."
+                       Foreground="Gray"
+                       Margin="0,0,0,12" />
+
+            <local:NoPeerControl Width="420"
+                                 Height="160"
+                                 Margin="0,0,0,12" />
+
+            <Button Content="Normal Button"
+                    Width="160"
+                    HorizontalAlignment="Left" />
+        </StackPanel>
+    </Grid>
+</Window>
+

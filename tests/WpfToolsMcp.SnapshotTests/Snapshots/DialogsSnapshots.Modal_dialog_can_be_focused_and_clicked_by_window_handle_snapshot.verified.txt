@@ -1,0 +1,52 @@
+{
+  OpenDialog: {
+    Clicked: true,
+    MethodUsed: mouse
+  },
+  WindowsWhileDialogOpen: {
+    ProcessName: WpfToolsMcp.TestApp.Dialogs,
+    Windows: [
+      {
+        Title: WPF Tools MCP Confirm Dialog,
+        Bounds: {
+          Width: 520,
+          Height: 260
+        },
+        IsVisible: true,
+        IsEnabled: true
+      },
+      {
+        Title: WPF Tools MCP Dialogs TestApp,
+        Bounds: {
+          Width: 900,
+          Height: 650
+        },
+        IsVisible: true,
+        IsEnabled: true
+      }
+    ]
+  },
+  Focus: {
+    Focused: true,
+    Title: WPF Tools MCP Confirm Dialog
+  },
+  ClickOk: {
+    Clicked: true,
+    MethodUsed: invoke
+  },
+  Status: Dialog: OK,
+  WindowsAfterClose: {
+    ProcessName: WpfToolsMcp.TestApp.Dialogs,
+    Windows: [
+      {
+        Title: WPF Tools MCP Dialogs TestApp,
+        Bounds: {
+          Width: 900,
+          Height: 650
+        },
+        IsVisible: true,
+        IsEnabled: true
+      }
+    ]
+  }
+}

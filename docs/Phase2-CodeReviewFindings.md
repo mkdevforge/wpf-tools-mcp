@@ -26,8 +26,8 @@ External dependency / setup friction:
 
 - **Overall architecture matches PRD**: out-of-proc interaction via FlaUI and in-proc inspection via an injected agent.
 - **Protocol is simple and testable**: length-prefixed JSON messages with request IDs and explicit `Ok/Error`.
-- **Injection is wired end-to-end** (subject to the GenericInjector binaries being present): MCP tool → `AutomationController` → `Snoop.InjectorLauncher` → `WpfPilot.Agent.EntryPoint.Start(pipeName)` → named pipe server.
-- **Deterministic packaging path**: `WpfPilot.McpServer` copies `agent/` payloads next to the server binary, which makes it easy to resolve assets from `AppContext.BaseDirectory`.
+- **Injection is wired end-to-end** (subject to the GenericInjector binaries being present): MCP tool → `AutomationController` → `Snoop.InjectorLauncher` → `WpfToolsMcp.Agent.EntryPoint.Start(pipeName)` → named pipe server.
+- **Deterministic packaging path**: `WpfToolsMcp.McpServer` copies `agent/` payloads next to the server binary, which makes it easy to resolve assets from `AppContext.BaseDirectory`.
 
 ## High-priority issues / blockers
 
@@ -48,7 +48,7 @@ External dependency / setup friction:
 **Why it matters:** The injected agent loads into the target’s **default** load context. Any dependencies we load can conflict with the app’s own dependencies.
 
 **Current posture:**
-- Agent loads `Snoop.Core.dll` + a small set of WpfPilot assemblies from the payload folder.
+- Agent loads `Snoop.Core.dll` + a small set of WpfToolsMcp assemblies from the payload folder.
 - `EntryPoint` registers `AssemblyLoadContext.Default.Resolving` to load missing dependencies from the agent folder.
 
 **Risk:** As Phase 2 expands (bindings, styles, DataContext materialization), dependency surface area grows and the chance of collision increases.
@@ -59,7 +59,7 @@ External dependency / setup friction:
 
 **Why it matters:** Phase 2’s injection story is only as good as how easy it is to build/copy the injector bits.
 
-**Current posture:** `WpfPilot.McpServer.csproj` copies `Snoop.InjectorLauncher.*` + `Snoop.GenericInjector.*` and also includes `CommandLine.dll` (required by InjectorLauncher at runtime).
+**Current posture:** `WpfToolsMcp.McpServer.csproj` copies `Snoop.InjectorLauncher.*` + `Snoop.GenericInjector.*` and also includes `CommandLine.dll` (required by InjectorLauncher at runtime).
 
 ## Medium-priority issues / improvements
 
@@ -68,15 +68,15 @@ External dependency / setup friction:
 `ProcessArchitectureDetector` is good, but the fallback to `RuntimeInformation.ProcessArchitecture` can be wrong if the API calls fail (it gives *host* architecture, not *target*).
 
 **Code reference:**
-- `src/WpfPilot.Automation/ProcessArchitectureDetector.cs:29`
+- `src/WpfToolsMcp.Automation/ProcessArchitectureDetector.cs:29`
 
 ### Publishing / dotnet tool packaging
 
-**Why it matters:** `WpfPilot.Tool` publishes the MCP server and packages it, and users may also run `dotnet publish` directly. The published output must include the `agent/` + `snoop/` payload folders or `inject_agent` will fail.
+**Why it matters:** `WpfToolsMcp.Tool` publishes the MCP server and packages it, and users may also run `dotnet publish` directly. The published output must include the `agent/` + `snoop/` payload folders or `inject_agent` will fail.
 
-**Previously observed behavior:** `dotnet publish src/WpfPilot.McpServer/WpfPilot.McpServer.csproj -c Debug -o <dir>` produced an output folder with `WpfPilot.McpServer.exe` etc., but **no** `agent/` or `snoop/` folders.
+**Previously observed behavior:** `dotnet publish src/WpfToolsMcp.McpServer/WpfToolsMcp.McpServer.csproj -c Debug -o <dir>` produced an output folder with `WpfToolsMcp.McpServer.exe` etc., but **no** `agent/` or `snoop/` folders.
 
-**Root cause:** `WpfPilot.McpServer.csproj` copies Phase 2 payloads only to `$(OutDir)` after `Build` (`CopyPhase2Assets` target). Publish uses `$(PublishDir)` and does not automatically include arbitrary files placed in `$(OutDir)`.
+**Root cause:** `WpfToolsMcp.McpServer.csproj` copies Phase 2 payloads only to `$(OutDir)` after `Build` (`CopyPhase2Assets` target). Publish uses `$(PublishDir)` and does not automatically include arbitrary files placed in `$(OutDir)`.
 
 **Fix implemented:** Added a publish-time copy step (`AfterTargets="Publish"`) to copy payloads into `$(PublishDir)`.
 
@@ -86,28 +86,28 @@ External dependency / setup friction:
 
 **Previously observed behavior:** `AgentClient.CallRawAsync` used the tool’s cancellation token but did not impose an internal timeout. Many MCP callers won’t cancel, so hung agent calls could hang the server/tool invocation.
 
-**Fix implemented:** Added a default timeout for agent calls (configurable via `WPF_PILOT_AGENT_CALL_TIMEOUT_MS`).
+**Fix implemented:** Added a default timeout for agent calls (configurable via `WPF_TOOLS_MCP_AGENT_CALL_TIMEOUT_MS`).
 
 ### HWND truncation
 
 InjectorLauncher expects `int` hwnd, so we cast `long → int`. This is likely fine on Windows, but if an HWND ever exceeds 32 bits, the value will wrap.
 
 **Code reference:**
-- `src/WpfPilot.Automation/SnoopInjector.cs:37`
+- `src/WpfToolsMcp.Automation/SnoopInjector.cs:37`
 
 ### Connection retry window may be tight
 
 The agent connect retry is ~3s total with short per-attempt timeouts. On slow machines or cold-start JIT, this could be flaky.
 
 **Code reference:**
-- `src/WpfPilot.Automation/AutomationController.Agent.cs:146`
+- `src/WpfToolsMcp.Automation/AutomationController.Agent.cs:146`
 
 ### CleanupAgent blocks synchronously
 
 `CleanupAgent()` calls async dispose synchronously. With concurrent tool calls (known Phase 1 risk), this can deadlock or stall shutdown paths.
 
 **Code reference:**
-- `src/WpfPilot.Automation/AutomationController.Agent.cs:204`
+- `src/WpfToolsMcp.Automation/AutomationController.Agent.cs:204`
 
 ### Concurrency remains a fundamental risk (singleton controller + mutable state)
 
