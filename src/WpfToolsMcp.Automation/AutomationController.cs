@@ -4259,13 +4259,36 @@ public sealed partial class AutomationController : IDisposable
                             IsEnabled: node.IsEnabled,
                             IsOffscreen: null);
 
-                        (satisfied, failureReason) = CheckWaitForStateWpf(
-                            node,
-                            state,
-                            stableMs,
-                            expectedText,
-                            ref lastBounds,
-                            ref stableStartTimestamp);
+                        if (state == WaitForState.NameContains)
+                        {
+                            var computed = await client.CallAsync<GetComputedPropertiesResponse>(
+                                "wpf/get_computed_properties",
+                                new GetComputedPropertiesRequest(
+                                    WindowHandle: windowHandle,
+                                    Locator: new ElementLocator(XPath: currentXPath),
+                                    PropertyNames: ["Name", "Text", "Content", "Header"],
+                                    IncludeSources: false,
+                                    IncludeDefault: false,
+                                    IncludeUnset: true,
+                                    MaxProperties: 8,
+                                    ValueFormat: "string"),
+                                cancellationToken).ConfigureAwait(false);
+
+                            (satisfied, failureReason) = CheckWpfNameContains(
+                                node,
+                                computed.Properties,
+                                expectedText);
+                        }
+                        else
+                        {
+                            (satisfied, failureReason) = CheckWaitForStateWpf(
+                                node,
+                                state,
+                                stableMs,
+                                expectedText,
+                                ref lastBounds,
+                                ref stableStartTimestamp);
+                        }
                     }
                 }
             }
@@ -4408,6 +4431,33 @@ public sealed partial class AutomationController : IDisposable
         }
 
         return (false, "value_not_numeric");
+    }
+
+    private static (bool Satisfied, string? FailureReason) CheckWpfNameContains(
+        TreeNode node,
+        IReadOnlyList<ComputedPropertyInfo> properties,
+        string? expectedText)
+    {
+        if (string.IsNullOrWhiteSpace(expectedText))
+        {
+            return (false, "expected_text_missing");
+        }
+
+        if ((node.Name ?? string.Empty).Contains(expectedText, StringComparison.OrdinalIgnoreCase))
+        {
+            return (true, null);
+        }
+
+        foreach (var property in properties)
+        {
+            if (!string.IsNullOrWhiteSpace(property.Value) &&
+                property.Value.Contains(expectedText, StringComparison.OrdinalIgnoreCase))
+            {
+                return (true, null);
+            }
+        }
+
+        return (false, "name_mismatch");
     }
 
     private enum WaitForState
