@@ -35,7 +35,7 @@
           ClassName: Button,
           Bounds: {},
           XPath: /Window/Button[3],
-          Score: 140
+          Score: 260
         },
         {
           ElementType: Button,
@@ -44,7 +44,7 @@
           ClassName: Button,
           Bounds: {},
           XPath: /Window/Button[3]/Button,
-          Score: 140
+          Score: 260
         }
       ]
     }

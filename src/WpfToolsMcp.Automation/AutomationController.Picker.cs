@@ -305,7 +305,8 @@ public sealed partial class AutomationController
             response.Element.Type,
             response.Element.AutomationId,
             response.Element.Name,
-            response.Element.ClassName);
+            response.Element.ClassName,
+            response.Element.Bounds);
 
         var picked = response.Element with { ElementId = pickedId, ElementIdWpf = null };
 
@@ -322,7 +323,8 @@ public sealed partial class AutomationController
                         a.Type,
                         a.AutomationId,
                         a.Name,
-                        a.ClassName);
+                        a.ClassName,
+                        a.Bounds);
 
                     return a with { ElementId = id, ElementIdWpf = null };
                 })

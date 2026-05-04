@@ -280,7 +280,8 @@ public sealed partial class AutomationController
             element.Type,
             element.AutomationId,
             element.Name,
-            element.ClassName);
+            element.ClassName,
+            element.Bounds);
 
         var elementRef = element with { ElementId = elementId, ElementIdWpf = null };
         return new ResolveElementResponse(InspectionBackend.Wpf, elementRef, hwnd);
@@ -442,7 +443,8 @@ public sealed partial class AutomationController
             element.Type,
             element.AutomationId,
             element.Name,
-            element.ClassName);
+            element.ClassName,
+            element.Bounds);
 
         return new ResolvedWpfLocatorTarget(elementId, RequireHandle(elementId));
     }
@@ -595,7 +597,8 @@ public sealed partial class AutomationController
                     m.Type,
                     m.AutomationId,
                     m.Name,
-                    m.ClassName);
+                    m.ClassName,
+                    m.Bounds);
 
                 return m with { ElementId = elementId, ElementIdWpf = null };
             })
@@ -797,8 +800,55 @@ public sealed partial class AutomationController
             }
         }
 
+        if (handle.Bounds is { } expectedBounds)
+        {
+            score += ScoreBoundsCandidate(ToRect(element.BoundingRectangle), expectedBounds);
+        }
+
         return score;
     }
+
+    private static int ScoreBoundsCandidate(Rect candidate, Rect expected)
+    {
+        if (!HasUsableBounds(candidate) || !HasUsableBounds(expected))
+        {
+            return 0;
+        }
+
+        var left = Math.Max(candidate.X, expected.X);
+        var top = Math.Max(candidate.Y, expected.Y);
+        var right = Math.Min(candidate.X + candidate.Width, expected.X + expected.Width);
+        var bottom = Math.Min(candidate.Y + candidate.Height, expected.Y + expected.Height);
+
+        if (right > left && bottom > top)
+        {
+            var intersection = (right - left) * (bottom - top);
+            var smallerArea = Math.Min(candidate.Width * candidate.Height, expected.Width * expected.Height);
+            if (smallerArea > 0 && intersection >= smallerArea * 0.6)
+            {
+                return 120;
+            }
+        }
+
+        var candidateCenterX = candidate.X + candidate.Width / 2.0;
+        var candidateCenterY = candidate.Y + candidate.Height / 2.0;
+        var expectedCenterX = expected.X + expected.Width / 2.0;
+        var expectedCenterY = expected.Y + expected.Height / 2.0;
+        var distance = Math.Sqrt(
+            Math.Pow(candidateCenterX - expectedCenterX, 2) +
+            Math.Pow(candidateCenterY - expectedCenterY, 2));
+
+        return distance switch
+        {
+            <= 4 => 100,
+            <= 16 => 60,
+            <= 48 => 20,
+            _ => 0
+        };
+    }
+
+    private static bool HasUsableBounds(Rect bounds) =>
+        bounds.Width > 0 && bounds.Height > 0;
 
     private static int GetXPathDepth(string xpath) =>
         string.IsNullOrWhiteSpace(xpath) ? int.MaxValue : xpath.Count(c => c == '/');
@@ -817,7 +867,8 @@ public sealed partial class AutomationController
         string? Type,
         string? AutomationId,
         string? Name,
-        string? ClassName);
+        string? ClassName,
+        Rect? Bounds = null);
 
     private sealed class ElementHandleStore
     {
@@ -937,7 +988,8 @@ public sealed partial class AutomationController
                     Type = string.IsNullOrWhiteSpace(element.Type) ? existing.Type : element.Type,
                     AutomationId = string.IsNullOrWhiteSpace(element.AutomationId) ? existing.AutomationId : element.AutomationId,
                     Name = string.IsNullOrWhiteSpace(element.Name) ? existing.Name : element.Name,
-                    ClassName = string.IsNullOrWhiteSpace(element.ClassName) ? existing.ClassName : element.ClassName
+                    ClassName = string.IsNullOrWhiteSpace(element.ClassName) ? existing.ClassName : element.ClassName,
+                    Bounds = element.Bounds ?? existing.Bounds
                 };
                 Touch(elementId);
                 return true;
@@ -951,7 +1003,8 @@ public sealed partial class AutomationController
             string type,
             string? automationId,
             string? name,
-            string? className)
+            string? className,
+            Rect? bounds = null)
         {
             var handle = new ElementHandle(
                 Backend: InspectionBackend.Uia,
@@ -962,7 +1015,8 @@ public sealed partial class AutomationController
                 Type: type,
                 AutomationId: automationId,
                 Name: name,
-                ClassName: className);
+                ClassName: className,
+                Bounds: bounds);
 
             return AddHandle("uia_", handle);
         }
@@ -974,7 +1028,8 @@ public sealed partial class AutomationController
             string type,
             string? automationId,
             string? name,
-            string? className)
+            string? className,
+            Rect? bounds = null)
         {
             var handle = new ElementHandle(
                 Backend: InspectionBackend.Wpf,
@@ -985,7 +1040,8 @@ public sealed partial class AutomationController
                 Type: type,
                 AutomationId: automationId,
                 Name: name,
-                ClassName: className);
+                ClassName: className,
+                Bounds: bounds);
 
             return AddHandle("wpf_", handle);
         }
