@@ -115,10 +115,25 @@ public sealed record ElementSummary(
     bool IsOffscreen,
     string XPath);
 
+public sealed record UiaMappingCandidate(
+    string ElementType,
+    string? AutomationId,
+    string? Name,
+    string? ClassName,
+    Rect Bounds,
+    string XPath,
+    int Score);
+
+public sealed record UiaMappingDiagnostics(
+    bool Ambiguous,
+    string SelectedXPath,
+    IReadOnlyList<UiaMappingCandidate> Candidates);
+
 public sealed record GetElementPropertiesResponse(
     ElementSummary Element,
     IReadOnlyDictionary<string, JsonNode?> Properties,
-    IReadOnlyDictionary<string, JsonNode?> Patterns);
+    IReadOnlyDictionary<string, JsonNode?> Patterns,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ScreenshotCaptureMode

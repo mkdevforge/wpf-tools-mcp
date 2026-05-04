@@ -44,6 +44,18 @@
                 <TextBlock Text="{TemplateBinding Content}" />
             </Border>
         </ControlTemplate>
+
+        <ControlTemplate x:Key="NestedButtonTemplate" TargetType="{x:Type Button}">
+            <Border Background="#FFEAF7ED"
+                    BorderBrush="#FF3A7D44"
+                    BorderThickness="1"
+                    Padding="10,6">
+                <Button AutomationProperties.AutomationId="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=(AutomationProperties.AutomationId)}"
+                        Content="{TemplateBinding Content}"
+                        Focusable="False"
+                        IsHitTestVisible="False" />
+            </Border>
+        </ControlTemplate>
     </Window.Resources>
 
     <Grid Margin="16">
@@ -95,7 +107,13 @@
 
             <TextBlock x:Name="TemplatedStatusText"
                        AutomationProperties.AutomationId="Custom_TemplatedStatus"
-                       Text="Templated invokes: button=0, toggle=0, radio=0" />
+                       Text="Templated invokes: button=0, toggle=0, radio=0"
+                       Margin="0,0,0,12" />
+
+            <Button x:Name="AmbiguousTemplateButton"
+                    AutomationProperties.AutomationId="Custom_AmbiguousTemplateButton"
+                    Content="Ambiguous template button"
+                    Template="{StaticResource NestedButtonTemplate}" />
         </StackPanel>
     </Grid>
 </Window>

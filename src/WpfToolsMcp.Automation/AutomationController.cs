@@ -7810,6 +7810,7 @@ public sealed partial class AutomationController : IDisposable
         Window window;
         AutomationElement element;
         string xpath;
+        UiaMappingDiagnostics? uiaMapping = null;
 
         if (hasElementId)
         {
@@ -7835,9 +7836,17 @@ public sealed partial class AutomationController : IDisposable
                 throw new InvalidOperationException($"stale_element: window_closed for '{id}'. Call resolve_element again.");
             }
 
-            element = handle.Backend == InspectionBackend.Uia
-                ? ResolveUiaElementById(window, rawWalker, id, out xpath)
-                : ResolveUiaElementByWpfHandle(window, controlWalker, rawWalker, id, handle, out xpath);
+            if (handle.Backend == InspectionBackend.Uia)
+            {
+                element = ResolveUiaElementById(window, rawWalker, id, out xpath);
+            }
+            else
+            {
+                var resolution = ResolveUiaElementByWpfHandleForProperties(window, controlWalker, rawWalker, id, handle);
+                element = resolution.Element;
+                xpath = resolution.XPath;
+                uiaMapping = resolution.UiaMapping;
+            }
         }
         else
         {
@@ -7859,15 +7868,10 @@ public sealed partial class AutomationController : IDisposable
 
             if (wpfTarget is not null)
             {
-                try
-                {
-                    element = ResolveUiaElementByWpfHandle(window, controlWalker, rawWalker, wpfTarget.ElementId, wpfTarget.Handle, out xpath);
-                }
-                catch (InvalidOperationException ex) when (IsWpfToUiaMappingAmbiguous(ex))
-                {
-                    element = ResolveElement(window, locator!, controlWalker, rawWalker);
-                    xpath = ComputeXPath(window, element, rawWalker);
-                }
+                var resolution = ResolveUiaElementByWpfHandleForProperties(window, controlWalker, rawWalker, wpfTarget.ElementId, wpfTarget.Handle);
+                element = resolution.Element;
+                xpath = resolution.XPath;
+                uiaMapping = resolution.UiaMapping;
             }
             else
             {
@@ -7892,7 +7896,7 @@ public sealed partial class AutomationController : IDisposable
         var patterns = new SortedDictionary<string, JsonNode?>(StringComparer.Ordinal);
         PopulatePatterns(element, patterns);
 
-        var response = new GetElementPropertiesResponse(summary, properties, patterns);
+        var response = new GetElementPropertiesResponse(summary, properties, patterns, uiaMapping);
         trace?.SetSummary($"{summary.ElementType} {summary.XPath}");
         return response;
         }

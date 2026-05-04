@@ -1,0 +1,28 @@
+{
+  Button: {
+    Type: Button,
+    AutomationId: Custom_TemplatedButton,
+    Name: TemplatedInvokeButton,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/StackPanel/Button,
+    ClassName: <class>,
+    Bounds: {},
+    ElementId: <element>
+  },
+  Properties: {
+    Element: {
+      ElementType: Button,
+      AutomationId: Custom_TemplatedButton,
+      Name: Templated button,
+      ClassName: Button,
+      Bounds: {},
+      IsEnabled: true,
+      IsOffscreen: false,
+      XPath: /Window/Button[1]
+    },
+    PatternNames: [
+      Invoke,
+      LegacyIAccessible,
+      SynchronizedInput
+    ]
+  }
+}

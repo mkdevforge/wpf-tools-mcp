@@ -157,6 +157,86 @@ public sealed class CustomControlsSnapshots
         }
     }
 
+    [Test]
+    public async Task GetElementProperties_templated_button_by_wpf_elementId_prefers_source_peer_snapshot()
+    {
+        await LaunchCustomControlsAppAsync();
+        try
+        {
+            var button = await FindSingleWpfElementAsync("Custom_TemplatedButton");
+
+            var properties = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["elementId"] = button.ElementId
+            });
+
+            Assert.That(properties.Element.ElementType, Is.EqualTo("Button"));
+            Assert.That(properties.Element.AutomationId, Is.EqualTo("Custom_TemplatedButton"));
+            Assert.That(properties.Element.Name, Is.EqualTo("Templated button"));
+
+            await Verifier.Verify(new
+            {
+                Button = ScrubElementRefForSnapshot(button),
+                Properties = new
+                {
+                    Element = properties.Element with
+                    {
+                        Bounds = new Rect(0, 0, 0, 0)
+                    },
+                    PatternNames = properties.Patterns.Keys.ToArray(),
+                    UiaMapping = ScrubUiaMapping(properties.UiaMapping)
+                }
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task GetElementProperties_ambiguous_templated_button_by_wpf_elementId_reports_mapping_snapshot()
+    {
+        await LaunchCustomControlsAppAsync();
+        try
+        {
+            var button = await FindWpfElementByAutomationIdAndNameAsync(
+                automationId: "Custom_AmbiguousTemplateButton",
+                name: "AmbiguousTemplateButton");
+
+            var properties = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["elementId"] = button.ElementId
+            });
+
+            Assert.That(properties.Element.ElementType, Is.EqualTo("Button"));
+            Assert.That(properties.Element.AutomationId, Is.EqualTo("Custom_AmbiguousTemplateButton"));
+            Assert.That(properties.UiaMapping, Is.Not.Null);
+            Assert.That(properties.UiaMapping!.Ambiguous, Is.True);
+            Assert.That(properties.UiaMapping.Candidates, Has.Count.GreaterThan(1));
+
+            await Verifier.Verify(new
+            {
+                Button = ScrubElementRefForSnapshot(button),
+                Properties = new
+                {
+                    Element = properties.Element with
+                    {
+                        Bounds = new Rect(0, 0, 0, 0)
+                    },
+                    PatternNames = properties.Patterns.Keys.ToArray(),
+                    UiaMapping = ScrubUiaMapping(properties.UiaMapping)
+                }
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
     private sealed record InvokeOutcome(bool Invoked, string? Error);
 
     private async Task<ElementRef> FindSingleWpfElementAsync(string automationId)
@@ -178,6 +258,28 @@ public sealed class CustomControlsSnapshots
         Assert.That(matches.Matches[0].ElementId, Does.StartWith("wpf_"));
 
         return matches.Matches[0];
+    }
+
+    private async Task<ElementRef> FindWpfElementByAutomationIdAndNameAsync(string automationId, string name)
+    {
+        var matches = await _mcp.CallToolAsync<FindElementsResponse>("find_elements", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["backend"] = "wpf",
+            ["query"] = new Dictionary<string, object?>
+            {
+                ["automationIdEquals"] = automationId
+            },
+            ["maxResults"] = 5,
+            ["returnFields"] = "standard"
+        });
+
+        Assert.That(matches.BackendUsed, Is.EqualTo(InspectionBackend.Wpf));
+
+        var selected = matches.Matches.SingleOrDefault(match => string.Equals(match.Name, name, StringComparison.Ordinal));
+        Assert.That(selected, Is.Not.Null);
+        Assert.That(selected!.ElementId, Does.StartWith("wpf_"));
+        return selected;
     }
 
     private Task<InvokeResponse> InvokeElementAsync(string? elementId)
@@ -218,4 +320,17 @@ public sealed class CustomControlsSnapshots
             ClassName = string.IsNullOrWhiteSpace(element.ClassName) ? null : "<class>",
             Bounds = element.Bounds is null ? null : new Rect(0, 0, 0, 0)
         };
+
+    private static UiaMappingDiagnostics? ScrubUiaMapping(UiaMappingDiagnostics? mapping) =>
+        mapping is null
+            ? null
+            : mapping with
+            {
+                Candidates = mapping.Candidates
+                    .Select(candidate => candidate with
+                    {
+                        Bounds = new Rect(0, 0, 0, 0)
+                    })
+                    .ToArray()
+            };
 }

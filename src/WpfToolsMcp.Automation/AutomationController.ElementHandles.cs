@@ -474,12 +474,6 @@ public sealed partial class AutomationController
             : firstLine.Trim();
     }
 
-    private static bool IsWpfToUiaMappingAmbiguous(InvalidOperationException ex)
-    {
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
-        return message.Contains("maps ambiguously to UIA", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static ElementLocator CreateWpfHandleRecoveryLocator(ElementHandle handle)
     {
         var typeEquals = string.IsNullOrWhiteSpace(handle.Type) ? null : handle.Type;
@@ -655,6 +649,39 @@ public sealed partial class AutomationController
         ElementHandle handle,
         out string xpathUsed)
     {
+        var resolution = ResolveUiaElementByWpfHandleCore(
+            window,
+            controlWalker,
+            rawWalker,
+            elementId,
+            handle,
+            allowAmbiguous: false);
+        xpathUsed = resolution.XPath;
+        return resolution.Element;
+    }
+
+    private WpfUiaResolution ResolveUiaElementByWpfHandleForProperties(
+        Window window,
+        ITreeWalker controlWalker,
+        ITreeWalker rawWalker,
+        string elementId,
+        ElementHandle handle) =>
+        ResolveUiaElementByWpfHandleCore(
+            window,
+            controlWalker,
+            rawWalker,
+            elementId,
+            handle,
+            allowAmbiguous: true);
+
+    private WpfUiaResolution ResolveUiaElementByWpfHandleCore(
+        Window window,
+        ITreeWalker controlWalker,
+        ITreeWalker rawWalker,
+        string elementId,
+        ElementHandle handle,
+        bool allowAmbiguous)
+    {
         var ranked = new List<(AutomationElement Element, string XPath, int Score)>();
 
         foreach (var candidate in EnumerateSelfAndDescendantsDepthFirst(window, controlWalker))
@@ -681,8 +708,8 @@ public sealed partial class AutomationController
                 var byXPath = TryResolveByXPath(window, new ElementLocator(XPath: handle.XPath), rawWalker);
                 if (byXPath is not null)
                 {
-                    xpathUsed = ComputeXPath(window, byXPath, rawWalker);
-                    return byXPath;
+                    var xpath = ComputeXPath(window, byXPath, rawWalker);
+                    return new WpfUiaResolution(byXPath, xpath, UiaMapping: null);
                 }
             }
             catch
@@ -697,6 +724,7 @@ public sealed partial class AutomationController
 
         var ordered = ranked
             .OrderByDescending(c => c.Score)
+            .ThenBy(c => GetXPathDepth(c.XPath))
             .ThenBy(c => c.XPath, StringComparer.Ordinal)
             .ToArray();
 
@@ -704,12 +732,32 @@ public sealed partial class AutomationController
         var ties = ordered.TakeWhile(c => c.Score == bestScore).ToArray();
         if (ties.Length > 1)
         {
-            throw new InvalidOperationException(
-                $"elementId '{elementId}' maps ambiguously to UIA properties. Call get_element_properties with a locator.");
+            if (!allowAmbiguous)
+            {
+                throw new InvalidOperationException(
+                    $"elementId '{elementId}' maps ambiguously to UIA properties. Call get_element_properties with a locator.");
+            }
+
+            var selected = ordered[0];
+            return new WpfUiaResolution(
+                selected.Element,
+                selected.XPath,
+                new UiaMappingDiagnostics(
+                    Ambiguous: true,
+                    SelectedXPath: selected.XPath,
+                    Candidates: ties
+                        .Select(candidate => new UiaMappingCandidate(
+                            ElementType: candidate.Element.ControlType.ToString(),
+                            AutomationId: GetAutomationId(candidate.Element),
+                            Name: GetName(candidate.Element),
+                            ClassName: GetClassName(candidate.Element),
+                            Bounds: ToRect(candidate.Element.BoundingRectangle),
+                            XPath: candidate.XPath,
+                            Score: candidate.Score))
+                        .ToArray()));
         }
 
-        xpathUsed = ordered[0].XPath;
-        return ordered[0].Element;
+        return new WpfUiaResolution(ordered[0].Element, ordered[0].XPath, UiaMapping: null);
     }
 
     private static int ScoreUiaCandidateForWpfHandle(AutomationElement element, ElementHandle handle)
@@ -745,12 +793,20 @@ public sealed partial class AutomationController
                 string.Equals(GetXPathLabel(element), expected, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(GetClassName(element), expected, StringComparison.OrdinalIgnoreCase))
             {
-                score += 10;
+                score += 40;
             }
         }
 
         return score;
     }
+
+    private static int GetXPathDepth(string xpath) =>
+        string.IsNullOrWhiteSpace(xpath) ? int.MaxValue : xpath.Count(c => c == '/');
+
+    private sealed record WpfUiaResolution(
+        AutomationElement Element,
+        string XPath,
+        UiaMappingDiagnostics? UiaMapping);
 
     private sealed record ElementHandle(
         InspectionBackend Backend,

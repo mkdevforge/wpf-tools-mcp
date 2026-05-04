@@ -1,0 +1,52 @@
+{
+  Button: {
+    Type: Button,
+    AutomationId: Custom_AmbiguousTemplateButton,
+    Name: AmbiguousTemplateButton,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button,
+    ClassName: <class>,
+    Bounds: {},
+    ElementId: <element>
+  },
+  Properties: {
+    Element: {
+      ElementType: Button,
+      AutomationId: Custom_AmbiguousTemplateButton,
+      Name: Ambiguous template button,
+      ClassName: Button,
+      Bounds: {},
+      IsEnabled: true,
+      IsOffscreen: false,
+      XPath: /Window/Button[3]
+    },
+    PatternNames: [
+      Invoke,
+      LegacyIAccessible,
+      SynchronizedInput
+    ],
+    UiaMapping: {
+      Ambiguous: true,
+      SelectedXPath: /Window/Button[3],
+      Candidates: [
+        {
+          ElementType: Button,
+          AutomationId: Custom_AmbiguousTemplateButton,
+          Name: Ambiguous template button,
+          ClassName: Button,
+          Bounds: {},
+          XPath: /Window/Button[3],
+          Score: 140
+        },
+        {
+          ElementType: Button,
+          AutomationId: Custom_AmbiguousTemplateButton,
+          Name: Ambiguous template button,
+          ClassName: Button,
+          Bounds: {},
+          XPath: /Window/Button[3]/Button,
+          Score: 140
+        }
+      ]
+    }
+  }
+}
