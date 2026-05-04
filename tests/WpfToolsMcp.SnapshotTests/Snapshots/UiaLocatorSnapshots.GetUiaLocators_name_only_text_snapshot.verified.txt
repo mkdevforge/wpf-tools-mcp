@@ -1,0 +1,25 @@
+{
+  Uia: {
+    ControlType: Text,
+    Name: TextBox:,
+    ClassName: TextBlock,
+    UiaXPath: /Window/TextBlock[3],
+    Bounds: {},
+    IsEnabled: true,
+    IsOffscreen: false,
+    IsControlElement: true,
+    IsContentElement: true
+  },
+  LocatorSuggestions: {
+    ByName: cf.ByName("TextBox:"),
+    ByClassName: cf.ByClassName("TextBlock"),
+    ByControlType: cf.ByControlType(ControlType.Text),
+    ByXPath: /Window/TextBlock[3],
+    Recommended: byNameAndControlType,
+    RecommendedReason: AutomationId is missing or not unique; Name is unique for this ControlType.
+  },
+  FlaUi: {
+    FindFirst: window.FindFirstDescendant(cf => cf.ByName("TextBox:").And(cf.ByControlType(ControlType.Text))),
+    FindFirstByXPath: window.FindFirstByXPath("/Window/TextBlock[3]")
+  }
+}

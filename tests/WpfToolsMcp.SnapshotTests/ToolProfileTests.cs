@@ -23,6 +23,8 @@ public sealed class ToolProfileTests
         "get_computed_properties",
         "get_data_context",
         "get_element_properties",
+        "get_uia_locators",
+        "get_uia_tree",
         "get_visual_tree",
         "invoke",
         "launch_app",
@@ -94,7 +96,7 @@ public sealed class ToolProfileTests
             .OrderBy(t => t, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.That(names, Has.Length.EqualTo(44));
+        Assert.That(names, Has.Length.EqualTo(CoreToolNames.Length + DiagnosticsOnlyToolNames.Length));
 
         foreach (var toolName in CoreToolNames.Concat(DiagnosticsOnlyToolNames))
         {

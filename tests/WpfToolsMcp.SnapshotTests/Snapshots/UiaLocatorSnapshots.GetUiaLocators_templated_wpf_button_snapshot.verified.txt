@@ -1,0 +1,35 @@
+{
+  Wpf: {
+    Type: Button,
+    AutomationId: Custom_TemplatedButton,
+    Name: TemplatedInvokeButton,
+    ClassName: <class>,
+    WpfXPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/StackPanel/Button,
+    ElementId: <element>
+  },
+  Uia: {
+    ControlType: Button,
+    AutomationId: Custom_TemplatedButton,
+    Name: Templated button,
+    ClassName: Button,
+    UiaXPath: /Window/Button[1],
+    Bounds: {},
+    IsEnabled: true,
+    IsOffscreen: false,
+    IsControlElement: true,
+    IsContentElement: true
+  },
+  LocatorSuggestions: {
+    ByAutomationId: cf.ByAutomationId("Custom_TemplatedButton"),
+    ByName: cf.ByName("Templated button"),
+    ByClassName: cf.ByClassName("Button"),
+    ByControlType: cf.ByControlType(ControlType.Button),
+    ByXPath: /Window/Button[1],
+    Recommended: byAutomationId,
+    RecommendedReason: AutomationId is present and unique in the UIA tree.
+  },
+  FlaUi: {
+    FindFirst: window.FindFirstDescendant(cf => cf.ByAutomationId("Custom_TemplatedButton")),
+    FindFirstByXPath: window.FindFirstByXPath("/Window/Button[1]")
+  }
+}

@@ -61,6 +61,42 @@ public static class InspectionTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "get_uia_locators"), Description("Return UIA locator suggestions and FlaUI snippets for a WPF or UIA element.")]
+    public static Task<GetUiaLocatorsResponse> GetUiaLocators(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.GetUiaLocatorsAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "get_uia_tree"), Description("Return a bounded UIA automation tree for a window or subtree.")]
+    public static Task<GetUiaTreeResponse> GetUiaTree(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Optional root locator for subtree")] ElementLocator? root = null,
+        [Description("Maximum depth (1 = root only)")] int depth = 4,
+        [Description("Maximum number of nodes returned")] int maxNodes = 200,
+        [Description("Filter to visible elements only")] bool visibleOnly = true,
+        [Description("Include off-viewport elements even when visibleOnly=true")] bool includeOffViewport = true,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.GetUiaTreeAsync(effectiveWindowHandle, root, depth, maxNodes, visibleOnly, includeOffViewport, cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "find_elements"), Description("Find elements without dumping the full tree.")]
     public static Task<FindElementsResponse> FindElements(
         SessionManager sessions,

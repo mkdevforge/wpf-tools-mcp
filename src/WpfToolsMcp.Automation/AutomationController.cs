@@ -7994,6 +7994,357 @@ public sealed partial class AutomationController : IDisposable
         }
     }
 
+    public async Task<GetUiaTreeResponse> GetUiaTreeAsync(
+        long? windowHandle = null,
+        ElementLocator? root = null,
+        int depth = 4,
+        int maxNodes = 200,
+        bool visibleOnly = true,
+        bool includeOffViewport = true,
+        CancellationToken cancellationToken = default)
+    {
+        var tree = await GetVisualTreeAsync(
+            InspectionBackend.Uia,
+            windowHandle,
+            root,
+            depth,
+            maxNodes,
+            visibleOnly,
+            includeOffViewport,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
+            preset: TreePreset.Standard,
+            fields: null,
+            cancellationToken).ConfigureAwait(false);
+
+        return new GetUiaTreeResponse(
+            Root: ConvertToUiaTreeNode(tree.Root),
+            ReturnedNodes: tree.ReturnedNodes,
+            ScannedNodes: tree.ScannedNodes,
+            Truncated: tree.Truncated,
+            TruncatedReason: tree.TruncatedReason);
+    }
+
+    public async Task<GetUiaLocatorsResponse> GetUiaLocatorsAsync(
+        ElementLocator? locator = null,
+        string? elementId = null,
+        long? windowHandle = null,
+        CancellationToken cancellationToken = default)
+    {
+        var trace = BeginTraceSpan("get_uia_locators");
+        try
+        {
+            var hasLocator = locator is not null;
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            if (hasLocator == hasElementId)
+            {
+                throw new ArgumentException("get_uia_locators requires exactly one of: locator OR elementId.");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var application = EnsureAttached();
+            var automation = EnsureAutomation();
+            var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+            var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+
+            Window window;
+            AutomationElement element;
+            string uiaXPath;
+            WpfLocatorIdentity? wpf = null;
+            UiaMappingDiagnostics? uiaMapping = null;
+
+            if (hasElementId)
+            {
+                var id = elementId!.Trim();
+                var handle = RequireHandle(id);
+                if (handle.Backend != InspectionBackend.Uia &&
+                    handle.Backend != InspectionBackend.Wpf)
+                {
+                    throw new InvalidOperationException($"elementId '{id}' has unsupported backend '{handle.Backend}'.");
+                }
+
+                if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+                {
+                    throw new ArgumentException("windowHandle does not match the elementId window.");
+                }
+
+                try
+                {
+                    window = FindWindowByHandle(application, automation, handle.WindowHandle);
+                }
+                catch
+                {
+                    throw new InvalidOperationException($"stale_element: window_closed for '{id}'. Call resolve_element again.");
+                }
+
+                if (handle.Backend == InspectionBackend.Wpf)
+                {
+                    var resolution = ResolveUiaElementByWpfHandleForProperties(window, controlWalker, rawWalker, id, handle);
+                    element = resolution.Element;
+                    uiaXPath = resolution.XPath;
+                    uiaMapping = resolution.UiaMapping;
+                    wpf = CreateWpfLocatorIdentity(handle, id);
+                }
+                else
+                {
+                    element = ResolveUiaElementById(window, rawWalker, id, out uiaXPath);
+                }
+            }
+            else
+            {
+                window = windowHandle is long requestedHandle
+                    ? FindWindowByHandle(application, automation, requestedHandle)
+                    : FindMainWindow(application, automation);
+
+                try
+                {
+                    element = ResolveElement(window, locator!, controlWalker, rawWalker);
+                    uiaXPath = ComputeXPath(window, element, rawWalker);
+
+                    if (HasStableWpfLocator(locator!))
+                    {
+                        var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
+                            window,
+                            locator!,
+                            timeoutMs: 0,
+                            pollIntervalMs: 100,
+                            stableMs: 0,
+                            visibleOnly: false,
+                            includeOffViewport: true,
+                            interactiveOnly: false,
+                            interactiveMode: InteractiveMode.Heuristic,
+                            cancellationToken).ConfigureAwait(false);
+
+                        if (wpfTarget is not null)
+                        {
+                            wpf = CreateWpfLocatorIdentity(wpfTarget.Handle, wpfTarget.ElementId);
+                        }
+                    }
+                }
+                catch
+                {
+                    var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
+                        window,
+                        locator!,
+                        timeoutMs: 0,
+                        pollIntervalMs: 100,
+                        stableMs: 0,
+                        visibleOnly: false,
+                        includeOffViewport: true,
+                        interactiveOnly: false,
+                        interactiveMode: InteractiveMode.Heuristic,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (wpfTarget is null)
+                    {
+                        throw;
+                    }
+
+                    var resolution = ResolveUiaElementByWpfHandleForProperties(window, controlWalker, rawWalker, wpfTarget.ElementId, wpfTarget.Handle);
+                    element = resolution.Element;
+                    uiaXPath = resolution.XPath;
+                    uiaMapping = resolution.UiaMapping;
+                    wpf = CreateWpfLocatorIdentity(wpfTarget.Handle, wpfTarget.ElementId);
+                }
+            }
+
+            var allElements = EnumerateSelfAndDescendantsDepthFirst(window, controlWalker).ToArray();
+            var uia = CreateUiaLocatorIdentity(element, uiaXPath);
+            var suggestions = CreateUiaLocatorSuggestions(element, uiaXPath, allElements);
+            var flaui = CreateFlaUiSnippets(suggestions);
+            var response = new GetUiaLocatorsResponse(wpf, uia, suggestions, flaui, uiaMapping);
+            trace?.SetSummary($"{uia.ControlType} {uia.UiaXPath} recommended={suggestions.Recommended}");
+            return response;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
+    }
+
+    private static UiaTreeNode ConvertToUiaTreeNode(TreeNode node) =>
+        new(
+            ControlType: node.Type,
+            AutomationId: node.AutomationId,
+            Name: node.Name,
+            ClassName: node.ClassName,
+            UiaXPath: node.XPath,
+            ChildrenCount: node.ChildrenCount,
+            Children: node.Children.Select(ConvertToUiaTreeNode).ToArray());
+
+    private static WpfLocatorIdentity CreateWpfLocatorIdentity(ElementHandle handle, string? elementId) =>
+        new(
+            Type: handle.Type,
+            AutomationId: handle.AutomationId,
+            Name: handle.Name,
+            ClassName: handle.ClassName,
+            WpfXPath: handle.XPath,
+            ElementId: elementId);
+
+    private static bool HasStableWpfLocator(ElementLocator locator) =>
+        !string.IsNullOrWhiteSpace(locator.AutomationId) ||
+        !string.IsNullOrWhiteSpace(locator.XPath);
+
+    private static UiaLocatorIdentity CreateUiaLocatorIdentity(AutomationElement element, string uiaXPath) =>
+        new(
+            ControlType: element.ControlType.ToString(),
+            AutomationId: GetAutomationId(element),
+            Name: GetName(element),
+            ClassName: GetClassName(element),
+            UiaXPath: uiaXPath,
+            Bounds: ToRect(element.BoundingRectangle),
+            IsEnabled: element.IsEnabled,
+            IsOffscreen: element.IsOffscreen,
+            HelpText: NullIfWhiteSpace(TryGetUiaProperty<string>(element, "HelpText")),
+            IsControlElement: TryGetUiaProperty<bool>(element, "IsControlElement"),
+            IsContentElement: TryGetUiaProperty<bool>(element, "IsContentElement"));
+
+    private static UiaLocatorSuggestions CreateUiaLocatorSuggestions(
+        AutomationElement element,
+        string uiaXPath,
+        IReadOnlyCollection<AutomationElement> allElements)
+    {
+        var controlType = element.ControlType.ToString();
+        var automationId = GetAutomationId(element);
+        var name = GetName(element);
+        var className = GetClassName(element);
+
+        var byAutomationId = string.IsNullOrWhiteSpace(automationId)
+            ? null
+            : $"cf.ByAutomationId(\"{EscapeCSharpString(automationId)}\")";
+        var byName = string.IsNullOrWhiteSpace(name)
+            ? null
+            : $"cf.ByName(\"{EscapeCSharpString(name)}\")";
+        var byClassName = string.IsNullOrWhiteSpace(className)
+            ? null
+            : $"cf.ByClassName(\"{EscapeCSharpString(className)}\")";
+        var byControlType = $"cf.ByControlType(ControlType.{controlType})";
+
+        var automationIdUnique = !string.IsNullOrWhiteSpace(automationId) &&
+                                 allElements.Count(e => string.Equals(GetAutomationId(e), automationId, StringComparison.Ordinal)) == 1;
+        var automationIdUniqueForType = !string.IsNullOrWhiteSpace(automationId) &&
+                                        allElements.Count(e =>
+                                            string.Equals(GetAutomationId(e), automationId, StringComparison.Ordinal) &&
+                                            string.Equals(e.ControlType.ToString(), controlType, StringComparison.Ordinal)) == 1;
+        var nameUniqueForType = !string.IsNullOrWhiteSpace(name) &&
+                                allElements.Count(e =>
+                                    string.Equals(GetName(e), name, StringComparison.Ordinal) &&
+                                    string.Equals(e.ControlType.ToString(), controlType, StringComparison.Ordinal)) == 1;
+        var classNameUniqueForType = !string.IsNullOrWhiteSpace(className) &&
+                                     allElements.Count(e =>
+                                         string.Equals(GetClassName(e), className, StringComparison.Ordinal) &&
+                                         string.Equals(e.ControlType.ToString(), controlType, StringComparison.Ordinal)) == 1;
+
+        string recommended;
+        string reason;
+        if (byAutomationId is not null && automationIdUnique)
+        {
+            recommended = "byAutomationId";
+            reason = "AutomationId is present and unique in the UIA tree.";
+        }
+        else if (byAutomationId is not null && automationIdUniqueForType)
+        {
+            recommended = "byAutomationIdAndControlType";
+            reason = "AutomationId is present and unique when combined with ControlType.";
+        }
+        else if (byName is not null && nameUniqueForType)
+        {
+            recommended = "byNameAndControlType";
+            reason = "AutomationId is missing or not unique; Name is unique for this ControlType.";
+        }
+        else if (byClassName is not null && classNameUniqueForType)
+        {
+            recommended = "byClassNameAndControlType";
+            reason = "AutomationId and Name are unavailable or not unique; ClassName is unique for this ControlType.";
+        }
+        else
+        {
+            recommended = "byXPath";
+            reason = "No stable unique AutomationId, Name, or ClassName locator was available; XPath is the only concrete locator.";
+        }
+
+        return new UiaLocatorSuggestions(
+            ByAutomationId: byAutomationId,
+            ByName: byName,
+            ByClassName: byClassName,
+            ByControlType: byControlType,
+            ByXPath: uiaXPath,
+            Recommended: recommended,
+            RecommendedReason: reason);
+    }
+
+    private static FlaUiLocatorSnippets CreateFlaUiSnippets(UiaLocatorSuggestions suggestions)
+    {
+        var condition = suggestions.Recommended switch
+        {
+            "byAutomationId" => suggestions.ByAutomationId!,
+            "byAutomationIdAndControlType" => $"{suggestions.ByAutomationId!}.And({suggestions.ByControlType})",
+            "byNameAndControlType" => $"{suggestions.ByName!}.And({suggestions.ByControlType})",
+            "byClassNameAndControlType" => $"{suggestions.ByClassName!}.And({suggestions.ByControlType})",
+            _ => null
+        };
+
+        var xpathLiteral = EscapeCSharpString(suggestions.ByXPath);
+        return new FlaUiLocatorSnippets(
+            FindFirst: condition is null
+                ? $"window.FindFirstByXPath(\"{xpathLiteral}\")"
+                : $"window.FindFirstDescendant(cf => {condition})",
+            FindFirstByXPath: $"window.FindFirstByXPath(\"{xpathLiteral}\")");
+    }
+
+    private static T? TryGetUiaProperty<T>(AutomationElement element, string propertyName)
+    {
+        try
+        {
+            var property = element.Properties.GetType().GetProperty(propertyName);
+            var wrapper = property?.GetValue(element.Properties);
+            var value = wrapper is null ? null : TryGetWrapperValue(wrapper);
+            if (value is T typed)
+            {
+                return typed;
+            }
+        }
+        catch
+        {
+        }
+
+        return default;
+    }
+
+    private static string EscapeCSharpString(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in value)
+        {
+            _ = character switch
+            {
+                '\\' => builder.Append(@"\\"),
+                '"' => builder.Append("\\\""),
+                '\0' => builder.Append(@"\0"),
+                '\a' => builder.Append(@"\a"),
+                '\b' => builder.Append(@"\b"),
+                '\f' => builder.Append(@"\f"),
+                '\n' => builder.Append(@"\n"),
+                '\r' => builder.Append(@"\r"),
+                '\t' => builder.Append(@"\t"),
+                '\v' => builder.Append(@"\v"),
+                _ when char.IsControl(character) => builder.Append(@"\u").Append(((int)character).ToString("x4", CultureInfo.InvariantCulture)),
+                _ => builder.Append(character)
+            };
+        }
+
+        return builder.ToString();
+    }
+
+    private static string? NullIfWhiteSpace(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
+
     private void EnsureNotAttached()
     {
         if (IsApplicationRunning(_application))

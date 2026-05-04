@@ -112,6 +112,22 @@ public sealed record GetVisualTreeResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
 
+public sealed record UiaTreeNode(
+    string ControlType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AutomationId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Name,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClassName,
+    string UiaXPath,
+    int ChildrenCount,
+    IReadOnlyList<UiaTreeNode> Children);
+
+public sealed record GetUiaTreeResponse(
+    UiaTreeNode Root,
+    int ReturnedNodes,
+    int ScannedNodes,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
+
 public sealed record ElementSummary(
     string ElementType,
     string? AutomationId,
@@ -140,6 +156,45 @@ public sealed record GetElementPropertiesResponse(
     ElementSummary Element,
     IReadOnlyDictionary<string, JsonNode?> Properties,
     IReadOnlyDictionary<string, JsonNode?> Patterns,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null);
+
+public sealed record WpfLocatorIdentity(
+    string? Type,
+    string? AutomationId,
+    string? Name,
+    string? ClassName,
+    string? WpfXPath,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ElementId = null);
+
+public sealed record UiaLocatorIdentity(
+    string ControlType,
+    string? AutomationId,
+    string? Name,
+    string? ClassName,
+    string UiaXPath,
+    Rect Bounds,
+    bool IsEnabled,
+    bool IsOffscreen,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HelpText = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsControlElement = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsContentElement = null);
+
+public sealed record UiaLocatorSuggestions(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ByAutomationId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ByName,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ByClassName,
+    string ByControlType,
+    string ByXPath,
+    string Recommended,
+    string RecommendedReason);
+
+public sealed record FlaUiLocatorSnippets(string FindFirst, string FindFirstByXPath);
+
+public sealed record GetUiaLocatorsResponse(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WpfLocatorIdentity? Wpf,
+    UiaLocatorIdentity Uia,
+    UiaLocatorSuggestions LocatorSuggestions,
+    FlaUiLocatorSnippets FlaUi,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

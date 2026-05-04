@@ -254,6 +254,51 @@ public static class CoreInspectionTools
                     cancellationToken),
                 cancellationToken);
         });
+
+    [McpServerTool(Name = "get_uia_locators"), Description("Return UIA locator suggestions and FlaUI snippets for a WPF or UIA element.")]
+    public static Task<GetUiaLocatorsResponse> GetUiaLocators(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator")] CoreElementLocator? locator = null,
+        [Description("Element ID")] string? elementId = null,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.GetUiaLocatorsAsync(
+                    locator?.ToElementLocator(),
+                    elementId,
+                    hasElementId ? windowHandle : effectiveWindowHandle,
+                    cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "get_uia_tree"), Description("Return a bounded UIA automation tree for a window or subtree.")]
+    public static Task<GetUiaTreeResponse> GetUiaTree(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Optional root locator for subtree")] CoreElementLocator? root = null,
+        [Description("Maximum depth (1 = root only)")] int depth = 4,
+        [Description("Maximum number of nodes returned")] int maxNodes = 200,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.GetUiaTreeAsync(
+                    effectiveWindowHandle,
+                    root?.ToElementLocator(),
+                    depth,
+                    maxNodes,
+                    visibleOnly: true,
+                    includeOffViewport: true,
+                    cancellationToken),
+                cancellationToken);
+        });
 }
 
 public static class CoreWpfDiagnosticsTools

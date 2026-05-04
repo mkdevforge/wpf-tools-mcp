@@ -1,0 +1,34 @@
+{
+  Wpf: {
+    Type: Button,
+    AutomationId: Basic_Button,
+    ClassName: <class>,
+    WpfXPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button,
+    ElementId: <element>
+  },
+  Uia: {
+    ControlType: Button,
+    AutomationId: Basic_Button,
+    Name: Click me,
+    ClassName: Button,
+    UiaXPath: /Window/Button[1],
+    Bounds: {},
+    IsEnabled: true,
+    IsOffscreen: false,
+    IsControlElement: true,
+    IsContentElement: true
+  },
+  LocatorSuggestions: {
+    ByAutomationId: cf.ByAutomationId("Basic_Button"),
+    ByName: cf.ByName("Click me"),
+    ByClassName: cf.ByClassName("Button"),
+    ByControlType: cf.ByControlType(ControlType.Button),
+    ByXPath: /Window/Button[1],
+    Recommended: byAutomationId,
+    RecommendedReason: AutomationId is present and unique in the UIA tree.
+  },
+  FlaUi: {
+    FindFirst: window.FindFirstDescendant(cf => cf.ByAutomationId("Basic_Button")),
+    FindFirstByXPath: window.FindFirstByXPath("/Window/Button[1]")
+  }
+}

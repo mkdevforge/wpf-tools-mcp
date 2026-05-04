@@ -1,0 +1,143 @@
+{
+  Root: {
+    ControlType: Window,
+    Name: WPF Tools MCP TestApp,
+    ClassName: Window,
+    UiaXPath: /Window,
+    ChildrenCount: 22,
+    Children: [
+      {
+        ControlType: TitleBar,
+        AutomationId: TitleBar,
+        UiaXPath: /Window/TitleBar,
+        ChildrenCount: 2
+      },
+      {
+        ControlType: Text,
+        AutomationId: Basic_Header,
+        Name: WpfToolsMcp.TestApp — Basic Controls,
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[1]
+      },
+      {
+        ControlType: Button,
+        AutomationId: Basic_Button,
+        Name: Click me,
+        ClassName: Button,
+        UiaXPath: /Window/Button[1],
+        ChildrenCount: 1
+      },
+      {
+        ControlType: Text,
+        AutomationId: Basic_ClickStatus,
+        Name: Clicks: 0,
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[2]
+      },
+      {
+        ControlType: Text,
+        Name: TextBox:,
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[3]
+      },
+      {
+        ControlType: Edit,
+        AutomationId: Basic_TextBox,
+        ClassName: TextBox,
+        UiaXPath: /Window/TextBox,
+        ChildrenCount: 1
+      },
+      {
+        ControlType: CheckBox,
+        AutomationId: Basic_CheckBox,
+        Name: I agree,
+        ClassName: CheckBox,
+        UiaXPath: /Window/CheckBox,
+        ChildrenCount: 1
+      },
+      {
+        ControlType: Text,
+        Name: ComboBox:,
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[4]
+      },
+      {
+        ControlType: ComboBox,
+        AutomationId: Basic_ComboBox,
+        ClassName: ComboBox,
+        UiaXPath: /Window/ComboBox
+      },
+      {
+        ControlType: Text,
+        Name: ListBox:,
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[5]
+      },
+      {
+        ControlType: List,
+        AutomationId: Basic_ListBox,
+        ClassName: ListBox,
+        UiaXPath: /Window/ListBox,
+        ChildrenCount: 8
+      },
+      {
+        ControlType: Text,
+        AutomationId: Basic_ListBoxStatus,
+        Name: Selected: (none),
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[6]
+      },
+      {
+        ControlType: Text,
+        Name: Slider:,
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[7]
+      },
+      {
+        ControlType: Slider,
+        AutomationId: Basic_Slider,
+        ClassName: Slider,
+        UiaXPath: /Window/Slider,
+        ChildrenCount: 3
+      },
+      {
+        ControlType: Text,
+        Name: Hyperlink:,
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[8]
+      },
+      {
+        ControlType: Text,
+        AutomationId: Basic_HyperlinkTextBlock,
+        Name: example.com,
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[9],
+        ChildrenCount: 1
+      },
+      {
+        ControlType: Text,
+        Name: XPath Demo:,
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[10]
+      },
+      {
+        ControlType: Text,
+        Name: Left Panel,
+        ClassName: TextBlock,
+        UiaXPath: /Window/TextBlock[11]
+      },
+      {
+        ControlType: Button,
+        AutomationId: XPathDemo_Left_Button1,
+        Name: Alpha,
+        ClassName: Button,
+        UiaXPath: /Window/Button[2],
+        ChildrenCount: 1
+      }
+    ]
+  },
+  ReturnedNodes: 20,
+  ScannedNodes: 20,
+  Truncated: true,
+  TruncatedReason: maxNodes
+}
