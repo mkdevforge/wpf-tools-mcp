@@ -490,3 +490,7 @@ references/*
 !references/Directory.Build.props
 !references/snoopwpf/
 references/FlaUI/
+
+# Local planning/imported report artifacts
+/backlog/
+/docs/wpfpilot-bug-reports/
