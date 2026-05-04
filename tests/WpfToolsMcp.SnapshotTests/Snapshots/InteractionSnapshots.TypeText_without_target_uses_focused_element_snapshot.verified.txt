@@ -1,0 +1,15 @@
+{
+  Clear: {
+    Set: true,
+    MethodUsed: wpf_textBoxText
+  },
+  Click: {
+    Clicked: true,
+    MethodUsed: mouse
+  },
+  Typed: {
+    Typed: true,
+    MethodUsed: keyboard_focused
+  },
+  Value: Focused text
+}

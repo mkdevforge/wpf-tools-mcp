@@ -231,6 +231,63 @@ public sealed class InteractionSnapshots
     }
 
     [Test]
+    public async Task TypeText_without_target_uses_focused_element_snapshot()
+    {
+        await LaunchTestAppAsync();
+        try
+        {
+            var clear = await _mcp.CallToolAsync<SetValueResponse>("set_value", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_TextBox"
+                },
+                ["text"] = ""
+            });
+
+            var click = await _mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_TextBox"
+                },
+                ["clickMode"] = "mouseAlways"
+            });
+
+            var typed = await _mcp.CallToolAsync<TypeTextResponse>("type_text", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["text"] = "Focused text"
+            });
+
+            var textbox = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_TextBox"
+                }
+            });
+
+            var valuePatternValue = GetPatternValue(textbox, "Value", "Value")?.GetValue<string>();
+
+            await Verifier.Verify(new
+            {
+                Clear = clear,
+                Click = click,
+                Typed = typed,
+                Value = valuePatternValue
+            });
+        }
+        finally
+        {
+            await CloseTestAppAsync();
+        }
+    }
+
+    [Test]
     public async Task SetValue_slider_updates_value_snapshot()
     {
         await LaunchTestAppAsync();

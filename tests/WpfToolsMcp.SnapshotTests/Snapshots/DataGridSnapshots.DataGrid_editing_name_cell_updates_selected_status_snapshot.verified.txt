@@ -10,7 +10,7 @@
   },
   Typed: {
     Typed: true,
-    MethodUsed: valuePattern
+    MethodUsed: keyboard
   },
   StatusAfter: Selected: Alicia (Age=30)
 }

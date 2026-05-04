@@ -175,7 +175,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "type_text"), Description("Type text into a focused or specified element (locator or elementId).")]
+    [McpServerTool(Name = "type_text"), Description("Type text into the focused element, or into a specified locator/elementId.")]
     public static Task<TypeTextResponse> TypeText(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

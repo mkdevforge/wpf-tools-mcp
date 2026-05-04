@@ -2138,7 +2138,8 @@ public sealed partial class AutomationController : IDisposable
     private static async Task PrepareWindowForInteractionAsync(
         Window window,
         int settleDelayMs,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool focusWindow = true)
     {
         var windowPattern = window.Patterns.Window.PatternOrDefault;
         if (windowPattern is not null && windowPattern.WindowVisualState == WindowVisualState.Minimized)
@@ -2162,12 +2163,15 @@ public sealed partial class AutomationController : IDisposable
         {
         }
 
-        try
+        if (focusWindow)
         {
-            window.Focus();
-        }
-        catch
-        {
+            try
+            {
+                window.Focus();
+            }
+            catch
+            {
+            }
         }
 
         await Task.Delay(settleDelayMs, cancellationToken);
@@ -2370,9 +2374,9 @@ public sealed partial class AutomationController : IDisposable
         {
         var hasLocator = request.Locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
-        if (hasLocator == hasElementId)
+        if (hasLocator && hasElementId)
         {
-            throw new ArgumentException("type_text requires exactly one of: locator OR elementId.");
+            throw new ArgumentException("type_text requires at most one of: locator OR elementId.");
         }
 
         if (request.Text is null)
@@ -2391,6 +2395,76 @@ public sealed partial class AutomationController : IDisposable
         AutomationElement element;
 
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+        if (!hasLocator && !hasElementId)
+        {
+            window = request.WindowHandle is long requestedHandle
+                ? FindWindowByHandle(application, automation, requestedHandle)
+                : FindMainWindow(application, automation);
+
+            await PrepareWindowForInteractionAsync(
+                window,
+                settleDelayMs: UiDelayWindowSettleMs,
+                cancellationToken,
+                focusWindow: false);
+
+            try
+            {
+                element = automation.FocusedElement();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("focused_element_unavailable: unable to read the currently focused element.", ex);
+            }
+
+            if (AreSameElement(window, element))
+            {
+                throw new InvalidOperationException("focused_element_unavailable: the session window is focused, but no child input target is focused.");
+            }
+
+            if (!IsElementWithinWindow(window, element, rawWalker))
+            {
+                throw new InvalidOperationException("focused_element_outside_session: the currently focused element does not belong to the active session window.");
+            }
+
+            EnsureEnabledOrThrow(element, "type_text");
+
+            if (request.AutoWait)
+            {
+                if (stableMs > 0)
+                {
+                    await WaitForResolvedElementStateAsync(
+                        element,
+                        WaitForState.Stable,
+                        timeoutMs,
+                        pollIntervalMs,
+                        stableMs,
+                        expectedValue: null,
+                        expectedText: null,
+                        cancellationToken);
+                }
+
+                await WaitForResolvedElementStateAsync(
+                    element,
+                    WaitForState.Visible,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: null,
+                    expectedText: null,
+                    cancellationToken);
+            }
+
+            Keyboard.Type(request.Text);
+
+            if (UiDelayMs > 0)
+            {
+                await Task.Delay(UiDelayMs, cancellationToken);
+            }
+
+            trace?.SetSummary("method=keyboard_focused");
+            return new TypeTextResponse(Typed: true, MethodUsed: "keyboard_focused");
+        }
+
         if (hasElementId)
         {
             var elementId = request.ElementId!.Trim();
@@ -9323,6 +9397,42 @@ public sealed partial class AutomationController : IDisposable
         if (firstRuntimeId is not null && secondRuntimeId is not null)
         {
             return firstRuntimeId.SequenceEqual(secondRuntimeId);
+        }
+
+        return false;
+    }
+
+    private static bool IsElementWithinWindow(Window window, AutomationElement element, ITreeWalker walker)
+    {
+        if (AreSameElement(window, element))
+        {
+            return true;
+        }
+
+        AutomationElement? current = element;
+        while (current is not null)
+        {
+            AutomationElement? parent;
+            try
+            {
+                parent = walker.GetParent(current);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (parent is null)
+            {
+                return false;
+            }
+
+            if (AreSameElement(parent, window))
+            {
+                return true;
+            }
+
+            current = parent;
         }
 
         return false;
