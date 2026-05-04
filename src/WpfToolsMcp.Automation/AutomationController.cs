@@ -7666,7 +7666,31 @@ public sealed partial class AutomationController : IDisposable
                         IncludeOffViewport: true,
                         MaxNodes: 8000);
 
-                var wpfResponse = await GetWpfPathAsync(request, injectIfMissing: true, cancellationToken).ConfigureAwait(false);
+                var fallbackRequest = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
+                    ? new GetWpfPathRequest(
+                        WindowHandle: handle.WindowHandle,
+                        Locator: CreateWpfHandleRecoveryLocator(handle),
+                        ElementId: null,
+                        RootXPath: null,
+                        VisibleOnly: true,
+                        IncludeOffViewport: true,
+                        MaxNodes: 8000)
+                    : null;
+                var target = new WpfAgentTarget(
+                    handle.WindowHandle,
+                    request.Locator,
+                    handle.WpfAgentElementId,
+                    id,
+                    fallbackRequest?.Locator,
+                    handle);
+                var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+                var wpfResponse = await CallWpfAgentTargetAsync<GetPathToElementResponse>(
+                    client,
+                    "wpf/get_path",
+                    request,
+                    fallbackRequest,
+                    target,
+                    cancellationToken).ConfigureAwait(false);
                 _elementHandles.TryUpdateWpfPath(id, wpfResponse.XPath);
                 trace?.SetSummary($"{wpfResponse.BackendUsed} {wpfResponse.XPath}");
                 return wpfResponse;

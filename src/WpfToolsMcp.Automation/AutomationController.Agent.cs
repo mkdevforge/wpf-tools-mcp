@@ -25,7 +25,15 @@ public sealed partial class AutomationController
         }
     }
 
-    private (long? WindowHandle, ElementLocator? Locator, string? AgentElementId, string? PublicElementId) PrepareWpfAgentTarget(
+    private sealed record WpfAgentTarget(
+        long? WindowHandle,
+        ElementLocator? Locator,
+        string? AgentElementId,
+        string? PublicElementId,
+        ElementLocator? RecoveryLocator,
+        ElementHandle? Handle);
+
+    private WpfAgentTarget PrepareWpfAgentTarget(
         string toolName,
         ElementLocator? locator,
         string? elementId,
@@ -40,7 +48,7 @@ public sealed partial class AutomationController
 
         if (!hasElementId)
         {
-            return (windowHandle, locator, null, null);
+            return new WpfAgentTarget(windowHandle, locator, null, null, null, null);
         }
 
         var id = elementId!.Trim();
@@ -55,23 +63,78 @@ public sealed partial class AutomationController
             throw new ArgumentException("windowHandle does not match the elementId window.");
         }
 
+        var recoveryLocator = CreateWpfHandleRecoveryLocator(handle);
         if (!string.IsNullOrWhiteSpace(handle.WpfAgentElementId))
         {
-            return (handle.WindowHandle, null, handle.WpfAgentElementId, id);
+            return new WpfAgentTarget(handle.WindowHandle, null, handle.WpfAgentElementId, id, recoveryLocator, handle);
         }
 
-        return (handle.WindowHandle, new ElementLocator(XPath: handle.XPath), null, id);
+        return new WpfAgentTarget(handle.WindowHandle, recoveryLocator, null, id, null, handle);
     }
 
     private static bool IsWpfAgentStaleOrNotFound(Exception ex)
     {
-        var message = ex.Message ?? string.Empty;
-        return message.StartsWith("wpf_resolve:", StringComparison.OrdinalIgnoreCase) ||
-               message.StartsWith("wpf_handle_stale:", StringComparison.OrdinalIgnoreCase);
+        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        return message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("wpf_handle_stale:", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static ElementRef StripAgentElementId(ElementRef element) =>
-        element with { ElementIdWpf = null };
+    private static bool CanRetryWpfAgentTarget(WpfAgentTarget target, object? fallbackRequest, Exception ex) =>
+        fallbackRequest is not null &&
+        target.PublicElementId is not null &&
+        target.AgentElementId is not null &&
+        IsWpfAgentStaleOrNotFound(ex);
+
+    private async Task<T> CallWpfAgentTargetAsync<T>(
+        AgentClient client,
+        string method,
+        object request,
+        object? fallbackRequest,
+        WpfAgentTarget target,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await client.CallAsync<T>(method, request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (CanRetryWpfAgentTarget(target, fallbackRequest, ex))
+        {
+            try
+            {
+                return await client.CallAsync<T>(method, fallbackRequest, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception retryEx) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(retryEx))
+            {
+                throw CreateStaleElementException(target, retryEx);
+            }
+        }
+        catch (Exception ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
+        {
+            throw CreateStaleElementException(target, ex);
+        }
+    }
+
+    private static InvalidOperationException CreateStaleElementException(WpfAgentTarget target, Exception inner)
+    {
+        var context = target.Handle is null
+            ? ""
+            : $" Last known WPF identity: type={target.Handle.Type}, automationId={target.Handle.AutomationId}, name={target.Handle.Name}, xpath={target.Handle.XPath}.";
+        var lastAgentError = (inner.GetBaseException().Message ?? inner.Message ?? string.Empty)
+            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)[0];
+
+        return new InvalidOperationException(
+            $"stale_element: not_found for '{target.PublicElementId}'.{context} Call resolve_element again. Last agent error: {lastAgentError}");
+    }
+
+    private ElementRef StripAgentElementId(ElementRef element, string? publicElementId = null)
+    {
+        if (!string.IsNullOrWhiteSpace(publicElementId))
+        {
+            _elementHandles.TryUpdateWpfResolution(publicElementId, element);
+        }
+
+        return element with { ElementIdWpf = null };
+    }
 
     public async Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default)
     {
@@ -316,17 +379,19 @@ public sealed partial class AutomationController
             MaxProperties: maxProperties,
             ValueFormat: valueFormat);
 
-        try
-        {
-            var response = await client.CallAsync<GetBindingInfoResponse>("wpf/get_binding_info", request, cancellationToken);
-            response = response with { Element = StripAgentElementId(response.Element) };
-            trace?.SetSummary($"bindings={response.Bindings.Count} truncated={response.Truncated}");
-            return response;
-        }
-        catch (InvalidOperationException ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
-        {
-            throw new InvalidOperationException($"stale_element: not_found for '{target.PublicElementId}'. Call resolve_element again.");
-        }
+        var fallbackRequest = target.RecoveryLocator is null
+            ? null
+            : request with { Locator = target.RecoveryLocator, ElementId = null };
+        var response = await CallWpfAgentTargetAsync<GetBindingInfoResponse>(
+            client,
+            "wpf/get_binding_info",
+            request,
+            fallbackRequest,
+            target,
+            cancellationToken);
+        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        trace?.SetSummary($"bindings={response.Bindings.Count} truncated={response.Truncated}");
+        return response;
         }
         catch (Exception ex)
         {
@@ -450,16 +515,18 @@ public sealed partial class AutomationController
             IncludeFrameworkProperties: includeFrameworkProperties,
             PropertyAllowList: propertyAllowList);
 
-        try
-        {
-            var response = await client.CallAsync<GetDataContextResponse>("wpf/get_data_context", request, cancellationToken);
-            trace?.SetSummary($"type={response.DataContextType ?? "null"}");
-            return response;
-        }
-        catch (InvalidOperationException ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
-        {
-            throw new InvalidOperationException($"stale_element: not_found for '{target.PublicElementId}'. Call resolve_element again.");
-        }
+        var fallbackRequest = target.RecoveryLocator is null
+            ? null
+            : request with { Locator = target.RecoveryLocator, ElementId = null };
+        var response = await CallWpfAgentTargetAsync<GetDataContextResponse>(
+            client,
+            "wpf/get_data_context",
+            request,
+            fallbackRequest,
+            target,
+            cancellationToken);
+        trace?.SetSummary($"type={response.DataContextType ?? "null"}");
+        return response;
         }
         catch (Exception ex)
         {
@@ -501,17 +568,19 @@ public sealed partial class AutomationController
             MaxProperties: maxProperties,
             ValueFormat: valueFormat);
 
-        try
-        {
-            var response = await client.CallAsync<GetComputedPropertiesResponse>("wpf/get_computed_properties", request, cancellationToken);
-            response = response with { Element = StripAgentElementId(response.Element) };
-            trace?.SetSummary($"props={response.Properties.Count} truncated={response.Truncated}");
-            return response;
-        }
-        catch (InvalidOperationException ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
-        {
-            throw new InvalidOperationException($"stale_element: not_found for '{target.PublicElementId}'. Call resolve_element again.");
-        }
+        var fallbackRequest = target.RecoveryLocator is null
+            ? null
+            : request with { Locator = target.RecoveryLocator, ElementId = null };
+        var response = await CallWpfAgentTargetAsync<GetComputedPropertiesResponse>(
+            client,
+            "wpf/get_computed_properties",
+            request,
+            fallbackRequest,
+            target,
+            cancellationToken);
+        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        trace?.SetSummary($"props={response.Properties.Count} truncated={response.Truncated}");
+        return response;
         }
         catch (Exception ex)
         {
@@ -547,17 +616,19 @@ public sealed partial class AutomationController
             IncludeResourceKeys: includeResourceKeys,
             MaxBasedOnDepth: maxBasedOnDepth);
 
-        try
-        {
-            var response = await client.CallAsync<GetStyleChainResponse>("wpf/get_style_chain", request, cancellationToken);
-            response = response with { Element = StripAgentElementId(response.Element) };
-            trace?.SetSummary($"entries={response.Styles.Count}");
-            return response;
-        }
-        catch (InvalidOperationException ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
-        {
-            throw new InvalidOperationException($"stale_element: not_found for '{target.PublicElementId}'. Call resolve_element again.");
-        }
+        var fallbackRequest = target.RecoveryLocator is null
+            ? null
+            : request with { Locator = target.RecoveryLocator, ElementId = null };
+        var response = await CallWpfAgentTargetAsync<GetStyleChainResponse>(
+            client,
+            "wpf/get_style_chain",
+            request,
+            fallbackRequest,
+            target,
+            cancellationToken);
+        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        trace?.SetSummary($"entries={response.Styles.Count}");
+        return response;
         }
         catch (Exception ex)
         {
@@ -595,18 +666,20 @@ public sealed partial class AutomationController
             IncludeResourceKeys: includeResourceKeys,
             IncludePartElementRefs: includePartElementRefs);
 
-        try
-        {
-            var response = await client.CallAsync<GetTemplateInfoResponse>("wpf/get_template_info", request, cancellationToken);
-            response = response with { Element = StripAgentElementId(response.Element) };
-            var named = response.Template.NamedElements is null ? 0 : response.Template.NamedElements.Count;
-            trace?.SetSummary($"named={named}");
-            return response;
-        }
-        catch (InvalidOperationException ex) when (target.PublicElementId is not null && IsWpfAgentStaleOrNotFound(ex))
-        {
-            throw new InvalidOperationException($"stale_element: not_found for '{target.PublicElementId}'. Call resolve_element again.");
-        }
+        var fallbackRequest = target.RecoveryLocator is null
+            ? null
+            : request with { Locator = target.RecoveryLocator, ElementId = null };
+        var response = await CallWpfAgentTargetAsync<GetTemplateInfoResponse>(
+            client,
+            "wpf/get_template_info",
+            request,
+            fallbackRequest,
+            target,
+            cancellationToken);
+        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        var named = response.Template.NamedElements is null ? 0 : response.Template.NamedElements.Count;
+        trace?.SetSummary($"named={named}");
+        return response;
         }
         catch (Exception ex)
         {

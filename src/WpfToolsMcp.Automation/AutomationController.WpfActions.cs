@@ -168,11 +168,17 @@ public sealed partial class AutomationController
                 ReturnFields: FindReturnFields.Standard);
 
             var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
-            return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex) when (IsWpfAgentStaleOrNotFound(ex))
+            {
+            }
         }
 
         return await ResolveWpfElementRefAsync(
-            new ElementLocator(XPath: handle.XPath),
+            CreateWpfHandleRecoveryLocator(handle),
             windowHandle,
             visibleOnly,
             includeOffViewport,

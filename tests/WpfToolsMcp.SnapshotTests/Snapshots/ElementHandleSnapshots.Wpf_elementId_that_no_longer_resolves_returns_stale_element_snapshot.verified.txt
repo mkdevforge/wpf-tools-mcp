@@ -1,4 +1,4 @@
-﻿{
+{
   Resolve: {
     BackendUsed: Wpf,
     Element: {
@@ -19,5 +19,5 @@
     Clicked: true,
     MethodUsed: mouse
   },
-  Error: Tool 'get_data_context' failed: An error occurred invoking 'get_data_context': tool=GetDataContext: stale_element: not_found for '<element>'. Call resolve_element again.
+  Error: Tool 'get_data_context' failed: An error occurred invoking 'get_data_context': tool=GetDataContext: stale_element: not_found for '<element>'. Last known WPF identity: type=Button, automationId=Dynamic_NewButton, name=, xpath=/Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/StackPanel/Button. Call resolve_element again. Last agent error: wpf_resolve:not_found: Locator did not match any elements.
 }

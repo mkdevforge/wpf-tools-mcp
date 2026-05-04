@@ -130,6 +130,30 @@ public sealed class ElementHandleSnapshots
             Bounds = element.Bounds is null ? null : new Rect(0, 0, 0, 0)
         };
 
+    private static async Task<ElementRef> FindSingleWpfElementAsync(
+        McpTestContext mcp,
+        string sessionId,
+        string automationId)
+    {
+        var matches = await mcp.CallToolAsync<FindElementsResponse>("find_elements", new Dictionary<string, object?>
+        {
+            ["sessionId"] = sessionId,
+            ["backend"] = "wpf",
+            ["query"] = new Dictionary<string, object?>
+            {
+                ["automationIdEquals"] = automationId
+            },
+            ["maxResults"] = 3,
+            ["returnFields"] = "standard"
+        });
+
+        Assert.That(matches.BackendUsed, Is.EqualTo(InspectionBackend.Wpf));
+        Assert.That(matches.ReturnedMatches, Is.EqualTo(1));
+        Assert.That(matches.Matches[0].ElementId, Does.StartWith("wpf_"));
+
+        return matches.Matches[0];
+    }
+
     [Test]
     public async Task ResolveElement_uia_then_click_by_elementId_snapshot()
     {
@@ -451,6 +475,77 @@ public sealed class ElementHandleSnapshots
         finally
         {
             await CloseTestAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task Wpf_elementId_survives_agent_handle_eviction_after_inspection_snapshot()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(
+            serverExe,
+            environmentVariables: new Dictionary<string, string?>
+            {
+                ["WPF_TOOLS_MCP_AGENT_MAX_WPF_HANDLES"] = "1"
+            });
+
+        var exePath = TestAppPaths.FindTestAppExecutable();
+        var launch = await mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        {
+            ["exePath"] = exePath,
+            ["workingDirectory"] = Path.GetDirectoryName(exePath)!
+        });
+
+        try
+        {
+            var button = await FindSingleWpfElementAsync(mcp, launch.SessionId, "Basic_Button");
+            var evictingElement = await FindSingleWpfElementAsync(mcp, launch.SessionId, "Basic_TextBox");
+
+            var dataContext = await mcp.CallToolAsync<GetDataContextResponse>("get_data_context", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["elementId"] = button.ElementId,
+                ["maxDepth"] = 0
+            });
+
+            var click = await mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["elementId"] = button.ElementId,
+                ["clickMode"] = "mouseAlways"
+            });
+
+            var status = await mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_ClickStatus"
+                }
+            });
+
+            await Verifier.Verify(new
+            {
+                Button = ScrubElementRefForSnapshot(button),
+                EvictingElement = ScrubElementRefForSnapshot(evictingElement),
+                DataContext = new
+                {
+                    dataContext.DataContextType,
+                    dataContext.Summary,
+                    dataContext.Truncated
+                },
+                Click = click,
+                Status = status.Element.Name
+            });
+        }
+        finally
+        {
+            _ = await mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["force"] = true,
+                ["timeoutMs"] = 2000
+            });
         }
     }
 

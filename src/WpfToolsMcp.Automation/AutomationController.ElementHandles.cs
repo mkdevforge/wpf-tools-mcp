@@ -480,6 +480,33 @@ public sealed partial class AutomationController
         return message.Contains("maps ambiguously to UIA", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static ElementLocator CreateWpfHandleRecoveryLocator(ElementHandle handle)
+    {
+        var typeEquals = string.IsNullOrWhiteSpace(handle.Type) ? null : handle.Type;
+        if (!string.IsNullOrWhiteSpace(handle.AutomationId))
+        {
+            return new ElementLocator(
+                AutomationId: handle.AutomationId,
+                TypeEquals: typeEquals,
+                Strict: true);
+        }
+
+        if (!string.IsNullOrWhiteSpace(handle.Name))
+        {
+            return new ElementLocator(
+                Name: handle.Name,
+                TypeEquals: typeEquals,
+                Strict: true);
+        }
+
+        if (!string.IsNullOrWhiteSpace(handle.XPath))
+        {
+            return new ElementLocator(XPath: handle.XPath, Strict: true);
+        }
+
+        throw new InvalidOperationException("WPF element handle does not contain enough identity data to re-resolve.");
+    }
+
     private async Task<string?> ResolveWpfRootXPathAsync(
         ElementLocator? root,
         long windowHandle,
@@ -823,6 +850,39 @@ public sealed partial class AutomationController
                 }
 
                 _entries[elementId] = existing with { XPath = xpath };
+                Touch(elementId);
+                return true;
+            }
+        }
+
+        public bool TryUpdateWpfResolution(string elementId, ElementRef element)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(elementId);
+            ArgumentNullException.ThrowIfNull(element);
+
+            lock (_sync)
+            {
+                if (!_entries.TryGetValue(elementId, out var existing))
+                {
+                    return false;
+                }
+
+                if (existing.Backend != InspectionBackend.Wpf)
+                {
+                    return false;
+                }
+
+                _entries[elementId] = existing with
+                {
+                    XPath = element.XPath,
+                    WpfAgentElementId = string.IsNullOrWhiteSpace(element.ElementIdWpf)
+                        ? existing.WpfAgentElementId
+                        : element.ElementIdWpf,
+                    Type = string.IsNullOrWhiteSpace(element.Type) ? existing.Type : element.Type,
+                    AutomationId = string.IsNullOrWhiteSpace(element.AutomationId) ? existing.AutomationId : element.AutomationId,
+                    Name = string.IsNullOrWhiteSpace(element.Name) ? existing.Name : element.Name,
+                    ClassName = string.IsNullOrWhiteSpace(element.ClassName) ? existing.ClassName : element.ClassName
+                };
                 Touch(elementId);
                 return true;
             }

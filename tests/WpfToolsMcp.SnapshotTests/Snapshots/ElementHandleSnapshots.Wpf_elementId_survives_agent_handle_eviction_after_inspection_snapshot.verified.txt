@@ -1,0 +1,26 @@
+{
+  Button: {
+    Type: Button,
+    AutomationId: Basic_Button,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/Button,
+    ClassName: <class>,
+    Bounds: {},
+    ElementId: <element>
+  },
+  EvictingElement: {
+    Type: TextBox,
+    AutomationId: Basic_TextBox,
+    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/TextBox,
+    ClassName: <class>,
+    Bounds: {},
+    ElementId: <element>
+  },
+  DataContext: {
+    Truncated: false
+  },
+  Click: {
+    Clicked: true,
+    MethodUsed: mouse
+  },
+  Status: Clicks: 1
+}
