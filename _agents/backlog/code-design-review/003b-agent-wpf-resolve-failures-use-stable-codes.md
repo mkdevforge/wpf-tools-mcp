@@ -1,7 +1,7 @@
 # Agent WPF Resolve Failures Use Stable Codes
 
 - ID: 003b
-- Status: Pending
+- Status: In Progress
 - Priority: P2
 - Source: split from 003
 - References:
@@ -42,3 +42,7 @@ Raise `AgentEndpointException` or another coded exception from WPF resolve failu
 ## QA Review
 
 - 2026-05-06: Split from 003. This isolates the injected-agent side of the typed error model before automation fallback logic is tightened.
+
+## Notes
+
+- 2026-05-06: Selected for implementation after `003a`. First validation target is focused agent design tests for coded WPF resolve not-found, ambiguous, stale-handle, and invalid-request failures without relying on message-prefix inference.
