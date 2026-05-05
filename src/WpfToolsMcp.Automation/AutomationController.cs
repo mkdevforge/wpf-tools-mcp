@@ -8487,31 +8487,50 @@ public sealed partial class AutomationController : IDisposable
 
     private static IReadOnlyList<Window> GetAllTopLevelWindows(Application application, UIA3Automation automation)
     {
-        var windows = application.GetAllTopLevelWindows(automation).ToList();
-        var handles = new HashSet<long>(windows.Select(w => w.Properties.NativeWindowHandle.Value.ToInt64()));
+        var windows = new List<Window>();
+        var handles = new HashSet<long>();
 
+        TryAddWindow(application.MainWindowHandle);
         foreach (var hwnd in EnumerateVisibleTopLevelWindowHandles(application.ProcessId))
         {
+            TryAddWindow(hwnd);
+        }
+
+        return windows;
+
+        void TryAddWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
             var handle = hwnd.ToInt64();
             if (!handles.Add(handle))
             {
-                continue;
+                return;
             }
 
             try
             {
+                GetWindowThreadProcessId(hwnd, out var processId);
+                if (processId != application.ProcessId)
+                {
+                    return;
+                }
+
                 var element = automation.FromHandle(hwnd);
                 var window = element.AsWindow();
 
                 var bounds = window.BoundingRectangle;
                 if (bounds.Width <= 0 || bounds.Height <= 0)
                 {
-                    continue;
+                    return;
                 }
 
                 if (string.IsNullOrWhiteSpace(window.Title))
                 {
-                    continue;
+                    return;
                 }
 
                 windows.Add(window);
@@ -8520,8 +8539,6 @@ public sealed partial class AutomationController : IDisposable
             {
             }
         }
-
-        return windows;
     }
 
     private static IReadOnlyList<IntPtr> EnumerateVisibleTopLevelWindowHandles(int processId)

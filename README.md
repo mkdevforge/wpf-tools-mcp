@@ -8,8 +8,8 @@ WPF Tools MCP is an **MCP server** that gives AI assistants the ability to **ins
 ## Install (dotnet tool)
 
 ```powershell
-dotnet tool install -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.22
-dotnet tool update -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.22
+dotnet tool install -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.23
+dotnet tool update -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.23
 ```
 
 ## Run
