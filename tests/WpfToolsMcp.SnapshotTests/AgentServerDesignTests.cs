@@ -36,17 +36,43 @@ public sealed class AgentServerDesignTests
     }
 
     [Test]
-    public void AgentResponses_maps_wpf_errors_to_protocol_codes()
+    public void AgentResponses_maps_coded_wpf_errors_to_protocol_codes()
+    {
+        var notFound = AgentResponses.FromException(
+            "request-1",
+            AgentEndpointException.WpfResolveNotFound("Locator did not match any elements."));
+        var ambiguous = AgentResponses.FromException(
+            "request-2",
+            AgentEndpointException.WpfResolveAmbiguous("Locator is ambiguous."));
+        var stale = AgentResponses.FromException(
+            "request-3",
+            AgentEndpointException.WpfHandleStale("Element handle is stale."));
+        var invalid = AgentResponses.FromException(
+            "request-4",
+            AgentEndpointException.InvalidRequest("Provide exactly one target."));
+
+        Assert.That(notFound.Error?.Code, Is.EqualTo(AgentErrorCodes.WpfResolveNotFound));
+        Assert.That(ambiguous.Error?.Code, Is.EqualTo(AgentErrorCodes.WpfResolveAmbiguous));
+        Assert.That(stale.Error?.Code, Is.EqualTo(AgentErrorCodes.WpfHandleStale));
+        Assert.That(invalid.Error?.Code, Is.EqualTo(AgentErrorCodes.InvalidRequest));
+    }
+
+    [Test]
+    public void AgentResponses_does_not_infer_migrated_wpf_codes_from_message_prefixes()
     {
         var notFound = AgentResponses.FromException(
             "request-1",
             new InvalidOperationException("wpf_resolve:not_found: Locator did not match any elements."));
-        var stale = AgentResponses.FromException(
+        var ambiguous = AgentResponses.FromException(
             "request-2",
+            new InvalidOperationException("wpf_resolve:ambiguous: Locator is ambiguous."));
+        var stale = AgentResponses.FromException(
+            "request-3",
             new InvalidOperationException("wpf_handle_stale:not_found: '<element>'."));
 
-        Assert.That(notFound.Error?.Code, Is.EqualTo(AgentErrorCodes.WpfResolveNotFound));
-        Assert.That(stale.Error?.Code, Is.EqualTo(AgentErrorCodes.WpfHandleStale));
+        Assert.That(notFound.Error?.Code, Is.EqualTo(AgentErrorCodes.OperationFailed));
+        Assert.That(ambiguous.Error?.Code, Is.EqualTo(AgentErrorCodes.OperationFailed));
+        Assert.That(stale.Error?.Code, Is.EqualTo(AgentErrorCodes.OperationFailed));
     }
 
     [Test]
