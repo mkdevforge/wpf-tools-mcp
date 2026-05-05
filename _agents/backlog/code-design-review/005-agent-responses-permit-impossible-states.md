@@ -1,7 +1,7 @@
 # Agent Responses Permit Impossible States
 
 - ID: 005
-- Status: In Progress
+- Status: Review
 - Priority: P3
 - Source: review finding
 - References:
@@ -44,4 +44,6 @@ Use factory-only construction, validating constructors, or separate success/fail
 ## Notes
 
 - 2026-05-06: Selected for implementation after `001`. First validation target is focused agent protocol/design coverage for valid success, valid failure, invalid construction, and client-side invariant checks.
+- 2026-05-06: Implemented in `3820d55`. `AgentResponse` now has validated construction plus success/failure factories while preserving the `Id`, `Ok`, `Result`, and `Error` wire properties. `AgentClient` now funnels responses through a defensive interpreter before trusting result or error state.
+- 2026-05-06: Validation so far: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter AgentServerDesignTests` passed with 9 tests. The command emits the same `System.Diagnostics.EventLog` version conflict warning noted during `001`.
 - Prefer a low-friction change that preserves current wire compatibility.
