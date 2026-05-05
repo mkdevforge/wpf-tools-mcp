@@ -8,13 +8,11 @@ internal abstract record ElementTarget
 
     public abstract long? WindowHandle { get; init; }
 
-    public bool IsLocator => Locator is not null;
-
-    public ElementTarget WithWindowHandle(long? windowHandle) =>
+    public ElementTarget WithInheritedWindowHandle(long? windowHandle) =>
         this switch
         {
             ByLocator locator => locator with { WindowHandle = windowHandle },
-            ByElementId elementId => elementId with { WindowHandle = windowHandle },
+            ByElementId elementId => elementId,
             _ => throw new InvalidOperationException("Unknown element target shape.")
         };
 

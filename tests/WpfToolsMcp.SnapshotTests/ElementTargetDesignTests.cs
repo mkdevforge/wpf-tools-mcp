@@ -32,6 +32,20 @@ public sealed class ElementTargetDesignTests
     }
 
     [Test]
+    public void WithInheritedWindowHandle_updates_only_locator_targets()
+    {
+        var locator = new ElementLocator(AutomationId: "Basic_Button");
+        var locatorTarget = ElementTarget.Parse(locator, null, null, operationName: "click_element");
+        var elementIdTarget = ElementTarget.Parse(null, "uia_123", 7, operationName: "click_element");
+
+        var inheritedLocator = locatorTarget.WithInheritedWindowHandle(42);
+        var inheritedElementId = elementIdTarget.WithInheritedWindowHandle(42);
+
+        Assert.That(inheritedLocator.WindowHandle, Is.EqualTo(42));
+        Assert.That(inheritedElementId.WindowHandle, Is.EqualTo(7));
+    }
+
+    [Test]
     public void Parse_requires_window_handle_for_element_id_when_policy_demands_it()
     {
         var ex = Assert.Throws<ArgumentException>(

@@ -104,9 +104,7 @@ public static class InteractionTools
                 windowHandle,
                 operationName: "click_element");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
-            var requestTarget = target.IsLocator
-                ? target.WithWindowHandle(effectiveWindowHandle)
-                : target;
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
 
             return automation.RunExclusiveAsync(
                 () => automation.ClickElementAsync(
