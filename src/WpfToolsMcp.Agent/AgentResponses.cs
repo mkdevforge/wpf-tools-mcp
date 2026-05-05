@@ -20,9 +20,10 @@ internal static class AgentResponses
 
     public static AgentResponse FromException(string requestId, Exception exception)
     {
-        var code = exception is AgentEndpointException endpointException
-            ? endpointException.Code
-            : InferCode(exception.Message);
+        var code = exception is IAgentErrorCodeException { Code: { } typedCode } &&
+                   !string.IsNullOrWhiteSpace(typedCode)
+            ? typedCode
+            : AgentErrorCodes.OperationFailed;
 
         return Failure(requestId, code, exception.Message, exception.ToString());
     }
@@ -30,29 +31,4 @@ internal static class AgentResponses
     public static AgentResponse UnknownMethod(string requestId, string method) =>
         Failure(requestId, AgentErrorCodes.UnknownMethod, $"Unknown method '{method}'.");
 
-    private static string InferCode(string message)
-    {
-        if (message.Contains("wpf_handle_stale:", StringComparison.OrdinalIgnoreCase))
-        {
-            return AgentErrorCodes.WpfHandleStale;
-        }
-
-        if (message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase))
-        {
-            return AgentErrorCodes.WpfResolveNotFound;
-        }
-
-        if (message.Contains("wpf_resolve:ambiguous:", StringComparison.OrdinalIgnoreCase))
-        {
-            return AgentErrorCodes.WpfResolveAmbiguous;
-        }
-
-        if (message.Contains("invalid_request:", StringComparison.OrdinalIgnoreCase) ||
-            message.Contains("requires exactly one", StringComparison.OrdinalIgnoreCase))
-        {
-            return AgentErrorCodes.InvalidRequest;
-        }
-
-        return AgentErrorCodes.OperationFailed;
-    }
 }

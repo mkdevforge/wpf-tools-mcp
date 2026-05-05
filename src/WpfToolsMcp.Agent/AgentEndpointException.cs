@@ -22,4 +22,13 @@ internal sealed class AgentEndpointException : InvalidOperationException, IAgent
 
     public static AgentEndpointException MissingParams(string method) =>
         new(AgentErrorCodes.MissingParams, $"Agent method '{method}' requires request params.");
+
+    public static AgentEndpointException WpfResolveNotFound(string message) =>
+        new(AgentErrorCodes.WpfResolveNotFound, message);
+
+    public static AgentEndpointException WpfResolveAmbiguous(string message) =>
+        new(AgentErrorCodes.WpfResolveAmbiguous, message);
+
+    public static AgentEndpointException WpfHandleStale(string message) =>
+        new(AgentErrorCodes.WpfHandleStale, message);
 }

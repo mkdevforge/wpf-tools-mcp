@@ -69,10 +69,14 @@ public sealed class AgentServerDesignTests
         var stale = AgentResponses.FromException(
             "request-3",
             new InvalidOperationException("wpf_handle_stale:not_found: '<element>'."));
+        var invalid = AgentResponses.FromException(
+            "request-4",
+            new InvalidOperationException("invalid_request: provide exactly one target."));
 
         Assert.That(notFound.Error?.Code, Is.EqualTo(AgentErrorCodes.OperationFailed));
         Assert.That(ambiguous.Error?.Code, Is.EqualTo(AgentErrorCodes.OperationFailed));
         Assert.That(stale.Error?.Code, Is.EqualTo(AgentErrorCodes.OperationFailed));
+        Assert.That(invalid.Error?.Code, Is.EqualTo(AgentErrorCodes.OperationFailed));
     }
 
     [Test]

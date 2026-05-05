@@ -100,7 +100,7 @@ internal static class WpfVisualTreeInspector
             {
                 if (!_byId.TryGetValue(id, out reference))
                 {
-                    throw new InvalidOperationException($"wpf_handle_stale:not_found: '{id}'.");
+                    throw AgentEndpointException.WpfHandleStale($"wpf_handle_stale:not_found: '{id}'.");
                 }
 
                 Touch(id);
@@ -109,20 +109,20 @@ internal static class WpfVisualTreeInspector
             if (!reference.TryGetTarget(out var element))
             {
                 Release(id);
-                throw new InvalidOperationException($"wpf_handle_stale:collected: '{id}'.");
+                throw AgentEndpointException.WpfHandleStale($"wpf_handle_stale:collected: '{id}'.");
             }
 
             var window = GetContainingWindow(element);
             if (window is null)
             {
                 Release(id);
-                throw new InvalidOperationException($"wpf_handle_stale:detached: '{id}'.");
+                throw AgentEndpointException.WpfHandleStale($"wpf_handle_stale:detached: '{id}'.");
             }
 
             var actualHandle = new WindowInteropHelper(window).Handle;
             if (actualHandle == IntPtr.Zero || actualHandle.ToInt64() != windowHandle)
             {
-                throw new InvalidOperationException(
+                throw AgentEndpointException.WpfHandleStale(
                     $"wpf_handle_stale:window_mismatch: '{id}' expected={windowHandle} actual={actualHandle.ToInt64()}.");
             }
 
@@ -1518,7 +1518,7 @@ internal static class WpfVisualTreeInspector
     {
         if (matches.Count == 0)
         {
-            throw new InvalidOperationException("wpf_resolve:not_found: Locator did not match any elements.");
+            throw AgentEndpointException.WpfResolveNotFound("wpf_resolve:not_found: Locator did not match any elements.");
         }
 
         if (matches.Count == 1)
@@ -1536,7 +1536,7 @@ internal static class WpfVisualTreeInspector
             var ordered = OrderMatchesForLocator(matches, locator);
             if (index >= ordered.Count)
             {
-                throw new InvalidOperationException(
+                throw AgentEndpointException.WpfResolveNotFound(
                     $"wpf_resolve:not_found: Locator index {index} is out of range (found {ordered.Count}).");
             }
 
@@ -1545,7 +1545,7 @@ internal static class WpfVisualTreeInspector
 
         if (locator.Strict)
         {
-            throw new InvalidOperationException(
+            throw AgentEndpointException.WpfResolveAmbiguous(
                 $"wpf_resolve:ambiguous: Locator is ambiguous (found {matches.Count}). Provide 'index' to disambiguate.");
         }
 
@@ -1640,7 +1640,7 @@ internal static class WpfVisualTreeInspector
     {
         if (IsEmptyLocator(locator))
         {
-            throw new ArgumentException(
+            throw AgentEndpointException.InvalidRequest(
                 "Locator must specify at least one of: xpath, automationId, automationIdContains, name, nameContains, className, classNameContains, typeEquals, controlTypeEquals, index.");
         }
 
@@ -1648,7 +1648,7 @@ internal static class WpfVisualTreeInspector
         {
             if (locator.Index is not null)
             {
-                throw new ArgumentException("index cannot be used with xpath.", nameof(locator));
+                throw AgentEndpointException.InvalidRequest("invalid_request: index cannot be used with xpath.");
             }
 
             var normalized = NormalizeXPath(locator.XPath);
@@ -1681,10 +1681,10 @@ internal static class WpfVisualTreeInspector
             {
                 if (ex.Message.Contains("ambiguous", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException($"wpf_resolve:ambiguous: {ex.Message}");
+                    throw AgentEndpointException.WpfResolveAmbiguous($"wpf_resolve:ambiguous: {ex.Message}");
                 }
 
-                throw new InvalidOperationException($"wpf_resolve:not_found: {ex.Message}");
+                throw AgentEndpointException.WpfResolveNotFound($"wpf_resolve:not_found: {ex.Message}");
             }
         }
 
@@ -1704,7 +1704,7 @@ internal static class WpfVisualTreeInspector
 
             if (index >= descendants.Length)
             {
-                throw new InvalidOperationException($"wpf_resolve:not_found: Locator index {index} is out of range (found {descendants.Length}).");
+                throw AgentEndpointException.WpfResolveNotFound($"wpf_resolve:not_found: Locator index {index} is out of range (found {descendants.Length}).");
             }
 
             return descendants[index];
@@ -1737,14 +1737,14 @@ internal static class WpfVisualTreeInspector
         var hasElementId = !string.IsNullOrWhiteSpace(elementId);
         if (hasLocator == hasElementId)
         {
-            throw new ArgumentException($"invalid_request: provide exactly one of {targetName}.");
+            throw AgentEndpointException.InvalidRequest($"invalid_request: provide exactly one of {targetName}.");
         }
 
         if (hasElementId)
         {
             if (windowHandle is not long hwnd || hwnd == 0)
             {
-                throw new ArgumentException("invalid_request: windowHandle is required with elementId.");
+                throw AgentEndpointException.InvalidRequest("invalid_request: windowHandle is required with elementId.");
             }
 
             var element = ElementHandles.Resolve(hwnd, elementId!.Trim());
@@ -1758,11 +1758,11 @@ internal static class WpfVisualTreeInspector
 
             var resolved = chain.Count > 0 && ReferenceEquals(chain[^1].Element, element)
                 ? chain[^1]
-                : throw new InvalidOperationException($"wpf_handle_stale:detached: '{elementId!.Trim()}'.");
+                : throw AgentEndpointException.WpfHandleStale($"wpf_handle_stale:detached: '{elementId!.Trim()}'.");
 
             if (visibleOnly && !ShouldIncludeWpfElement(resolved.Element, visibleOnly, includeOffViewport, TryGetClientBoundsScreen(window)))
             {
-                throw new InvalidOperationException("wpf_handle_stale:not_visible: element is not visible under the requested filters.");
+                throw AgentEndpointException.WpfHandleStale("wpf_handle_stale:not_visible: element is not visible under the requested filters.");
             }
 
             return resolved;
@@ -2084,7 +2084,7 @@ internal static class WpfVisualTreeInspector
         var hasNumericValue = request.Value.HasValue;
         if (hasText == hasNumericValue)
         {
-            throw new ArgumentException("invalid_request: set_value requires exactly one of text OR value.");
+            throw AgentEndpointException.InvalidRequest("invalid_request: set_value requires exactly one of text OR value.");
         }
 
         var window = ResolveWindow(request.WindowHandle);
@@ -2157,7 +2157,7 @@ internal static class WpfVisualTreeInspector
         var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
         if (hasXPath == hasElementId)
         {
-            throw new ArgumentException("invalid_request: provide exactly one of elementId|xpath.");
+            throw AgentEndpointException.InvalidRequest("invalid_request: provide exactly one of elementId|xpath.");
         }
 
         var window = ResolveWindow(request.WindowHandle);
