@@ -24,7 +24,7 @@
 | 005 | Done | P3 | [Agent responses permit impossible states](005-agent-responses-permit-impossible-states.md) | review finding |
 | 003a | Done | P2 | [MCP tool boundary uses typed error codes](003a-mcp-tool-boundary-uses-typed-error-codes.md) | split from 003 |
 | 003b | Done | P2 | [Agent WPF resolve failures use stable codes](003b-agent-wpf-resolve-failures-use-stable-codes.md) | split from 003 |
-| 003c | In Progress | P2 | [Automation fallback logic consumes typed error codes](003c-automation-fallback-logic-consumes-typed-error-codes.md) | split from 003 |
+| 003c | Review | P2 | [Automation fallback logic consumes typed error codes](003c-automation-fallback-logic-consumes-typed-error-codes.md) | split from 003 |
 | 002a | Pending | P2 | [Element target parser for click element](002a-element-target-parser-for-click-element.md) | split from 002 |
 | 002b | Pending | P2 | [Central locator shape validation](002b-central-locator-shape-validation.md) | split from 002 |
 | 002c | Pending | P2 | [Migrate remaining target-bearing operations](002c-migrate-remaining-target-bearing-operations.md) | split from 002 |

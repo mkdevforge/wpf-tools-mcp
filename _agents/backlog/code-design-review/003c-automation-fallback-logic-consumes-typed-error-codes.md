@@ -1,7 +1,7 @@
 # Automation Fallback Logic Consumes Typed Error Codes
 
 - ID: 003c
-- Status: In Progress
+- Status: Review
 - Priority: P2
 - Source: split from 003
 - References:
@@ -45,3 +45,5 @@ Teach the relevant automation helper methods to consume coded exceptions, especi
 ## Notes
 
 - 2026-05-06: Selected for implementation after `003b`. First validation target is focused automation helper coverage for coded WPF not-found, ambiguous, stale-handle, and legacy fallback behavior.
+- 2026-05-06: Implemented in `13dbc55`. Added `WpfAgentErrorClassifier` as the single owner for typed WPF agent error classification, routed retry/not-found/ambiguous helpers through it, and confined remaining WPF prefix checks to documented legacy fallback methods.
+- 2026-05-06: Validation so far: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter WpfAgentErrorClassifierTests` passed with 3 tests. The command emits the same `System.Diagnostics.EventLog` version conflict warning noted during `001`.
