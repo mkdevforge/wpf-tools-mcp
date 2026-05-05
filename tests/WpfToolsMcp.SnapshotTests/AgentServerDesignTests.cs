@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using WpfToolsMcp.Agent;
 using WpfToolsMcp.AgentProtocol;
+using WpfToolsMcp.Automation;
 
 namespace WpfToolsMcp.SnapshotTests;
 
@@ -107,6 +108,28 @@ public sealed class AgentServerDesignTests
         Assert.That(
             () => JsonSerializer.Deserialize<AgentResponse>(json),
             NUnit.Framework.Throws.Exception);
+    }
+
+    [Test]
+    public void AgentClient_validates_response_id_and_typed_failure()
+    {
+        var mismatch = AgentResponse.Success("response-2", new JsonObject { ["value"] = 42 });
+
+        Assert.That(
+            () => AgentClient.ReadResultOrThrow("method", "request-1", mismatch),
+            NUnit.Framework.Throws.InvalidOperationException.With.Message.EqualTo("Agent protocol error: response ID mismatch."));
+
+        var failure = AgentResponse.Failure(
+            "request-1",
+            new AgentError("failed", "details", AgentErrorCodes.OperationFailed));
+
+        var ex = Assert.Throws<AgentCallException>(
+            () => AgentClient.ReadResultOrThrow("method", "request-1", failure));
+
+        Assert.That(ex?.Code, Is.EqualTo(AgentErrorCodes.OperationFailed));
+        Assert.That(ex?.Details, Is.EqualTo("details"));
+        Assert.That(ex?.Message, Does.Contain("failed"));
+        Assert.That(ex?.Message, Does.Contain("details"));
     }
 
     [Test]

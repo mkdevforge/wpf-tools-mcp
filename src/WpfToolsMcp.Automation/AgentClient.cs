@@ -92,24 +92,7 @@ internal sealed class AgentClient : IAsyncDisposable
             await PipeProtocol.WriteAsync(_pipe, request, callToken);
             var response = await PipeProtocol.ReadAsync<AgentResponse>(_pipe, callToken);
 
-            if (!string.Equals(response.Id, request.Id, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("Agent protocol error: response ID mismatch.");
-            }
-
-            if (!response.Ok)
-            {
-                var message = response.Error?.Message ?? "Agent call failed.";
-                var details = response.Error?.Details;
-                if (!string.IsNullOrWhiteSpace(details))
-                {
-                    message += $"{Environment.NewLine}{details}";
-                }
-
-                throw new AgentCallException(message, response.Error?.Code, details);
-            }
-
-            return response.Result;
+            return ReadResultOrThrow(method, request.Id, response);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -124,6 +107,35 @@ internal sealed class AgentClient : IAsyncDisposable
                 _mutex.Release();
             }
         }
+    }
+
+    internal static JsonNode? ReadResultOrThrow(string method, string requestId, AgentResponse response)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(method);
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+        ArgumentNullException.ThrowIfNull(response);
+
+        response.EnsureValid();
+
+        if (!string.Equals(response.Id, requestId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Agent protocol error: response ID mismatch.");
+        }
+
+        if (!response.Ok)
+        {
+            var error = response.Error!;
+            var message = error.Message;
+            var details = error.Details;
+            if (!string.IsNullOrWhiteSpace(details))
+            {
+                message += $"{Environment.NewLine}{details}";
+            }
+
+            throw new AgentCallException(message, error.Code, details);
+        }
+
+        return response.Result;
     }
 
     public async ValueTask DisposeAsync()

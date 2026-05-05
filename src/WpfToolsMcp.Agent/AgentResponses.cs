@@ -7,18 +7,16 @@ namespace WpfToolsMcp.Agent;
 internal static class AgentResponses
 {
     public static AgentResponse Success<T>(string requestId, T result) =>
-        new(
+        AgentResponse.Success(
             requestId,
-            Ok: true,
-            Result: result is JsonNode node
+            result is JsonNode node
                 ? node
                 : JsonSerializer.SerializeToNode(result, AgentJson.Options));
 
     public static AgentResponse Failure(string requestId, string code, string message, string? details = null) =>
-        new(
+        AgentResponse.Failure(
             requestId,
-            Ok: false,
-            Error: new AgentError(message, details, code));
+            new AgentError(message, details, code));
 
     public static AgentResponse FromException(string requestId, Exception exception)
     {
