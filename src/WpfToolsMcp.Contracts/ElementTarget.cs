@@ -60,7 +60,7 @@ internal abstract record ElementTarget
             WindowHandle = windowHandle;
         }
 
-        public ElementLocator Value { get; init; }
+        public ElementLocator Value { get; }
 
         public override ElementLocator? Locator => Value;
 
@@ -77,7 +77,7 @@ internal abstract record ElementTarget
             WindowHandle = windowHandle;
         }
 
-        public string Value { get; init; }
+        public string Value { get; }
 
         public override ElementLocator? Locator => null;
 
