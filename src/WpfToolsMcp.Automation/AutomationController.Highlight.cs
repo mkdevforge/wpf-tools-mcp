@@ -1,5 +1,6 @@
 using System.Drawing;
 using FlaUI.Core.AutomationElements;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -100,7 +101,7 @@ public sealed partial class AutomationController
                         : null;
 
                     var agentResult = await client.CallAsync<HighlightWpfElementResponse>(
-                        "wpf/highlight_element",
+                        AgentMethods.HighlightElement,
                         new HighlightWpfElementRequest(
                             WindowHandle: windowHandleUsed,
                             Locator: locator,
@@ -128,7 +129,7 @@ public sealed partial class AutomationController
                         if (TryGetHighlightProbePoint(bounds, out var xScreen, out var yScreen))
                         {
                             var picked = await client.CallAsync<PickWpfElementAtPointResponse>(
-                                "wpf/pick_element_at_point",
+                                AgentMethods.PickElementAtPoint,
                                 new PickWpfElementAtPointRequest(
                                     WindowHandle: windowHandleUsed,
                                     X: xScreen,
@@ -142,7 +143,7 @@ public sealed partial class AutomationController
                             var mappedLocator = new ElementLocator(XPath: mapped.XPath);
 
                             var agentResult = await client.CallAsync<HighlightWpfElementResponse>(
-                                "wpf/highlight_element",
+                                AgentMethods.HighlightElement,
                                 new HighlightWpfElementRequest(
                                     WindowHandle: windowHandleUsed,
                                     Locator: string.IsNullOrWhiteSpace(mapped.ElementIdWpf) ? mappedLocator : null,
@@ -321,7 +322,7 @@ public sealed partial class AutomationController
         }
 
         return await client.CallAsync<ElementRef>(
-            "wpf/resolve_element",
+            AgentMethods.ResolveElement,
             new ResolveWpfElementRequest(
                 WindowHandle: windowHandle,
                 Locator: string.IsNullOrWhiteSpace(agentElementId) ? locator : null,

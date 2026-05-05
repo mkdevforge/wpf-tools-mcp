@@ -6,5 +6,4 @@ public sealed record AgentRequest(string Id, string Method, JsonNode? Params = n
 
 public sealed record AgentResponse(string Id, bool Ok, JsonNode? Result = null, AgentError? Error = null);
 
-public sealed record AgentError(string Message, string? Details = null);
-
+public sealed record AgentError(string Message, string? Details = null, string? Code = null);

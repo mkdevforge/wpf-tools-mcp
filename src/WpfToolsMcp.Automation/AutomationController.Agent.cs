@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -92,6 +93,11 @@ public sealed partial class AutomationController
 
     private static bool IsWpfAgentStaleOrNotFound(Exception ex)
     {
+        if (ex is AgentCallException { Code: AgentErrorCodes.WpfResolveNotFound or AgentErrorCodes.WpfHandleStale })
+        {
+            return true;
+        }
+
         var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
         return message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("wpf_handle_stale:", StringComparison.OrdinalIgnoreCase);
@@ -184,7 +190,7 @@ public sealed partial class AutomationController
             // Ensure the agent is still responsive
             try
             {
-                _ = await existingClient.CallAsync<string>("ping", @params: null, cancellationToken);
+                _ = await existingClient.CallAsync<string>(AgentMethods.Ping, @params: null, cancellationToken);
                 var response = new InjectAgentResponse(Injected: false, PipeName: existingPipeName);
                 ClearAutoAgentFailure();
                 trace?.SetSummary($"injected={response.Injected} pipe={response.PipeName}");
@@ -212,7 +218,7 @@ public sealed partial class AutomationController
         {
             try
             {
-                var pong = await connectFirstClient.CallAsync<string>("ping", @params: null, cancellationToken);
+                var pong = await connectFirstClient.CallAsync<string>(AgentMethods.Ping, @params: null, cancellationToken);
                 if (!string.Equals(pong, "pong", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException($"Unexpected agent ping response '{pong}'.");
@@ -265,7 +271,7 @@ public sealed partial class AutomationController
         var client = await ConnectToAgentWithRetryAsync(pipeName, cancellationToken);
         try
         {
-            var pong = await client.CallAsync<string>("ping", @params: null, cancellationToken);
+            var pong = await client.CallAsync<string>(AgentMethods.Ping, @params: null, cancellationToken);
             if (!string.Equals(pong, "pong", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Unexpected agent ping response '{pong}'.");
@@ -306,7 +312,7 @@ public sealed partial class AutomationController
         try
         {
             var client = await EnsureAgentConnectedAsync(cancellationToken);
-            var pong = await client.CallAsync<string>("ping", @params: null, cancellationToken);
+            var pong = await client.CallAsync<string>(AgentMethods.Ping, @params: null, cancellationToken);
             var response = new AgentPingResponse(pong);
             trace?.SetSummary($"message={response.Message}");
             return response;
@@ -333,7 +339,7 @@ public sealed partial class AutomationController
         {
             var client = await EnsureAgentConnectedAsync(cancellationToken);
             var request = new PerformanceStartRequest(probeIntervalMs, autoStopAfterMs, resetIfRunning);
-            var response = await client.CallAsync<PerformanceStartResponse>("wpf/performance_start", request, cancellationToken);
+            var response = await client.CallAsync<PerformanceStartResponse>(AgentMethods.PerformanceStart, request, cancellationToken);
             trace?.SetSummary($"runId={response.RunId} startedAt={response.StartedAtUtc:O}");
             return response;
         }
@@ -359,7 +365,7 @@ public sealed partial class AutomationController
         {
             var client = await EnsureAgentConnectedAsync(cancellationToken);
             var request = new PerformanceStopRequest(runId.Trim());
-            var response = await client.CallAsync<PerformanceStopResponse>("wpf/performance_stop", request, cancellationToken);
+            var response = await client.CallAsync<PerformanceStopResponse>(AgentMethods.PerformanceStop, request, cancellationToken);
             trace?.SetSummary($"runId={runId.Trim()}");
             return response;
         }
@@ -408,7 +414,7 @@ public sealed partial class AutomationController
             : request with { Locator = target.RecoveryLocator, ElementId = null };
         var response = await CallWpfAgentTargetAsync<GetBindingInfoResponse>(
             client,
-            "wpf/get_binding_info",
+            AgentMethods.GetBindingInfo,
             request,
             fallbackRequest,
             target,
@@ -447,7 +453,7 @@ public sealed partial class AutomationController
                 MaxErrors: maxErrors,
                 MaxNodes: maxNodes);
 
-            var response = await client.CallAsync<GetBindingErrorsResponse>("wpf/get_binding_errors", request, cancellationToken);
+            var response = await client.CallAsync<GetBindingErrorsResponse>(AgentMethods.GetBindingErrors, request, cancellationToken);
             trace?.SetSummary($"errors={response.Errors.Count} truncated={response.Truncated}");
             return response;
         }
@@ -487,7 +493,7 @@ public sealed partial class AutomationController
                 MaxNodes: maxNodes,
                 MaxFindings: maxFindings);
 
-            var response = await client.CallAsync<GetUiaCoverageReportResponse>("wpf/uia_coverage_report", request, cancellationToken);
+            var response = await client.CallAsync<GetUiaCoverageReportResponse>(AgentMethods.GetUiaCoverageReport, request, cancellationToken);
             response = response with
             {
                 Findings = response.Findings
@@ -544,7 +550,7 @@ public sealed partial class AutomationController
             : request with { Locator = target.RecoveryLocator, ElementId = null };
         var response = await CallWpfAgentTargetAsync<GetDataContextResponse>(
             client,
-            "wpf/get_data_context",
+            AgentMethods.GetDataContext,
             request,
             fallbackRequest,
             target,
@@ -597,7 +603,7 @@ public sealed partial class AutomationController
             : request with { Locator = target.RecoveryLocator, ElementId = null };
         var response = await CallWpfAgentTargetAsync<GetComputedPropertiesResponse>(
             client,
-            "wpf/get_computed_properties",
+            AgentMethods.GetComputedProperties,
             request,
             fallbackRequest,
             target,
@@ -645,7 +651,7 @@ public sealed partial class AutomationController
             : request with { Locator = target.RecoveryLocator, ElementId = null };
         var response = await CallWpfAgentTargetAsync<GetStyleChainResponse>(
             client,
-            "wpf/get_style_chain",
+            AgentMethods.GetStyleChain,
             request,
             fallbackRequest,
             target,
@@ -695,7 +701,7 @@ public sealed partial class AutomationController
             : request with { Locator = target.RecoveryLocator, ElementId = null };
         var response = await CallWpfAgentTargetAsync<GetTemplateInfoResponse>(
             client,
-            "wpf/get_template_info",
+            AgentMethods.GetTemplateInfo,
             request,
             fallbackRequest,
             target,
@@ -730,7 +736,7 @@ public sealed partial class AutomationController
             throw new InvalidOperationException("WPF agent is not connected.");
         }
 
-        return await client.CallAsync<GetVisualTreeResponse>("wpf/get_visual_tree", request, cancellationToken);
+        return await client.CallAsync<GetVisualTreeResponse>(AgentMethods.GetVisualTree, request, cancellationToken);
     }
 
     internal async Task<GetVisualTreeResponse?> TryGetVisualTreeWpfAsync(
@@ -748,7 +754,7 @@ public sealed partial class AutomationController
 
         try
         {
-            return await client.CallAsync<GetVisualTreeResponse>("wpf/get_visual_tree", request, cancellationToken);
+            return await client.CallAsync<GetVisualTreeResponse>(AgentMethods.GetVisualTree, request, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -775,7 +781,7 @@ public sealed partial class AutomationController
             throw new InvalidOperationException("WPF agent is not connected.");
         }
 
-        return await client.CallAsync<FindElementsResponse>("wpf/find_elements", request, cancellationToken);
+        return await client.CallAsync<FindElementsResponse>(AgentMethods.FindElements, request, cancellationToken);
     }
 
     internal async Task<FindElementsResponse?> TryFindElementsWpfAsync(
@@ -793,7 +799,7 @@ public sealed partial class AutomationController
 
         try
         {
-            return await client.CallAsync<FindElementsResponse>("wpf/find_elements", request, cancellationToken);
+            return await client.CallAsync<FindElementsResponse>(AgentMethods.FindElements, request, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -820,7 +826,7 @@ public sealed partial class AutomationController
             throw new InvalidOperationException("WPF agent is not connected.");
         }
 
-        return await client.CallAsync<GetPathToElementResponse>("wpf/get_path", request, cancellationToken);
+        return await client.CallAsync<GetPathToElementResponse>(AgentMethods.GetPath, request, cancellationToken);
     }
 
     private async Task<AgentClient?> EnsureAgentConnectedOrNullAsync(CancellationToken cancellationToken)
@@ -853,7 +859,7 @@ public sealed partial class AutomationController
 
             try
             {
-                var pong = await connectClient.CallAsync<string>("ping", @params: null, cancellationToken);
+                var pong = await connectClient.CallAsync<string>(AgentMethods.Ping, @params: null, cancellationToken);
                 if (!string.Equals(pong, "pong", StringComparison.OrdinalIgnoreCase))
                 {
                     await connectClient.DisposeAsync();

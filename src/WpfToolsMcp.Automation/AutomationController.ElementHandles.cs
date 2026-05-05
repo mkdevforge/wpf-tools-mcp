@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Linq;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -112,7 +113,7 @@ public sealed partial class AutomationController
                     if (client is not null)
                     {
                         _ = await client.CallAsync<ReleaseElementResponse>(
-                            "wpf/release_element",
+                            AgentMethods.ReleaseElement,
                             new ReleaseWpfElementRequest(handle.WpfAgentElementId),
                             CancellationToken.None).ConfigureAwait(false);
                     }
@@ -382,7 +383,7 @@ public sealed partial class AutomationController
             ReturnFields: FindReturnFields.Standard);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
-        return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
+        return await client.CallAsync<ElementRef>(AgentMethods.ResolveElement, request, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ResolvedWpfLocatorTarget?> TryResolveWpfLocatorTargetForAutoAsync(

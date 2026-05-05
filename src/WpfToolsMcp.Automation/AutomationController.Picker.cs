@@ -1,5 +1,6 @@
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -287,7 +288,7 @@ public sealed partial class AutomationController
         }
 
         var response = await client.CallAsync<PickWpfElementAtPointResponse>(
-            "wpf/pick_element_at_point",
+            AgentMethods.PickElementAtPoint,
             new PickWpfElementAtPointRequest(
                 WindowHandle: windowHandleUsed,
                 X: xScreen,

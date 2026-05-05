@@ -106,7 +106,7 @@ internal sealed class AgentClient : IAsyncDisposable
                     message += $"{Environment.NewLine}{details}";
                 }
 
-                throw new InvalidOperationException(message);
+                throw new AgentCallException(message, response.Error?.Code, details);
             }
 
             return response.Result;

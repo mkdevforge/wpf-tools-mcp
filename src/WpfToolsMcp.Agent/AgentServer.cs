@@ -1,29 +1,19 @@
 using System.IO.Pipes;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Threading;
 using WpfToolsMcp.AgentProtocol;
-using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Agent;
 
 internal static class AgentServer
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
-
     private static readonly UiThreadLatencyRecorder UiThreadLatency = new();
+    private static readonly AgentOperationRegistry Operations = AgentOperations.Create();
 
     public static async Task RunAsync(string pipeName, CancellationToken cancellationToken)
     {
-        // Allow multiple concurrent MCP sessions to connect to the same injected agent.
-        // Each connection is handled on its own task, but all WPF operations are still serialized
-        // via Dispatcher in RunOnUiAsync.
-
-        var connectionTasks = new List<Task>();
+        var connectionTasks = new AgentConnectionTasks();
+        var retryDelay = AgentPipeRetryPolicy.InitialDelay;
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -32,29 +22,30 @@ internal static class AgentServer
             {
                 pipe = CreatePipe(pipeName);
                 await pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
+                retryDelay = AgentPipeRetryPolicy.InitialDelay;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 pipe?.Dispose();
                 break;
             }
+            catch (Exception ex) when (AgentPipeRetryPolicy.CanRetry(ex))
+            {
+                pipe?.Dispose();
+                await AgentPipeRetryPolicy.DelayAsync(retryDelay, cancellationToken).ConfigureAwait(false);
+                retryDelay = AgentPipeRetryPolicy.NextDelay(retryDelay);
+                continue;
+            }
             catch
             {
                 pipe?.Dispose();
-                continue;
+                throw;
             }
 
-            connectionTasks.Add(Task.Run(() => RunConnectionAsync(pipe, cancellationToken), CancellationToken.None));
+            connectionTasks.Track(Task.Run(() => RunConnectionAsync(pipe, cancellationToken), CancellationToken.None));
         }
 
-        try
-        {
-            await Task.WhenAll(connectionTasks).ConfigureAwait(false);
-        }
-        catch
-        {
-            // Best-effort shutdown.
-        }
+        await connectionTasks.WaitForAllAsync().ConfigureAwait(false);
     }
 
     private static NamedPipeServerStream CreatePipe(string pipeName) =>
@@ -81,7 +72,15 @@ internal static class AgentServer
                 break;
             }
 
-            var response = await HandleAsync(request, cancellationToken).ConfigureAwait(false);
+            AgentResponse response;
+            try
+            {
+                response = await HandleAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
 
             try
             {
@@ -94,263 +93,42 @@ internal static class AgentServer
         }
     }
 
-    private static async Task<AgentResponse> HandleAsync(AgentRequest request, CancellationToken cancellationToken)
+    internal static async Task<AgentResponse> HandleAsync(AgentRequest request, CancellationToken cancellationToken)
     {
         try
         {
-            switch (request.Method)
+            if (!Operations.TryGet(request.Method, out var operation))
             {
-                case "ping":
-                    return new AgentResponse(request.Id, Ok: true, Result: JsonValue.Create("pong"));
-                case "wpf/get_visual_tree":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<GetWpfVisualTreeRequestV2>(JsonOptions)
-                            ?? new GetWpfVisualTreeRequestV2();
-
-                        var response = WpfVisualTreeInspector.GetVisualTree(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/performance_start":
-                    {
-                        var typedRequest = request.Params?.Deserialize<PerformanceStartRequest>(JsonOptions)
-                            ?? new PerformanceStartRequest();
-
-                        var dispatcher = Application.Current?.Dispatcher;
-                        if (dispatcher is null)
-                        {
-                            return new AgentResponse(
-                                Id: request.Id,
-                                Ok: false,
-                                Error: new AgentError("Application.Current.Dispatcher is not available. Is the target a WPF app?"));
-                        }
-
-                        var response = UiThreadLatency.Start(dispatcher, typedRequest);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }
-                case "wpf/performance_stop":
-                    {
-                        var typedRequest = request.Params?.Deserialize<PerformanceStopRequest>(JsonOptions)
-                            ?? throw new InvalidOperationException("Missing request params.");
-
-                        var response = UiThreadLatency.Stop(typedRequest.RunId);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }
-                case "wpf/find_elements":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<FindElementsWpfRequest>(JsonOptions)
-                            ?? new FindElementsWpfRequest();
-
-                        var response = WpfVisualTreeInspector.FindElements(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/get_path":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<GetWpfPathRequest>(JsonOptions)
-                            ?? new GetWpfPathRequest();
-
-                        var response = WpfVisualTreeInspector.GetPath(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/resolve_element":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<ResolveWpfElementRequest>(JsonOptions)
-                            ?? new ResolveWpfElementRequest();
-
-                        var response = WpfVisualTreeInspector.ResolveElement(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/set_value":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<SetWpfValueRequest>(JsonOptions)
-                            ?? new SetWpfValueRequest();
-
-                        var response = WpfVisualTreeInspector.SetValue(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/bring_into_view":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<BringIntoViewWpfRequest>(JsonOptions)
-                            ?? throw new InvalidOperationException("Missing request params.");
-
-                        var response = WpfVisualTreeInspector.BringIntoView(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/release_element":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<ReleaseWpfElementRequest>(JsonOptions)
-                            ?? throw new InvalidOperationException("Missing request params.");
-
-                        var response = WpfVisualTreeInspector.ReleaseElement(typedRequest);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/highlight_element":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<HighlightWpfElementRequest>(JsonOptions)
-                            ?? new HighlightWpfElementRequest();
-
-                        var response = WpfVisualTreeInspector.HighlightElement(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/pick_element_at_point":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<PickWpfElementAtPointRequest>(JsonOptions)
-                            ?? new PickWpfElementAtPointRequest();
-
-                        var response = WpfVisualTreeInspector.PickElementAtPoint(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/get_binding_info":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<GetBindingInfoRequest>(JsonOptions)
-                            ?? new GetBindingInfoRequest();
-
-                        var response = WpfVisualTreeInspector.GetBindingInfo(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/get_binding_errors":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<GetBindingErrorsRequest>(JsonOptions)
-                            ?? new GetBindingErrorsRequest();
-
-                        var response = WpfVisualTreeInspector.GetBindingErrors(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/uia_coverage_report":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<GetUiaCoverageReportRequest>(JsonOptions)
-                            ?? new GetUiaCoverageReportRequest();
-
-                        var response = WpfVisualTreeInspector.GetUiaCoverageReport(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/get_data_context":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<GetDataContextRequest>(JsonOptions)
-                            ?? new GetDataContextRequest();
-
-                        var response = WpfVisualTreeInspector.GetDataContext(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/get_computed_properties":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<GetComputedPropertiesRequest>(JsonOptions)
-                            ?? new GetComputedPropertiesRequest();
-
-                        var response = WpfVisualTreeInspector.GetComputedProperties(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/get_style_chain":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<GetStyleChainRequest>(JsonOptions)
-                            ?? new GetStyleChainRequest();
-
-                        var response = WpfVisualTreeInspector.GetStyleChain(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                case "wpf/get_template_info":
-                    return await RunOnUiAsync(() =>
-                    {
-                        var typedRequest = request.Params?.Deserialize<GetTemplateInfoRequest>(JsonOptions)
-                            ?? new GetTemplateInfoRequest();
-
-                        var response = WpfVisualTreeInspector.GetTemplateInfo(typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
-                default:
-                    return new AgentResponse(
-                        request.Id,
-                        Ok: false,
-                        Error: new AgentError($"Unknown method '{request.Method}'."));
+                return AgentResponses.UnknownMethod(request.Id, request.Method);
             }
+
+            var context = new AgentOperationContext(UiThreadLatency);
+            if (!operation.RequiresUiThread)
+            {
+                return operation.Handle(request, context, cancellationToken);
+            }
+
+            return await RunOnUiAsync(
+                () => operation.Handle(request, context, cancellationToken),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            return AgentResponses.Failure(request.Id, AgentErrorCodes.OperationCanceled, ex.Message, ex.ToString());
         }
         catch (Exception ex)
         {
-            return new AgentResponse(
-                request.Id,
-                Ok: false,
-                Error: new AgentError(ex.Message, ex.ToString()));
+            return AgentResponses.FromException(request.Id, ex);
         }
     }
 
-    private static async Task<AgentResponse> RunOnUiAsync(Func<AgentResponse> action, string requestId, CancellationToken cancellationToken)
+    private static async Task<AgentResponse> RunOnUiAsync(Func<AgentResponse> action, CancellationToken cancellationToken)
     {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null)
-        {
-            return new AgentResponse(
-                Id: requestId,
-                Ok: false,
-                Error: new AgentError("Application.Current.Dispatcher is not available. Is the target a WPF app?"));
-        }
+        var dispatcher = Application.Current?.Dispatcher ?? throw AgentOperationException.DispatcherUnavailable();
 
         if (dispatcher.CheckAccess())
         {

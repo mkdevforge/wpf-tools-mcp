@@ -17,6 +17,7 @@ using FlaUI.Core.Input;
 using FlaUI.Core.Patterns;
 using FlaUI.Core.WindowsAPI;
 using FlaUI.UIA3;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -4323,7 +4324,7 @@ public sealed partial class AutomationController : IDisposable
                     try
                     {
                         var computed = await client.CallAsync<GetComputedPropertiesResponse>(
-                            "wpf/get_computed_properties",
+                            AgentMethods.GetComputedProperties,
                             new GetComputedPropertiesRequest(
                                 WindowHandle: windowHandle,
                                 Locator: new ElementLocator(XPath: currentXPath),
@@ -4397,7 +4398,7 @@ public sealed partial class AutomationController : IDisposable
                     try
                     {
                         var tree = await client.CallAsync<GetVisualTreeResponse>(
-                            "wpf/get_visual_tree",
+                            AgentMethods.GetVisualTree,
                             new GetWpfVisualTreeRequestV2(
                                 WindowHandle: windowHandle,
                                 RootXPath: currentXPath,
@@ -4433,7 +4434,7 @@ public sealed partial class AutomationController : IDisposable
                         if (state == WaitForState.NameContains)
                         {
                             var computed = await client.CallAsync<GetComputedPropertiesResponse>(
-                                "wpf/get_computed_properties",
+                                AgentMethods.GetComputedProperties,
                                 new GetComputedPropertiesRequest(
                                     WindowHandle: windowHandle,
                                     Locator: new ElementLocator(XPath: currentXPath),
@@ -7837,7 +7838,7 @@ public sealed partial class AutomationController : IDisposable
                 var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
                 var wpfResponse = await CallWpfAgentTargetAsync<GetPathToElementResponse>(
                     client,
-                    "wpf/get_path",
+                    AgentMethods.GetPath,
                     request,
                     fallbackRequest,
                     target,

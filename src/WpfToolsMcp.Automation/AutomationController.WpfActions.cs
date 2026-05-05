@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Linq;
 using FlaUI.Core.AutomationElements;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -55,7 +56,7 @@ public sealed partial class AutomationController
             : new BringIntoViewWpfRequest(handle.WindowHandle, XPath: handle.XPath);
 
         return await client.CallAsync<BringIntoViewWpfResponse>(
-            "wpf/bring_into_view",
+            AgentMethods.BringIntoView,
             request,
             cancellationToken).ConfigureAwait(false);
     }
@@ -96,7 +97,7 @@ public sealed partial class AutomationController
         {
             return await CallWpfAgentTargetAsync<SetValueResponse>(
                 client,
-                "wpf/set_value",
+                AgentMethods.SetValue,
                 request,
                 fallbackRequest,
                 target,
@@ -121,7 +122,7 @@ public sealed partial class AutomationController
     {
         var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
         return await client.CallAsync<BringIntoViewWpfResponse>(
-            "wpf/bring_into_view",
+            AgentMethods.BringIntoView,
             new BringIntoViewWpfRequest(windowHandle, xpath),
             cancellationToken).ConfigureAwait(false);
     }
@@ -224,7 +225,7 @@ public sealed partial class AutomationController
             var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
+                return await client.CallAsync<ElementRef>(AgentMethods.ResolveElement, request, cancellationToken).ConfigureAwait(false);
             }
             catch (InvalidOperationException ex) when (IsWpfAgentStaleOrNotFound(ex))
             {
