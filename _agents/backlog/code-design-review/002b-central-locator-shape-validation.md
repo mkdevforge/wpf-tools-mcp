@@ -1,7 +1,7 @@
 # Central Locator Shape Validation
 
 - ID: 002b
-- Status: Pending
+- Status: In Progress
 - Priority: P2
 - Source: split from 002
 - References:
@@ -42,3 +42,7 @@ Add a central locator-shape validator that allows intentional index-only locator
 ## QA Review
 
 - 2026-05-06: Split from 002. The original item treated locator shape and target identity as one task; this slice isolates locator-shape invariants without changing every operation target at once.
+
+## Notes
+
+- 2026-05-06: Selected for implementation after `002a`. First validation target is focused `ElementLocator` shape coverage for empty locator, `xpath + index`, negative index, and valid index-only locator behavior across the shared parser plus representative UIA/WPF resolver paths.
