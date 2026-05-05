@@ -1,7 +1,7 @@
 # MCP Tool Boundary Uses Typed Error Codes
 
 - ID: 003a
-- Status: Pending
+- Status: In Progress
 - Priority: P2
 - Source: split from 003
 - References:
@@ -40,3 +40,7 @@ Introduce or reuse a small coded-exception interface/base type and have `McpTool
 ## QA Review
 
 - 2026-05-06: Split from 003. Current code already has `AgentErrorCodes` and `AgentCallException`, so this slice should extend the existing model instead of replacing it.
+
+## Notes
+
+- 2026-05-06: Selected for implementation after `005`. First validation target is focused `McpToolErrors` coverage for coded exceptions and legacy prefix fallback.
