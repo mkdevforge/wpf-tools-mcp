@@ -98,14 +98,22 @@ public static class InteractionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            var target = ElementTarget.Parse(
+                locator,
+                elementId,
+                windowHandle,
+                operationName: "click_element");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var requestTarget = target.IsLocator
+                ? target.WithWindowHandle(effectiveWindowHandle)
+                : target;
+
             return automation.RunExclusiveAsync(
                 () => automation.ClickElementAsync(
                     new ClickElementRequest(
-                        Locator: locator,
-                        ElementId: elementId,
-                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        Locator: requestTarget.Locator,
+                        ElementId: requestTarget.ElementId,
+                        WindowHandle: requestTarget.WindowHandle,
                         ClickType: ParseClickType(clickType),
                         ClickMode: ParseClickMode(clickMode),
                         TimeoutMs: timeoutMs,
