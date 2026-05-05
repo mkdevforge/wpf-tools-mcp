@@ -1,7 +1,7 @@
 # Element Target Parser For Click Element
 
 - ID: 002a
-- Status: In Progress
+- Status: Review
 - Priority: P2
 - Source: split from 002
 - References:
@@ -45,3 +45,6 @@ Introduce a small internal value object or parser that returns either a locator 
 ## Notes
 
 - 2026-05-06: Selected for implementation after `003c`. First validation target is focused `click_element` target parsing coverage for locator, element-id, missing target, and mixed target cases while preserving the existing request JSON shape.
+- 2026-05-06: Implemented in `21d82b3` and refined in `44cfc34`. Added internal `ElementTarget` as a locator-or-element-id value object, wired `click_element` MCP request construction through it, reused it in automation click resolution, and routed agent endpoint target validation through the same parser while preserving public DTOs.
+- 2026-05-06: Validation so far: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter "FullyQualifiedName~McpToolErrorsDesignTests|FullyQualifiedName~ElementTargetDesignTests|FullyQualifiedName~ClickElement_basic_button_updates_status_snapshot|FullyQualifiedName~ResolveElement_uia_then_click_by_elementId_snapshot"` passed with 10 tests. The command emits the known `System.Diagnostics.EventLog` version conflict warning.
+- 2026-05-06: Review note: `dotnet format whitespace src\WpfToolsMcp.Automation\WpfToolsMcp.Automation.csproj --include src\WpfToolsMcp.Automation\AutomationController.cs --no-restore --verify-no-changes` reports broad pre-existing whitespace drift in `AutomationController.cs`; no formatting churn was applied for this item.
