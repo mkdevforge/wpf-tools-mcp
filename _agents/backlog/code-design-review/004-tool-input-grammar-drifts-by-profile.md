@@ -31,6 +31,15 @@ Move click type parsing to a shared helper or use enum binding with a shared con
 - Existing snapshot/tool-profile tests continue to pass.
 - Add a focused test if current coverage does not catch profile grammar drift.
 
+## Validation
+
+- Add or update a focused tool-profile test that exercises at least one alias currently accepted only by diagnostics, such as `leftClick`, against the core profile.
+- Run the focused tool-profile snapshot tests.
+
+## QA Review
+
+- 2026-05-06: Verified. `CoreTools.ParseClickType` accepts fewer aliases than `InteractionTools.ParseClickType` for the same `click_element` concept. The item is small, independent, and remains P3.
+
 ## Notes
 
 - This is intentionally small and independent.

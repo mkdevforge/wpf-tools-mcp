@@ -1,0 +1,43 @@
+# Element Target Parser For Click Element
+
+- ID: 002a
+- Status: Pending
+- Priority: P2
+- Source: split from 002
+- References:
+  - `src/WpfToolsMcp.Contracts/Contracts.cs:408-417`
+  - `src/WpfToolsMcp.Automation/AutomationController.cs:1861-1906`
+  - `src/WpfToolsMcp.Agent/AgentEndpointValidation.cs:7-18`
+  - `src/WpfToolsMcp.McpServer/Tools/InteractionTools.cs:89-111`
+
+## Problem
+
+The `click_element` path accepts target identity as unrelated nullable fields: `Locator`, `ElementId`, and `WindowHandle`. Each layer repeats exactly-one validation and decides independently whether `windowHandle` applies.
+
+## Consequence
+
+Invalid or ambiguous click targets can cross protocol boundaries before being rejected, and future click behavior can drift between MCP tools, automation, and agent endpoints.
+
+## Desired Outcome
+
+`click_element` parses target identity into one internal target concept before automation execution while preserving the existing JSON request shape.
+
+## Suggested Approach
+
+Introduce a small internal value object or parser that returns either a locator target or an element-id target. Use it first in the `click_element` path, including the boundary decision for whether a window handle is required or inherited.
+
+## Acceptance Criteria
+
+- `click_element` accepts the existing JSON fields without a wire contract change.
+- Missing target, mixed `locator` plus `elementId`, and element-id target without a usable window handle fail at the boundary with consistent invalid-request errors.
+- Valid locator and valid element-id click paths still work.
+- The new target type is internal implementation detail, not a public contract change.
+
+## Validation
+
+- Add or update focused tests for `click_element` locator target, element-id target, missing target, and mixed target cases.
+- Run the focused interaction/tool-profile tests that cover `click_element`.
+
+## QA Review
+
+- 2026-05-06: Split from 002. This is the first representative slice because it proves the target abstraction on a single action path before broader migration.

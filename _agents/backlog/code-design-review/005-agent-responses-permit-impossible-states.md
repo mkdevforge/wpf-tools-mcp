@@ -32,6 +32,15 @@ Use factory-only construction, validating constructors, or separate success/fail
 - Agent client validates response invariants defensively.
 - Agent protocol snapshot tests are updated or added as needed.
 
+## Validation
+
+- Add or update focused agent protocol tests for success, failure, and invalid response shapes.
+- Run the focused agent server/protocol design tests and any affected snapshot tests.
+
+## QA Review
+
+- 2026-05-06: Verified. `AgentResponse` is a public positional record with nullable `Result` and `Error`, so invalid success/failure combinations remain constructible and `AgentClient` currently gates primarily on `Ok`.
+
 ## Notes
 
 - Prefer a low-friction change that preserves current wire compatibility.

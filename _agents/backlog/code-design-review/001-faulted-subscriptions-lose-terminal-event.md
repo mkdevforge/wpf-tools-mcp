@@ -32,6 +32,15 @@ Introduce an explicit subscription lifecycle state such as `Active`, `Faulted`, 
 - Unsubscribe still cancels and removes both active and faulted subscriptions.
 - Add targeted tests for terminal-event polling and cleanup behavior.
 
+## Validation
+
+- Add or update a focused subscription-manager test that forces a worker failure and then polls the subscription.
+- Run the focused subscription snapshot/unit tests that cover `subscribe_binding_errors`, `poll_subscription`, and `unsubscribe`.
+
+## QA Review
+
+- 2026-05-06: Verified. Current `SubscriptionManager` enqueues `subscription_error` in the worker failure path and then removes the subscription from `_subscriptions` before `PollAsync` can reliably drain it. The consequence and priority remain supported.
+
 ## Notes
 
 - Keep queue bounds intact; the terminal event should not be silently dropped by lifecycle cleanup.

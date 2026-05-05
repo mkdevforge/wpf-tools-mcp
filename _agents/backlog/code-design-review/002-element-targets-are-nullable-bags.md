@@ -1,7 +1,7 @@
 # Element Targets Are Nullable Bags
 
 - ID: 002
-- Status: Pending
+- Status: Split
 - Priority: P2
 - Source: review finding
 - References:
@@ -35,4 +35,9 @@ Introduce a small `ElementTarget` abstraction, for example `ElementTarget.ById` 
 
 ## Notes
 
-- This is the largest item. Avoid a broad rewrite; migrate by operation or by a shared boundary parser.
+- This parent item is retained as provenance. Active work has been split into `002a`, `002b`, and `002c`.
+- QA correction: index-only locators are intentionally supported by current UIA and WPF resolver paths. `xpath + index` is already rejected, but the rejection happens inside duplicated resolver logic instead of at a shared boundary.
+
+## QA Review
+
+- 2026-05-06: Partially Verified. The nullable `locator`/`elementId` target concern is factual and repeated across MCP, automation, and agent layers. The original scope was too broad for one item and overstated index-only locators as inherently invalid.

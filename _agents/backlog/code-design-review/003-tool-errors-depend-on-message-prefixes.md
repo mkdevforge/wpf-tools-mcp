@@ -1,7 +1,7 @@
 # Tool Errors Depend On Message Prefixes
 
 - ID: 003
-- Status: Pending
+- Status: Split
 - Priority: P2
 - Source: review finding
 - References:
@@ -36,3 +36,8 @@ Introduce shared domain/tool exceptions or a result/error type with a stable err
 ## Notes
 
 - Coordinate with `AgentCallException` and `AgentErrorCodes`; there is already a partial model to build on.
+- This parent item is retained as provenance. Active work has been split into `003a`, `003b`, and `003c`.
+
+## QA Review
+
+- 2026-05-06: Partially Verified. Message-prefix parsing remains in MCP, agent response mapping, and automation fallback paths, but `AgentErrorCodes`, `AgentEndpointException`, and `AgentCallException` already provide a partial typed model. The implementation should extend that model rather than introduce an unrelated error system.
