@@ -1,0 +1,37 @@
+# Faulted Subscriptions Lose Terminal Event
+
+- ID: 001
+- Status: Pending
+- Priority: P2
+- Source: review finding
+- References:
+  - `src/WpfToolsMcp.McpServer/Subscriptions/SubscriptionManager.cs:187-195`
+  - `src/WpfToolsMcp.McpServer/Subscriptions/SubscriptionManager.cs:274-290`
+  - `src/WpfToolsMcp.McpServer/Subscriptions/SubscriptionManager.cs:352-359`
+
+## Problem
+
+Result/Error Modeling and State Object: the subscription worker catches a fatal exception, enqueues `subscription_error`, then removes the subscription in `finally`. `PollAsync` resolves the subscription before draining, so a caller can see `Unknown subscriptionId` instead of the terminal error event.
+
+## Consequence
+
+Consumers lose the useful failure payload and cannot distinguish a faulted subscription from an invalid or already-unsubscribed ID. This makes subscription failures hard to diagnose and weakens the event protocol.
+
+## Desired Outcome
+
+Faulted subscriptions keep their terminal event available for polling until the event is drained, the subscription is explicitly unsubscribed, or a clear retention policy expires it.
+
+## Suggested Approach
+
+Introduce an explicit subscription lifecycle state such as `Active`, `Faulted`, and `Disposed`. On fatal worker failure, transition to `Faulted`, enqueue the terminal error, and avoid immediate dictionary removal. Remove the subscription only after the terminal event is drained or after `Unsubscribe`.
+
+## Acceptance Criteria
+
+- A worker failure produces a pollable `subscription_error` event instead of `Unknown subscriptionId`.
+- Polling with the wrong `sessionId` still rejects access.
+- Unsubscribe still cancels and removes both active and faulted subscriptions.
+- Add targeted tests for terminal-event polling and cleanup behavior.
+
+## Notes
+
+- Keep queue bounds intact; the terminal event should not be silently dropped by lifecycle cleanup.
