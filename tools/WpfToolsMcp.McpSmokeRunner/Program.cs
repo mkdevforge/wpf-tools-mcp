@@ -1063,7 +1063,7 @@ sealed class McpWrapper : IAsyncDisposable
 
         if (result.StructuredContent is not null)
         {
-            return result.StructuredContent.ToJsonString();
+            return JsonSerializer.Serialize(result.StructuredContent);
         }
 
         throw new InvalidOperationException("Tool returned no text or structured content.");
