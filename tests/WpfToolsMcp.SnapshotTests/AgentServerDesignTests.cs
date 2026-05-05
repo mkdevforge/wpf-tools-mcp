@@ -21,12 +21,12 @@ public sealed class AgentServerDesignTests
     [Test]
     public void Required_operation_reports_missing_params_before_execution()
     {
-        var registry = AgentOperations.Create();
-        Assert.That(registry.TryGet(AgentMethods.ReleaseElement, out var operation), Is.True);
+        var registry = AgentEndpoints.Create();
+        Assert.That(registry.TryGet(AgentMethods.ReleaseElement, out var endpoint), Is.True);
 
-        var context = new AgentOperationContext(new UiThreadLatencyRecorder());
-        var ex = Assert.Throws<AgentOperationException>(() =>
-            operation.Handle(
+        var context = new AgentEndpointContext(new UiThreadLatencyRecorder());
+        var ex = Assert.ThrowsAsync<AgentEndpointException>(() =>
+            endpoint.HandleAsync(
                 new AgentRequest("request-1", AgentMethods.ReleaseElement),
                 context,
                 CancellationToken.None));

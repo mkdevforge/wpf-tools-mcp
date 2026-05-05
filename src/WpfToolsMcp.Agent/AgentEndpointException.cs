@@ -2,9 +2,9 @@ using WpfToolsMcp.AgentProtocol;
 
 namespace WpfToolsMcp.Agent;
 
-internal sealed class AgentOperationException : InvalidOperationException
+internal sealed class AgentEndpointException : InvalidOperationException
 {
-    public AgentOperationException(string code, string message)
+    public AgentEndpointException(string code, string message)
         : base(message)
     {
         Code = code;
@@ -12,14 +12,14 @@ internal sealed class AgentOperationException : InvalidOperationException
 
     public string Code { get; }
 
-    public static AgentOperationException DispatcherUnavailable() =>
+    public static AgentEndpointException DispatcherUnavailable() =>
         new(
             AgentErrorCodes.DispatcherUnavailable,
             "Application.Current.Dispatcher is not available. Is the target a WPF app?");
 
-    public static AgentOperationException InvalidRequest(string message) =>
+    public static AgentEndpointException InvalidRequest(string message) =>
         new(AgentErrorCodes.InvalidRequest, message);
 
-    public static AgentOperationException MissingParams(string method) =>
+    public static AgentEndpointException MissingParams(string method) =>
         new(AgentErrorCodes.MissingParams, $"Agent method '{method}' requires request params.");
 }

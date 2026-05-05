@@ -1,6 +1,4 @@
 using System.IO.Pipes;
-using System.Windows;
-using System.Windows.Threading;
 using WpfToolsMcp.AgentProtocol;
 
 namespace WpfToolsMcp.Agent;
@@ -8,7 +6,7 @@ namespace WpfToolsMcp.Agent;
 internal static class AgentServer
 {
     private static readonly UiThreadLatencyRecorder UiThreadLatency = new();
-    private static readonly AgentOperationRegistry Operations = AgentOperations.Create();
+    private static readonly AgentEndpointRegistry Endpoints = AgentEndpoints.Create();
 
     public static async Task RunAsync(string pipeName, CancellationToken cancellationToken)
     {
@@ -95,47 +93,12 @@ internal static class AgentServer
 
     internal static async Task<AgentResponse> HandleAsync(AgentRequest request, CancellationToken cancellationToken)
     {
-        try
+        if (!Endpoints.TryGet(request.Method, out var endpoint))
         {
-            if (!Operations.TryGet(request.Method, out var operation))
-            {
-                return AgentResponses.UnknownMethod(request.Id, request.Method);
-            }
-
-            var context = new AgentOperationContext(UiThreadLatency);
-            if (!operation.RequiresUiThread)
-            {
-                return operation.Handle(request, context, cancellationToken);
-            }
-
-            return await RunOnUiAsync(
-                () => operation.Handle(request, context, cancellationToken),
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (OperationCanceledException ex)
-        {
-            return AgentResponses.Failure(request.Id, AgentErrorCodes.OperationCanceled, ex.Message, ex.ToString());
-        }
-        catch (Exception ex)
-        {
-            return AgentResponses.FromException(request.Id, ex);
-        }
-    }
-
-    private static async Task<AgentResponse> RunOnUiAsync(Func<AgentResponse> action, CancellationToken cancellationToken)
-    {
-        var dispatcher = Application.Current?.Dispatcher ?? throw AgentOperationException.DispatcherUnavailable();
-
-        if (dispatcher.CheckAccess())
-        {
-            return action();
+            return AgentResponses.UnknownMethod(request.Id, request.Method);
         }
 
-        var op = dispatcher.InvokeAsync(action, DispatcherPriority.Send, cancellationToken);
-        return await op.Task;
+        var context = new AgentEndpointContext(UiThreadLatency);
+        return await endpoint.HandleAsync(request, context, cancellationToken).ConfigureAwait(false);
     }
 }

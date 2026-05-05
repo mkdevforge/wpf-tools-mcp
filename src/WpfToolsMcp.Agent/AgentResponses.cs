@@ -22,8 +22,8 @@ internal static class AgentResponses
 
     public static AgentResponse FromException(string requestId, Exception exception)
     {
-        var code = exception is AgentOperationException agentException
-            ? agentException.Code
+        var code = exception is AgentEndpointException endpointException
+            ? endpointException.Code
             : InferCode(exception.Message);
 
         return Failure(requestId, code, exception.Message, exception.ToString());

@@ -3,9 +3,9 @@ using System.Windows.Threading;
 
 namespace WpfToolsMcp.Agent;
 
-internal sealed class AgentOperationContext
+internal sealed class AgentEndpointContext
 {
-    public AgentOperationContext(UiThreadLatencyRecorder uiThreadLatency)
+    public AgentEndpointContext(UiThreadLatencyRecorder uiThreadLatency)
     {
         UiThreadLatency = uiThreadLatency;
     }
@@ -13,5 +13,5 @@ internal sealed class AgentOperationContext
     public UiThreadLatencyRecorder UiThreadLatency { get; }
 
     public Dispatcher Dispatcher =>
-        Application.Current?.Dispatcher ?? throw AgentOperationException.DispatcherUnavailable();
+        Application.Current?.Dispatcher ?? throw AgentEndpointException.DispatcherUnavailable();
 }
