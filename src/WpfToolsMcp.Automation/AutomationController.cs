@@ -8559,14 +8559,27 @@ public sealed partial class AutomationController : IDisposable
 
     private static Window FindWindowByHandle(Application application, UIA3Automation automation, long nativeWindowHandle)
     {
-        var windows = GetAllTopLevelWindows(application, automation);
-        var window = windows.FirstOrDefault(w => w.Properties.NativeWindowHandle.Value.ToInt64() == nativeWindowHandle);
-        if (window is null)
+        var hwnd = new IntPtr(nativeWindowHandle);
+        if (hwnd == IntPtr.Zero)
         {
             throw new InvalidOperationException($"No window found with handle {nativeWindowHandle}.");
         }
 
-        return window;
+        GetWindowThreadProcessId(hwnd, out var processId);
+        if (processId != application.ProcessId)
+        {
+            throw new InvalidOperationException($"No window found with handle {nativeWindowHandle}.");
+        }
+
+        try
+        {
+            var element = automation.FromHandle(hwnd);
+            return element.AsWindow();
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"No window found with handle {nativeWindowHandle}.", ex);
+        }
     }
 
     private static Window FindWindowByTitle(Application application, UIA3Automation automation, string title)
