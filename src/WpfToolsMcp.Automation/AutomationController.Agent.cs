@@ -92,16 +92,7 @@ public sealed partial class AutomationController
     }
 
     private static bool IsWpfAgentStaleOrNotFound(Exception ex)
-    {
-        if (ex is AgentCallException { Code: AgentErrorCodes.WpfResolveNotFound or AgentErrorCodes.WpfHandleStale })
-        {
-            return true;
-        }
-
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
-        return message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("wpf_handle_stale:", StringComparison.OrdinalIgnoreCase);
-    }
+        => WpfAgentErrorClassifier.IsStaleOrNotFound(ex);
 
     private static bool CanRetryWpfAgentTarget(WpfAgentTarget target, object? fallbackRequest, Exception ex) =>
         fallbackRequest is not null &&

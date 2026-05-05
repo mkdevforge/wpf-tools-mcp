@@ -451,31 +451,14 @@ public sealed partial class AutomationController
     }
 
     private static bool IsAutoWpfLocatorMiss(InvalidOperationException ex)
-    {
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
-        return message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("timeout: element not found", StringComparison.OrdinalIgnoreCase);
-    }
+        => WpfAgentErrorClassifier.IsResolveNotFound(ex) ||
+           WpfAgentErrorClassifier.IsLegacyTimeoutElementNotFound(ex);
 
     private static bool IsAutoWpfLocatorAmbiguous(InvalidOperationException ex)
-    {
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
-        return message.Contains("wpf_resolve:ambiguous:", StringComparison.OrdinalIgnoreCase);
-    }
+        => WpfAgentErrorClassifier.IsResolveAmbiguous(ex);
 
     private static string CleanAutoWpfResolveMessage(InvalidOperationException ex)
-    {
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
-        var firstLine = message
-            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
-            .FirstOrDefault() ?? message;
-
-        const string prefix = "wpf_resolve:ambiguous:";
-        var index = firstLine.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-        return index >= 0
-            ? firstLine[(index + prefix.Length)..].Trim()
-            : firstLine.Trim();
-    }
+        => WpfAgentErrorClassifier.CleanLegacyPrefix(ex, "wpf_resolve:ambiguous:");
 
     private static ElementLocator CreateWpfHandleRecoveryLocator(ElementHandle handle)
     {
@@ -564,10 +547,7 @@ public sealed partial class AutomationController
     }
 
     private static bool IsWaitableWpfNotFound(InvalidOperationException ex)
-    {
-        var message = ex.Message ?? string.Empty;
-        return message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase);
-    }
+        => WpfAgentErrorClassifier.IsResolveNotFound(ex);
 
     private ElementHandle RequireHandle(string elementId)
     {
