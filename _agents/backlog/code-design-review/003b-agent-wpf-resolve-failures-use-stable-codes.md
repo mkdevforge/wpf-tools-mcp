@@ -1,7 +1,7 @@
 # Agent WPF Resolve Failures Use Stable Codes
 
 - ID: 003b
-- Status: Review
+- Status: Done
 - Priority: P2
 - Source: split from 003
 - References:
@@ -48,3 +48,4 @@ Raise `AgentEndpointException` or another coded exception from WPF resolve failu
 - 2026-05-06: Selected for implementation after `003a`. First validation target is focused agent design tests for coded WPF resolve not-found, ambiguous, stale-handle, and invalid-request failures without relying on message-prefix inference.
 - 2026-05-06: Implemented in `0159b8f`. Added WPF resolve/stale factories to `AgentEndpointException`, migrated known WPF inspector throw sites to coded exceptions, and removed agent response inference from WPF/invalid-request message prefixes.
 - 2026-05-06: Validation so far: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter AgentServerDesignTests` passed with 10 tests. The command emits the same `System.Diagnostics.EventLog` version conflict warning noted during `001`.
+- 2026-05-06: Final validation passed with 11 tests: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter "FullyQualifiedName~AgentServerDesignTests|FullyQualifiedName~Wpf_elementId_that_no_longer_resolves_returns_stale_element_snapshot"`. Self-review result: happy with the implementation; response codes now come from coded exceptions, old message-prefix inference is gone from agent response serialization, and WPF stale snapshot behavior remains intact.
