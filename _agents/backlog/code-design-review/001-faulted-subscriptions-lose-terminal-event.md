@@ -1,7 +1,7 @@
 # Faulted Subscriptions Lose Terminal Event
 
 - ID: 001
-- Status: Review
+- Status: Done
 - Priority: P2
 - Source: review finding
 - References:
@@ -46,4 +46,5 @@ Introduce an explicit subscription lifecycle state such as `Active`, `Faulted`, 
 - 2026-05-06: Selected for implementation. First validation target is focused subscription-manager coverage for terminal error polling and unsubscribe cleanup.
 - 2026-05-06: Implemented in `9b2c5c5`. Added a subscription registration/event-sink boundary, explicit faulted lifecycle handling, and removal after a faulted terminal event is drained.
 - 2026-05-06: Validation so far: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter SubscriptionManagerDesignTests` passed; `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter BindingSubscriptionSnapshots` passed. Both commands emit an existing `System.Diagnostics.EventLog` version conflict warning after referencing the MCP server assembly from tests.
+- 2026-05-06: Final validation passed with 5 tests: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter "FullyQualifiedName~SubscriptionManagerDesignTests|FullyQualifiedName~BindingSubscriptionSnapshots|FullyQualifiedName~TraceCoverageSnapshots"`. Self-review result: happy with the implementation; state is explicit, terminal events remain pollable, session ownership is still checked before drain, and cleanup is deterministic after drain or unsubscribe.
 - Keep queue bounds intact; the terminal event should not be silently dropped by lifecycle cleanup.
