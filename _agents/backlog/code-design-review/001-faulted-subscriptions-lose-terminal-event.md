@@ -1,7 +1,7 @@
 # Faulted Subscriptions Lose Terminal Event
 
 - ID: 001
-- Status: Pending
+- Status: In Progress
 - Priority: P2
 - Source: review finding
 - References:
@@ -43,4 +43,5 @@ Introduce an explicit subscription lifecycle state such as `Active`, `Faulted`, 
 
 ## Notes
 
+- 2026-05-06: Selected for implementation. First validation target is focused subscription-manager coverage for terminal error polling and unsubscribe cleanup.
 - Keep queue bounds intact; the terminal event should not be silently dropped by lifecycle cleanup.
