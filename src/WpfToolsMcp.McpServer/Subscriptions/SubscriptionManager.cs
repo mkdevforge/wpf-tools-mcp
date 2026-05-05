@@ -8,6 +8,39 @@ namespace WpfToolsMcp.McpServer.Subscriptions;
 
 public sealed class SubscriptionManager : IDisposable
 {
+    internal sealed record SubscriptionRegistration(string SubscriptionId, Task Worker);
+
+    internal interface ISubscriptionEventSink
+    {
+        void Enqueue(string kind, JsonNode payload);
+    }
+
+    private sealed class SubscriptionEventSink : ISubscriptionEventSink
+    {
+        private readonly SubscriptionState _state;
+
+        public SubscriptionEventSink(SubscriptionState state)
+        {
+            _state = state;
+        }
+
+        public void Enqueue(string kind, JsonNode payload)
+            => _state.Enqueue(kind, payload);
+    }
+
+    private enum SubscriptionLifecycle
+    {
+        Active,
+        Faulted,
+        Disposed
+    }
+
+    private readonly record struct DrainResult(
+        IReadOnlyList<SubscriptionEvent> Events,
+        int Dropped,
+        bool HasMore,
+        bool FaultedAndDrained);
+
     private sealed class SubscriptionState : IDisposable
     {
         private readonly object _sync = new();
@@ -16,6 +49,7 @@ public sealed class SubscriptionManager : IDisposable
         private TaskCompletionSource<bool> _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _dropped;
         private int _sequence;
+        private SubscriptionLifecycle _lifecycle = SubscriptionLifecycle.Active;
 
         public SubscriptionState(
             string subscriptionId,
@@ -44,23 +78,37 @@ public sealed class SubscriptionManager : IDisposable
             TaskCompletionSource<bool> toSignal;
             lock (_sync)
             {
-                if (_queue.Count >= MaxQueue)
+                if (_lifecycle == SubscriptionLifecycle.Disposed)
                 {
-                    _queue.Dequeue();
-                    _dropped++;
+                    return;
                 }
 
-                _sequence++;
-                _queue.Enqueue(new SubscriptionEvent(_sequence, kind, payload));
-
-                toSignal = _wake;
-                _wake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                toSignal = EnqueueLocked(kind, payload);
             }
 
             toSignal.TrySetResult(true);
         }
 
-        public (IReadOnlyList<SubscriptionEvent> Events, int Dropped, bool HasMore) Drain(int maxBatch)
+        public void Fault(Exception ex)
+        {
+            var payload = JsonSerializer.SerializeToNode(new { message = ex.Message })!;
+
+            TaskCompletionSource<bool> toSignal;
+            lock (_sync)
+            {
+                if (_lifecycle == SubscriptionLifecycle.Disposed)
+                {
+                    return;
+                }
+
+                _lifecycle = SubscriptionLifecycle.Faulted;
+                toSignal = EnqueueLocked("subscription_error", payload);
+            }
+
+            toSignal.TrySetResult(true);
+        }
+
+        public DrainResult Drain(int maxBatch)
         {
             lock (_sync)
             {
@@ -73,7 +121,10 @@ public sealed class SubscriptionManager : IDisposable
                 var dropped = _dropped;
                 _dropped = 0;
 
-                return (batch.ToArray(), dropped, _queue.Count > 0);
+                var hasMore = _queue.Count > 0;
+                var faultedAndDrained = _lifecycle == SubscriptionLifecycle.Faulted && !hasMore;
+
+                return new DrainResult(batch.ToArray(), dropped, hasMore, faultedAndDrained);
             }
         }
 
@@ -92,6 +143,14 @@ public sealed class SubscriptionManager : IDisposable
 
         public void Dispose()
         {
+            TaskCompletionSource<bool> toSignal;
+            lock (_sync)
+            {
+                _lifecycle = SubscriptionLifecycle.Disposed;
+                toSignal = _wake;
+                _wake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
             try
             {
                 Cts.Cancel();
@@ -107,6 +166,24 @@ public sealed class SubscriptionManager : IDisposable
             catch
             {
             }
+
+            toSignal.TrySetResult(true);
+        }
+
+        private TaskCompletionSource<bool> EnqueueLocked(string kind, JsonNode payload)
+        {
+            if (_queue.Count >= MaxQueue)
+            {
+                _queue.Dequeue();
+                _dropped++;
+            }
+
+            _sequence++;
+            _queue.Enqueue(new SubscriptionEvent(_sequence, kind, payload));
+
+            var toSignal = _wake;
+            _wake = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            return toSignal;
         }
     }
 
@@ -142,13 +219,52 @@ public sealed class SubscriptionManager : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(automation);
 
+        var registration = StartSubscription(
+            sessionId,
+            SubscriptionKind.BindingErrors,
+            maxQueue,
+            async (events, cancellationToken) =>
+        {
+            var pollDelay = TimeSpan.FromMilliseconds(Math.Clamp(pollIntervalMs, 50, 60_000));
+            var lastKeys = new HashSet<string>(StringComparer.Ordinal);
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await TickBindingErrorsAsync(
+                    events,
+                    automation,
+                    windowHandleUsed,
+                    rootXPath,
+                    depth,
+                    maxErrors,
+                    maxNodes,
+                    lastKeys,
+                    cancellationToken)
+                    .ConfigureAwait(false);
+
+                await Task.Delay(pollDelay, cancellationToken).ConfigureAwait(false);
+            }
+        });
+
+        return new SubscribeBindingErrorsResponse(registration.SubscriptionId);
+    }
+
+    internal SubscriptionRegistration StartSubscription(
+        string sessionId,
+        SubscriptionKind kind,
+        int maxQueue,
+        Func<ISubscriptionEventSink, CancellationToken, Task> runAsync)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(runAsync);
+
         var subscriptionId = Guid.NewGuid().ToString("N");
         var cts = new CancellationTokenSource();
 
         var state = new SubscriptionState(
             subscriptionId: subscriptionId,
             sessionId: sessionId,
-            kind: SubscriptionKind.BindingErrors,
+            kind: kind,
             maxQueue: Math.Clamp(maxQueue, 1, 10_000),
             cts: cts);
 
@@ -157,50 +273,28 @@ public sealed class SubscriptionManager : IDisposable
             throw new InvalidOperationException("Failed to register subscription.");
         }
 
-        state.Worker = Task.Run(async () =>
+        var sink = new SubscriptionEventSink(state);
+        var worker = Task.Run(async () =>
         {
-            var pollDelay = TimeSpan.FromMilliseconds(Math.Clamp(pollIntervalMs, 50, 60_000));
-            var lastKeys = new HashSet<string>(StringComparer.Ordinal);
-
             try
             {
-                while (!cts.IsCancellationRequested)
-                {
-                    await TickBindingErrorsAsync(
-                        state,
-                        automation,
-                        windowHandleUsed,
-                        rootXPath,
-                        depth,
-                        maxErrors,
-                        maxNodes,
-                        lastKeys,
-                        cts.Token)
-                        .ConfigureAwait(false);
-
-                    await Task.Delay(pollDelay, cts.Token).ConfigureAwait(false);
-                }
+                await runAsync(sink, cts.Token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
             {
             }
             catch (Exception ex)
             {
-                state.Enqueue(
-                    kind: "subscription_error",
-                    payload: JsonSerializer.SerializeToNode(new { message = ex.Message })!);
-            }
-            finally
-            {
-                _ = _subscriptions.TryRemove(subscriptionId, out _);
+                state.Fault(ex);
             }
         });
 
-        return new SubscribeBindingErrorsResponse(subscriptionId);
+        state.Worker = worker;
+        return new SubscriptionRegistration(subscriptionId, worker);
     }
 
     private static async Task TickBindingErrorsAsync(
-        SubscriptionState state,
+        ISubscriptionEventSink events,
         AutomationController automation,
         long? windowHandleUsed,
         string? rootXPath,
@@ -217,9 +311,13 @@ public sealed class SubscriptionManager : IDisposable
                 () => automation.GetBindingErrorsAsync(windowHandleUsed, rootXPath, depth, maxErrors, maxNodes, cancellationToken),
                 cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            state.Enqueue(
+            events.Enqueue(
                 kind: "subscription_error",
                 payload: JsonSerializer.SerializeToNode(new { message = ex.Message })!);
             return;
@@ -250,7 +348,7 @@ public sealed class SubscriptionManager : IDisposable
         foreach (var error in newErrors.OrderBy(e => ComputeBindingErrorKey(e), StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            state.Enqueue(
+            events.Enqueue(
                 kind: "binding_error_added",
                 payload: JsonSerializer.SerializeToNode(error)!);
         }
@@ -289,10 +387,12 @@ public sealed class SubscriptionManager : IDisposable
 
         var batchSize = Math.Clamp(maxBatch, 1, 500);
 
-        var (events, dropped, hasMore) = state.Drain(batchSize);
-        if (events.Count > 0 || timeoutMs <= 0)
+        var firstDrain = state.Drain(batchSize);
+        RemoveIfFaultedAndDrained(subscriptionId, state, firstDrain);
+
+        if (firstDrain.Events.Count > 0 || timeoutMs <= 0)
         {
-            return new PollSubscriptionResponse(events, dropped, hasMore);
+            return new PollSubscriptionResponse(firstDrain.Events, firstDrain.Dropped, firstDrain.HasMore);
         }
 
         var timeout = TimeSpan.FromMilliseconds(Math.Clamp(timeoutMs, 1, 60_000));
@@ -307,8 +407,10 @@ public sealed class SubscriptionManager : IDisposable
         {
         }
 
-        (events, dropped, hasMore) = state.Drain(batchSize);
-        return new PollSubscriptionResponse(events, dropped, hasMore);
+        var secondDrain = state.Drain(batchSize);
+        RemoveIfFaultedAndDrained(subscriptionId, state, secondDrain);
+
+        return new PollSubscriptionResponse(secondDrain.Events, secondDrain.Dropped, secondDrain.HasMore);
     }
 
     public UnsubscribeResponse Unsubscribe(string sessionId, string subscriptionId)
@@ -358,5 +460,22 @@ public sealed class SubscriptionManager : IDisposable
 
         throw new InvalidOperationException($"Unknown subscriptionId '{subscriptionId}'.");
     }
-}
 
+    private void RemoveIfFaultedAndDrained(string subscriptionId, SubscriptionState state, DrainResult drain)
+    {
+        if (!drain.FaultedAndDrained)
+        {
+            return;
+        }
+
+        if (!_subscriptions.TryGetValue(subscriptionId, out var current) || !ReferenceEquals(current, state))
+        {
+            return;
+        }
+
+        if (_subscriptions.TryRemove(subscriptionId, out var removed) && ReferenceEquals(removed, state))
+        {
+            removed.Dispose();
+        }
+    }
+}
