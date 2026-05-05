@@ -7,6 +7,10 @@ updates:
       - "/tools/*"
     schedule:
       interval: "weekly"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     groups:
       nuget-dependencies:
         applies-to: "version-updates"
@@ -21,6 +25,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     groups:
       github-actions:
         applies-to: "version-updates"
