@@ -1,7 +1,7 @@
 # Automation Fallback Logic Consumes Typed Error Codes
 
 - ID: 003c
-- Status: Pending
+- Status: In Progress
 - Priority: P2
 - Source: split from 003
 - References:
@@ -41,3 +41,7 @@ Teach the relevant automation helper methods to consume coded exceptions, especi
 ## QA Review
 
 - 2026-05-06: Split from 003. This depends on the protocol and MCP boundary slices because automation can only consume typed codes reliably after they are propagated.
+
+## Notes
+
+- 2026-05-06: Selected for implementation after `003b`. First validation target is focused automation helper coverage for coded WPF not-found, ambiguous, stale-handle, and legacy fallback behavior.
