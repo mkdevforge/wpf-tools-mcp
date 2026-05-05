@@ -1,7 +1,7 @@
 # Agent Responses Permit Impossible States
 
 - ID: 005
-- Status: Pending
+- Status: In Progress
 - Priority: P3
 - Source: review finding
 - References:
@@ -43,4 +43,5 @@ Use factory-only construction, validating constructors, or separate success/fail
 
 ## Notes
 
+- 2026-05-06: Selected for implementation after `001`. First validation target is focused agent protocol/design coverage for valid success, valid failure, invalid construction, and client-side invariant checks.
 - Prefer a low-friction change that preserves current wire compatibility.
