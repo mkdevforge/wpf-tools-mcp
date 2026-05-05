@@ -29,7 +29,7 @@
     <ProjectReference Include="..\..\src\WpfToolsMcp.AgentProtocol\WpfToolsMcp.AgentProtocol.csproj" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.Agent\WpfToolsMcp.Agent.csproj" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.Automation\WpfToolsMcp.Automation.csproj" />
-    <ProjectReference Include="..\..\src\WpfToolsMcp.McpServer\WpfToolsMcp.McpServer.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.McpServer\WpfToolsMcp.McpServer.csproj" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp\WpfToolsMcp.TestApp.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Minimal\WpfToolsMcp.TestApp.Minimal.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.BrokenAutomation\WpfToolsMcp.TestApp.BrokenAutomation.csproj" ReferenceOutputAssembly="false" />
