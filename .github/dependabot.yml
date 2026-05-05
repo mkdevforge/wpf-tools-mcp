@@ -9,6 +9,11 @@ updates:
       interval: "weekly"
     groups:
       nuget-dependencies:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+      nuget-security:
+        applies-to: "security-updates"
         patterns:
           - "*"
 
@@ -18,5 +23,10 @@ updates:
       interval: "weekly"
     groups:
       github-actions:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+      github-actions-security:
+        applies-to: "security-updates"
         patterns:
           - "*"
