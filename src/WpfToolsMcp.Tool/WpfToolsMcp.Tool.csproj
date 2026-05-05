@@ -17,7 +17,7 @@
     <Authors>mkdevforge</Authors>
     <Title>WPF Tools MCP</Title>
     <Description>WPF Tools MCP server for inspecting and controlling .NET 8+ WPF apps (Snoop sees, FlaUI acts).</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageLicenseExpression>MIT AND MS-PL</PackageLicenseExpression>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/mkdevforge/wpf-tools-mcp</RepositoryUrl>
     <PackageTags>wpf;automation;uia;flaui;snoop;mcp;dotnet-tool</PackageTags>
