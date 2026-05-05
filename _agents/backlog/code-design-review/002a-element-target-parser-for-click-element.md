@@ -1,7 +1,7 @@
 # Element Target Parser For Click Element
 
 - ID: 002a
-- Status: Pending
+- Status: In Progress
 - Priority: P2
 - Source: split from 002
 - References:
@@ -41,3 +41,7 @@ Introduce a small internal value object or parser that returns either a locator 
 ## QA Review
 
 - 2026-05-06: Split from 002. This is the first representative slice because it proves the target abstraction on a single action path before broader migration.
+
+## Notes
+
+- 2026-05-06: Selected for implementation after `003c`. First validation target is focused `click_element` target parsing coverage for locator, element-id, missing target, and mixed target cases while preserving the existing request JSON shape.
