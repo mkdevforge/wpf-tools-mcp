@@ -1,7 +1,7 @@
 # MCP Tool Boundary Uses Typed Error Codes
 
 - ID: 003a
-- Status: Review
+- Status: Done
 - Priority: P2
 - Source: split from 003
 - References:
@@ -46,3 +46,4 @@ Introduce or reuse a small coded-exception interface/base type and have `McpTool
 - 2026-05-06: Selected for implementation after `005`. First validation target is focused `McpToolErrors` coverage for coded exceptions and legacy prefix fallback.
 - 2026-05-06: Implemented in `5686b3f`. Added `IAgentErrorCodeException`, implemented it on `AgentCallException` and `AgentEndpointException`, and changed `McpToolErrors` to prefer typed codes before using the renamed legacy prefix fallback.
 - 2026-05-06: Validation so far: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter McpToolErrorsDesignTests` passed with 3 tests. The command emits the same `System.Diagnostics.EventLog` version conflict warning noted during `001`.
+- 2026-05-06: Final validation passed with 12 tests: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter "FullyQualifiedName~McpToolErrorsDesignTests|FullyQualifiedName~AgentServerDesignTests"`. Self-review result: happy with the implementation; typed error codes now drive MCP boundary formatting, legacy prefix parsing is explicitly isolated, and messages remain tool-scoped and readable.
