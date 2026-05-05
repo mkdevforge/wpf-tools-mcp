@@ -2,7 +2,7 @@ using WpfToolsMcp.AgentProtocol;
 
 namespace WpfToolsMcp.Agent;
 
-internal sealed class AgentEndpointException : InvalidOperationException
+internal sealed class AgentEndpointException : InvalidOperationException, IAgentErrorCodeException
 {
     public AgentEndpointException(string code, string message)
         : base(message)

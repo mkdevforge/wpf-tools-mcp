@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using ModelContextProtocol;
+using WpfToolsMcp.AgentProtocol;
 
 namespace WpfToolsMcp.McpServer.Tools;
 
@@ -28,7 +29,7 @@ internal static class McpToolErrors
             var innerMessage = ex.InnerException is not null && !ReferenceEquals(ex.InnerException, baseException)
                 ? ex.InnerException.Message
                 : null;
-            var code = GetKnownErrorCode(message);
+            var code = GetTypedErrorCode(ex) ?? GetLegacyKnownErrorCode(message);
             var prefix = string.IsNullOrWhiteSpace(code) ||
                          message.StartsWith(code + ":", StringComparison.OrdinalIgnoreCase)
                 ? ""
@@ -40,7 +41,21 @@ internal static class McpToolErrors
         }
     }
 
-    private static string? GetKnownErrorCode(string message)
+    private static string? GetTypedErrorCode(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is IAgentErrorCodeException { Code: { } code } &&
+                !string.IsNullOrWhiteSpace(code))
+            {
+                return code;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? GetLegacyKnownErrorCode(string message)
     {
         if (string.IsNullOrWhiteSpace(message))
         {

@@ -1,6 +1,8 @@
+using WpfToolsMcp.AgentProtocol;
+
 namespace WpfToolsMcp.Automation;
 
-internal sealed class AgentCallException : InvalidOperationException
+internal sealed class AgentCallException : InvalidOperationException, IAgentErrorCodeException
 {
     public AgentCallException(string message, string? code, string? details)
         : base(message)
