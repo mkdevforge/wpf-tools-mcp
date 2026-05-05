@@ -1,6 +1,7 @@
 using ModelContextProtocol;
 using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Automation;
+using WpfToolsMcp.Contracts;
 using WpfToolsMcp.McpServer.Tools;
 
 namespace WpfToolsMcp.SnapshotTests;
@@ -39,5 +40,33 @@ public sealed class McpToolErrorsDesignTests
                 "wait_for"));
 
         Assert.That(ex?.Message, Does.Contain("tool=wait_for: timeout: element not found before deadline."));
+    }
+
+    [Test]
+    public void ClickElement_rejects_missing_target_before_session_lookup()
+    {
+        using var sessions = new SessionManager();
+
+        var ex = Assert.ThrowsAsync<McpException>(
+            async () => await InteractionTools.ClickElement(sessions, "missing-session"));
+
+        Assert.That(ex?.Message, Does.Contain("invalid_request: click_element requires exactly one of locator OR elementId."));
+        Assert.That(ex?.Message, Does.Not.Contain("Unknown sessionId"));
+    }
+
+    [Test]
+    public void ClickElement_rejects_mixed_target_before_session_lookup()
+    {
+        using var sessions = new SessionManager();
+
+        var ex = Assert.ThrowsAsync<McpException>(
+            async () => await InteractionTools.ClickElement(
+                sessions,
+                "missing-session",
+                locator: new ElementLocator(AutomationId: "Basic_Button"),
+                elementId: "uia_1"));
+
+        Assert.That(ex?.Message, Does.Contain("invalid_request: click_element requires exactly one of locator OR elementId."));
+        Assert.That(ex?.Message, Does.Not.Contain("Unknown sessionId"));
     }
 }
