@@ -99,6 +99,7 @@ internal static class AgentServer
         }
 
         var context = new AgentEndpointContext(UiThreadLatency);
-        return await endpoint.HandleAsync(request, context, cancellationToken).ConfigureAwait(false);
+        var invocation = endpoint.Bind(request);
+        return await invocation.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
     }
 }

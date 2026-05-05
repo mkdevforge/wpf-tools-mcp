@@ -38,24 +38,37 @@ internal sealed class UiThreadAgentEndpoint : IAgentEndpoint
 
     public string Method => _inner.Method;
 
-    public async Task<AgentResponse> HandleAsync(
-        AgentRequest request,
-        AgentEndpointContext context,
-        CancellationToken cancellationToken)
+    public AgentEndpointInvocation Bind(AgentRequest request) =>
+        new UiThreadAgentEndpointInvocation(_inner.Bind(request));
+
+    private sealed class UiThreadAgentEndpointInvocation : AgentEndpointInvocation
     {
-        var dispatcher = context.Dispatcher;
-        if (dispatcher.CheckAccess())
+        private readonly AgentEndpointInvocation _inner;
+
+        public UiThreadAgentEndpointInvocation(AgentEndpointInvocation inner)
+            : base(inner.RequestId)
         {
-            return await _inner.HandleAsync(request, context, cancellationToken).ConfigureAwait(false);
+            _inner = inner;
         }
 
-        var operation = dispatcher.InvokeAsync(
-            () => _inner.HandleAsync(request, context, cancellationToken),
-            DispatcherPriority.Send,
-            cancellationToken);
+        public override async Task<AgentResponse> ExecuteAsync(
+            AgentEndpointContext context,
+            CancellationToken cancellationToken)
+        {
+            var dispatcher = context.Dispatcher;
+            if (dispatcher.CheckAccess())
+            {
+                return await _inner.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
+            }
 
-        var responseTask = await operation.Task.ConfigureAwait(false);
-        return await responseTask.ConfigureAwait(false);
+            var operation = dispatcher.InvokeAsync(
+                () => _inner.ExecuteAsync(context, cancellationToken),
+                DispatcherPriority.Send,
+                cancellationToken);
+
+            var responseTask = await operation.Task.ConfigureAwait(false);
+            return await responseTask.ConfigureAwait(false);
+        }
     }
 }
 
@@ -70,26 +83,48 @@ internal sealed class ErrorMappingAgentEndpoint : IAgentEndpoint
 
     public string Method => _inner.Method;
 
-    public async Task<AgentResponse> HandleAsync(
-        AgentRequest request,
-        AgentEndpointContext context,
-        CancellationToken cancellationToken)
+    public AgentEndpointInvocation Bind(AgentRequest request)
     {
         try
         {
-            return await _inner.HandleAsync(request, context, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (OperationCanceledException ex)
-        {
-            return AgentResponses.Failure(request.Id, AgentErrorCodes.OperationCanceled, ex.Message, ex.ToString());
+            return new ErrorMappingAgentEndpointInvocation(_inner.Bind(request));
         }
         catch (Exception ex)
         {
-            return AgentResponses.FromException(request.Id, ex);
+            return AgentEndpointInvocation.FromException(request.Id, ex);
+        }
+    }
+
+    private sealed class ErrorMappingAgentEndpointInvocation : AgentEndpointInvocation
+    {
+        private readonly AgentEndpointInvocation _inner;
+
+        public ErrorMappingAgentEndpointInvocation(AgentEndpointInvocation inner)
+            : base(inner.RequestId)
+        {
+            _inner = inner;
+        }
+
+        public override async Task<AgentResponse> ExecuteAsync(
+            AgentEndpointContext context,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await _inner.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException ex)
+            {
+                return AgentResponses.Failure(RequestId, AgentErrorCodes.OperationCanceled, ex.Message, ex.ToString());
+            }
+            catch (Exception ex)
+            {
+                return AgentResponses.FromException(RequestId, ex);
+            }
         }
     }
 }

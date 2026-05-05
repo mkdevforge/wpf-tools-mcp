@@ -19,19 +19,17 @@ public sealed class AgentServerDesignTests
     }
 
     [Test]
-    public void Required_operation_reports_missing_params_before_execution()
+    public async Task Required_endpoint_reports_missing_params_before_execution()
     {
         var registry = AgentEndpoints.Create();
         Assert.That(registry.TryGet(AgentMethods.ReleaseElement, out var endpoint), Is.True);
 
         var context = new AgentEndpointContext(new UiThreadLatencyRecorder());
-        var ex = Assert.ThrowsAsync<AgentEndpointException>(() =>
-            endpoint.HandleAsync(
-                new AgentRequest("request-1", AgentMethods.ReleaseElement),
-                context,
-                CancellationToken.None));
+        var invocation = endpoint.Bind(new AgentRequest("request-1", AgentMethods.ReleaseElement));
+        var response = await invocation.ExecuteAsync(context, CancellationToken.None);
 
-        Assert.That(ex!.Code, Is.EqualTo(AgentErrorCodes.MissingParams));
+        Assert.That(response.Ok, Is.False);
+        Assert.That(response.Error?.Code, Is.EqualTo(AgentErrorCodes.MissingParams));
     }
 
     [Test]
