@@ -1,4 +1,6 @@
 using System.IO;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using WpfToolsMcp.Agent;
 using WpfToolsMcp.AgentProtocol;
 
@@ -44,6 +46,67 @@ public sealed class AgentServerDesignTests
 
         Assert.That(notFound.Error?.Code, Is.EqualTo(AgentErrorCodes.WpfResolveNotFound));
         Assert.That(stale.Error?.Code, Is.EqualTo(AgentErrorCodes.WpfHandleStale));
+    }
+
+    [Test]
+    public void AgentResponse_factories_preserve_wire_shape()
+    {
+        var success = AgentResponse.Success("request-1", new JsonObject { ["value"] = 42 });
+        var failure = AgentResponse.Failure(
+            "request-2",
+            new AgentError("failed", "details", AgentErrorCodes.OperationFailed));
+
+        var successJson = JsonSerializer.Serialize(success);
+        var failureJson = JsonSerializer.Serialize(failure);
+
+        Assert.That(success.Ok, Is.True);
+        Assert.That(success.Result?["value"]?.GetValue<int>(), Is.EqualTo(42));
+        Assert.That(success.Error, Is.Null);
+        Assert.That(successJson, Does.Contain("\"Id\":\"request-1\""));
+        Assert.That(successJson, Does.Contain("\"Ok\":true"));
+        Assert.That(successJson, Does.Contain("\"Result\""));
+        Assert.That(successJson, Does.Contain("\"Error\":null"));
+
+        Assert.That(failure.Ok, Is.False);
+        Assert.That(failure.Result, Is.Null);
+        Assert.That(failure.Error?.Code, Is.EqualTo(AgentErrorCodes.OperationFailed));
+        Assert.That(failureJson, Does.Contain("\"Id\":\"request-2\""));
+        Assert.That(failureJson, Does.Contain("\"Ok\":false"));
+        Assert.That(failureJson, Does.Contain("\"Result\":null"));
+        Assert.That(failureJson, Does.Contain("\"Error\""));
+    }
+
+    [Test]
+    public void AgentResponse_rejects_invalid_states()
+    {
+        Assert.That(
+            () => new AgentResponse("request-1", true, new JsonObject(), new AgentError("failed")),
+            NUnit.Framework.Throws.ArgumentException.With.Message.Contains("successful response cannot include an error"));
+
+        Assert.That(
+            () => new AgentResponse("request-2", false),
+            NUnit.Framework.Throws.ArgumentException.With.Message.Contains("failed response must include an error"));
+
+        Assert.That(
+            () => new AgentResponse("request-3", false, new JsonObject(), new AgentError("failed")),
+            NUnit.Framework.Throws.ArgumentException.With.Message.Contains("failed response cannot include a result"));
+    }
+
+    [Test]
+    public void AgentResponse_deserialization_rejects_invalid_wire_shape()
+    {
+        const string json = """
+            {
+              "Id": "request-1",
+              "Ok": false,
+              "Result": { "value": 42 },
+              "Error": null
+            }
+            """;
+
+        Assert.That(
+            () => JsonSerializer.Deserialize<AgentResponse>(json),
+            NUnit.Framework.Throws.Exception);
     }
 
     [Test]
