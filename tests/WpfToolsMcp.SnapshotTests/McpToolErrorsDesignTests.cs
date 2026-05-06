@@ -69,4 +69,19 @@ public sealed class McpToolErrorsDesignTests
         Assert.That(ex?.Message, Does.Contain("invalid_request: click_element requires exactly one of locator OR elementId."));
         Assert.That(ex?.Message, Does.Not.Contain("Unknown sessionId"));
     }
+
+    [Test]
+    public void SetValue_rejects_missing_target_before_session_lookup()
+    {
+        using var sessions = new SessionManager();
+
+        var ex = Assert.ThrowsAsync<McpException>(
+            async () => await InteractionTools.SetValue(
+                sessions,
+                "missing-session",
+                text: "hello"));
+
+        Assert.That(ex?.Message, Does.Contain("invalid_request: set_value requires exactly one of locator OR elementId."));
+        Assert.That(ex?.Message, Does.Not.Contain("Unknown sessionId"));
+    }
 }
