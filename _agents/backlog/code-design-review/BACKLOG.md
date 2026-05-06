@@ -28,7 +28,7 @@
 | 002a | Done | P2 | [Element target parser for click element](002a-element-target-parser-for-click-element.md) | split from 002 |
 | 002b | Done | P2 | [Central locator shape validation](002b-central-locator-shape-validation.md) | split from 002 |
 | 002c | Done | P2 | [Migrate remaining target-bearing operations](002c-migrate-remaining-target-bearing-operations.md) | split from 002 |
-| 004 | Pending | P3 | [Tool input grammar drifts by profile](004-tool-input-grammar-drifts-by-profile.md) | review finding |
+| 004 | In Progress | P3 | [Tool input grammar drifts by profile](004-tool-input-grammar-drifts-by-profile.md) | review finding |
 
 ## Split Items
 

@@ -1,7 +1,7 @@
 # Tool Input Grammar Drifts By Profile
 
 - ID: 004
-- Status: Pending
+- Status: In Progress
 - Priority: P3
 - Source: review finding
 - References:
@@ -43,3 +43,4 @@ Move click type parsing to a shared helper or use enum binding with a shared con
 ## Notes
 
 - This is intentionally small and independent.
+- 2026-05-06: Selected after completing `002c`. First validation target is a focused profile grammar test proving a diagnostics-only alias, such as `leftClick`, works through the core-profile `click_element`.
