@@ -1,7 +1,7 @@
 # Central Locator Shape Validation
 
 - ID: 002b
-- Status: In Progress
+- Status: Review
 - Priority: P2
 - Source: split from 002
 - References:
@@ -46,3 +46,5 @@ Add a central locator-shape validator that allows intentional index-only locator
 ## Notes
 
 - 2026-05-06: Selected for implementation after `002a`. First validation target is focused `ElementLocator` shape coverage for empty locator, `xpath + index`, negative index, and valid index-only locator behavior across the shared parser plus representative UIA/WPF resolver paths.
+- 2026-05-06: Implemented in `897129e`. Added internal `ElementLocatorShape`, moved empty locator, `xpath + index`, and negative index checks into the shared parser, and reused it from representative UIA and WPF resolver entrypoints while preserving index-only resolution.
+- 2026-05-06: Validation so far: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter "FullyQualifiedName~ElementLocatorShapeDesignTests|FullyQualifiedName~LocatorStrategies_resolve_snapshot|FullyQualifiedName~ResolveElement_wpf_then_get_data_context_by_elementId_snapshot|FullyQualifiedName~ClickElement_name_with_index_updates_click_count_snapshot"` passed with 7 tests. The command emits the known `System.Diagnostics.EventLog` version conflict warning.

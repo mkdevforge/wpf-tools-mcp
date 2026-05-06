@@ -26,7 +26,7 @@
 | 003b | Done | P2 | [Agent WPF resolve failures use stable codes](003b-agent-wpf-resolve-failures-use-stable-codes.md) | split from 003 |
 | 003c | Done | P2 | [Automation fallback logic consumes typed error codes](003c-automation-fallback-logic-consumes-typed-error-codes.md) | split from 003 |
 | 002a | Done | P2 | [Element target parser for click element](002a-element-target-parser-for-click-element.md) | split from 002 |
-| 002b | In Progress | P2 | [Central locator shape validation](002b-central-locator-shape-validation.md) | split from 002 |
+| 002b | Review | P2 | [Central locator shape validation](002b-central-locator-shape-validation.md) | split from 002 |
 | 002c | Pending | P2 | [Migrate remaining target-bearing operations](002c-migrate-remaining-target-bearing-operations.md) | split from 002 |
 | 004 | Pending | P3 | [Tool input grammar drifts by profile](004-tool-input-grammar-drifts-by-profile.md) | review finding |
 
