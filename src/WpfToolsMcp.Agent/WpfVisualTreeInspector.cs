@@ -1638,20 +1638,11 @@ internal static class WpfVisualTreeInspector
         int maxNodes,
         CancellationToken cancellationToken)
     {
-        if (IsEmptyLocator(locator))
-        {
-            throw AgentEndpointException.InvalidRequest(
-                "Locator must specify at least one of: xpath, automationId, automationIdContains, name, nameContains, className, classNameContains, typeEquals, controlTypeEquals, index.");
-        }
+        var shape = ParseLocatorShapeOrThrow(locator);
 
-        if (!string.IsNullOrWhiteSpace(locator.XPath))
+        if (shape.Kind == ElementLocatorShapeKind.XPath)
         {
-            if (locator.Index is not null)
-            {
-                throw AgentEndpointException.InvalidRequest("invalid_request: index cannot be used with xpath.");
-            }
-
-            var normalized = NormalizeXPath(locator.XPath);
+            var normalized = NormalizeXPath(locator.XPath!);
             try
             {
                 var element = ResolveByXPath(treeService, window, normalized, visibleOnly, cancellationToken);
@@ -1694,14 +1685,9 @@ internal static class WpfVisualTreeInspector
             .Where(e => !interactiveOnly || IsInteractiveWpf(e.Element, interactiveMode))
             .ToArray();
 
-        if (IsIndexOnlyLocator(locator))
+        if (shape.Kind == ElementLocatorShapeKind.IndexOnly)
         {
             var index = locator.Index!.Value;
-            if (index < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(locator), "index must be >= 0.");
-            }
-
             if (index >= descendants.Length)
             {
                 throw AgentEndpointException.WpfResolveNotFound($"wpf_resolve:not_found: Locator index {index} is out of range (found {descendants.Length}).");
@@ -1782,32 +1768,16 @@ internal static class WpfVisualTreeInspector
             cancellationToken);
     }
 
-    private static bool IsIndexOnlyLocator(ElementLocator locator)
+    private static ElementLocatorShape ParseLocatorShapeOrThrow(ElementLocator locator)
     {
-        return locator.Index is not null
-               && string.IsNullOrWhiteSpace(locator.AutomationId)
-               && string.IsNullOrWhiteSpace(locator.AutomationIdContains)
-               && string.IsNullOrWhiteSpace(locator.Name)
-               && string.IsNullOrWhiteSpace(locator.NameContains)
-               && string.IsNullOrWhiteSpace(locator.ClassName)
-               && string.IsNullOrWhiteSpace(locator.ClassNameContains)
-               && string.IsNullOrWhiteSpace(locator.TypeEquals)
-               && string.IsNullOrWhiteSpace(locator.ControlTypeEquals)
-               && string.IsNullOrWhiteSpace(locator.XPath);
-    }
-
-    private static bool IsEmptyLocator(ElementLocator locator)
-    {
-        return string.IsNullOrWhiteSpace(locator.AutomationId)
-               && string.IsNullOrWhiteSpace(locator.AutomationIdContains)
-               && string.IsNullOrWhiteSpace(locator.Name)
-               && string.IsNullOrWhiteSpace(locator.NameContains)
-               && string.IsNullOrWhiteSpace(locator.ClassName)
-               && string.IsNullOrWhiteSpace(locator.ClassNameContains)
-               && string.IsNullOrWhiteSpace(locator.TypeEquals)
-               && string.IsNullOrWhiteSpace(locator.ControlTypeEquals)
-               && string.IsNullOrWhiteSpace(locator.XPath)
-               && locator.Index is null;
+        try
+        {
+            return ElementLocatorShape.Parse(locator);
+        }
+        catch (ArgumentException ex)
+        {
+            throw AgentEndpointException.InvalidRequest(ex.Message);
+        }
     }
 
     private static string? DescribeXPathFilterMismatchWpf(DependencyObject element, ElementLocator locator)

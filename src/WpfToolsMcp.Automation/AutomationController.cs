@@ -8679,20 +8679,10 @@ public sealed partial class AutomationController : IDisposable
             throw new ArgumentNullException(nameof(locator));
         }
 
-        if (IsEmptyLocator(locator))
-        {
-            throw new ArgumentException(
-                "Locator must specify at least one of: xpath, automationId, automationIdContains, name, nameContains, className, classNameContains, typeEquals, controlTypeEquals, index.",
-                nameof(locator));
-        }
+        var shape = ElementLocatorShape.Parse(locator);
 
-        if (!string.IsNullOrWhiteSpace(locator.XPath))
+        if (shape.Kind == ElementLocatorShapeKind.XPath)
         {
-            if (locator.Index is not null)
-            {
-                throw new ArgumentException("index cannot be used with xpath.", nameof(locator));
-            }
-
             var resolved = TryResolveByXPath(window, locator, rawWalker)
                 ?? throw new InvalidOperationException("Locator did not match any element.");
 
@@ -8715,10 +8705,9 @@ public sealed partial class AutomationController : IDisposable
             return resolved;
         }
 
-        var indexOnly = TryResolveByIndexOnly(window, locator, controlWalker, visibleOnly, includeOffViewport, interactiveOnly, interactiveMode);
-        if (indexOnly is not null)
+        if (shape.Kind == ElementLocatorShapeKind.IndexOnly)
         {
-            return indexOnly;
+            return ResolveByIndexOnly(window, locator, controlWalker, visibleOnly, includeOffViewport, interactiveOnly, interactiveMode);
         }
 
         var matches = EnumerateSelfAndDescendantsDepthFirst(window, controlWalker)
@@ -8774,20 +8763,6 @@ public sealed partial class AutomationController : IDisposable
         {
             return false;
         }
-    }
-
-    private static bool IsEmptyLocator(ElementLocator locator)
-    {
-        return string.IsNullOrWhiteSpace(locator.AutomationId)
-               && string.IsNullOrWhiteSpace(locator.AutomationIdContains)
-               && string.IsNullOrWhiteSpace(locator.Name)
-               && string.IsNullOrWhiteSpace(locator.NameContains)
-               && string.IsNullOrWhiteSpace(locator.ClassName)
-               && string.IsNullOrWhiteSpace(locator.ClassNameContains)
-               && string.IsNullOrWhiteSpace(locator.TypeEquals)
-               && string.IsNullOrWhiteSpace(locator.ControlTypeEquals)
-               && string.IsNullOrWhiteSpace(locator.XPath)
-               && locator.Index is null;
     }
 
     private static string? DescribeXPathFilterMismatchUia(AutomationElement element, ElementLocator locator)
@@ -9170,7 +9145,7 @@ public sealed partial class AutomationController : IDisposable
         return current;
     }
 
-    private static AutomationElement? TryResolveByIndexOnly(
+    private static AutomationElement ResolveByIndexOnly(
         Window window,
         ElementLocator locator,
         ITreeWalker walker,
@@ -9179,30 +9154,7 @@ public sealed partial class AutomationController : IDisposable
         bool interactiveOnly,
         InteractiveMode interactiveMode)
     {
-        if (locator.Index is null)
-        {
-            return null;
-        }
-
-        if (!string.IsNullOrWhiteSpace(locator.AutomationId) ||
-            !string.IsNullOrWhiteSpace(locator.AutomationIdContains) ||
-            !string.IsNullOrWhiteSpace(locator.Name) ||
-            !string.IsNullOrWhiteSpace(locator.NameContains) ||
-            !string.IsNullOrWhiteSpace(locator.ClassName) ||
-            !string.IsNullOrWhiteSpace(locator.ClassNameContains) ||
-            !string.IsNullOrWhiteSpace(locator.TypeEquals) ||
-            !string.IsNullOrWhiteSpace(locator.ControlTypeEquals) ||
-            !string.IsNullOrWhiteSpace(locator.XPath))
-        {
-            return null;
-        }
-
-        var index = locator.Index.Value;
-        if (index < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(locator), "index must be >= 0.");
-        }
-
+        var index = locator.Index!.Value;
         var query = EnumerateSelfAndDescendantsDepthFirst(window, walker).Skip(1);
         if (visibleOnly)
         {
