@@ -2225,12 +2225,11 @@ public sealed partial class AutomationController : IDisposable
         var trace = BeginTraceSpan("invoke");
         try
         {
-            var hasLocator = request.Locator is not null;
-            var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
-            if (hasLocator == hasElementId)
-            {
-                throw new ArgumentException("invoke requires exactly one of: locator OR elementId.");
-            }
+            var target = ElementTarget.Parse(
+                request.Locator,
+                request.ElementId,
+                request.WindowHandle,
+                operationName: "invoke");
 
             var application = EnsureAttached();
             var automation = EnsureAutomation();
@@ -2245,12 +2244,12 @@ public sealed partial class AutomationController : IDisposable
 
             var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
-            if (hasElementId)
+            if (target is ElementTarget.ByElementId elementIdTarget)
             {
-                var elementId = request.ElementId!.Trim();
+                var elementId = elementIdTarget.Value;
                 var handle = RequireHandle(elementId);
 
-                if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+                if (elementIdTarget.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
                 {
                     throw new ArgumentException("windowHandle does not match the elementId window.");
                 }
@@ -2280,9 +2279,9 @@ public sealed partial class AutomationController : IDisposable
                     throw new InvalidOperationException($"elementId '{elementId}' has unsupported backend '{handle.Backend}'.");
                 }
             }
-            else
+            else if (target is ElementTarget.ByLocator locatorTarget)
             {
-                window = request.WindowHandle is long requestedHandle
+                window = locatorTarget.WindowHandle is long requestedHandle
                     ? FindWindowByHandle(application, automation, requestedHandle)
                     : FindMainWindow(application, automation);
 
@@ -2290,7 +2289,7 @@ public sealed partial class AutomationController : IDisposable
 
                 var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
                     window,
-                    request.Locator!,
+                    locatorTarget.Value,
                     request.AutoWait ? timeoutMs : 0,
                     pollIntervalMs,
                     request.AutoWait ? stableMs : 0,
@@ -2310,15 +2309,19 @@ public sealed partial class AutomationController : IDisposable
                     element = request.AutoWait
                         ? await ResolveUiaElementWithWaitAsync(
                             window,
-                            request.Locator!,
+                            locatorTarget.Value,
                             controlWalker,
                             rawWalker,
                             timeoutMs,
                             pollIntervalMs,
                             ActionKind.Invoke,
                             cancellationToken)
-                        : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.Invoke);
+                        : ResolveElement(window, locatorTarget.Value, controlWalker, rawWalker, ActionKind.Invoke);
                 }
+            }
+            else
+            {
+                throw new InvalidOperationException("Unknown element target shape.");
             }
 
             TryScrollIntoView(element);
@@ -2411,12 +2414,11 @@ public sealed partial class AutomationController : IDisposable
         var trace = BeginTraceSpan("type_text");
         try
         {
-        var hasLocator = request.Locator is not null;
-        var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
-        if (hasLocator && hasElementId)
-        {
-            throw new ArgumentException("type_text requires at most one of: locator OR elementId.");
-        }
+        var target = ElementTarget.ParseOptional(
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
+            operationName: "type_text");
 
         if (request.Text is null)
         {
@@ -2434,7 +2436,7 @@ public sealed partial class AutomationController : IDisposable
         AutomationElement element;
 
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
-        if (!hasLocator && !hasElementId)
+        if (target is null)
         {
             window = request.WindowHandle is long requestedHandle
                 ? FindWindowByHandle(application, automation, requestedHandle)
@@ -2504,12 +2506,12 @@ public sealed partial class AutomationController : IDisposable
             return new TypeTextResponse(Typed: true, MethodUsed: "keyboard_focused");
         }
 
-        if (hasElementId)
+        if (target is ElementTarget.ByElementId elementIdTarget)
         {
-            var elementId = request.ElementId!.Trim();
+            var elementId = elementIdTarget.Value;
             var handle = RequireHandle(elementId);
 
-            if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            if (elementIdTarget.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
             {
                 throw new ArgumentException("windowHandle does not match the elementId window.");
             }
@@ -2563,9 +2565,9 @@ public sealed partial class AutomationController : IDisposable
 
             element = ResolveUiaElementById(window, rawWalker, elementId, out _);
         }
-        else
+        else if (target is ElementTarget.ByLocator locatorTarget)
         {
-            window = request.WindowHandle is long requestedHandle
+            window = locatorTarget.WindowHandle is long requestedHandle
                 ? FindWindowByHandle(application, automation, requestedHandle)
                 : FindMainWindow(application, automation);
 
@@ -2573,7 +2575,7 @@ public sealed partial class AutomationController : IDisposable
 
             var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
                 window,
-                request.Locator!,
+                locatorTarget.Value,
                 request.AutoWait ? timeoutMs : 0,
                 pollIntervalMs,
                 request.AutoWait ? stableMs : 0,
@@ -2618,14 +2620,18 @@ public sealed partial class AutomationController : IDisposable
             element = request.AutoWait
                 ? await ResolveUiaElementWithWaitAsync(
                     window,
-                    request.Locator!,
+                    locatorTarget.Value,
                     controlWalker,
                     rawWalker,
                     timeoutMs,
                     pollIntervalMs,
                     ActionKind.TypeText,
                     cancellationToken)
-                : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.TypeText);
+                : ResolveElement(window, locatorTarget.Value, controlWalker, rawWalker, ActionKind.TypeText);
+        }
+        else
+        {
+            throw new InvalidOperationException("Unknown element target shape.");
         }
 
         TryScrollIntoView(element);
@@ -2735,12 +2741,11 @@ public sealed partial class AutomationController : IDisposable
         var trace = BeginTraceSpan("set_value");
         try
         {
-            var hasLocator = request.Locator is not null;
-            var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
-            if (hasLocator == hasElementId)
-            {
-                throw new ArgumentException("set_value requires exactly one of: locator OR elementId.");
-            }
+            var target = ElementTarget.Parse(
+                request.Locator,
+                request.ElementId,
+                request.WindowHandle,
+                operationName: "set_value");
 
             var application = EnsureAttached();
             var automation = EnsureAutomation();
@@ -2765,12 +2770,12 @@ public sealed partial class AutomationController : IDisposable
 
             var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
-            if (hasElementId)
+            if (target is ElementTarget.ByElementId elementIdTarget)
             {
-                var elementId = request.ElementId!.Trim();
+                var elementId = elementIdTarget.Value;
                 var handle = RequireHandle(elementId);
 
-                if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+                if (elementIdTarget.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
                 {
                     throw new ArgumentException("windowHandle does not match the elementId window.");
                 }
@@ -2805,9 +2810,9 @@ public sealed partial class AutomationController : IDisposable
                     throw new InvalidOperationException($"elementId '{elementId}' has unsupported backend '{handle.Backend}'.");
                 }
             }
-            else
+            else if (target is ElementTarget.ByLocator locatorTarget)
             {
-                window = request.WindowHandle is long requestedHandle
+                window = locatorTarget.WindowHandle is long requestedHandle
                     ? FindWindowByHandle(application, automation, requestedHandle)
                     : FindMainWindow(application, automation);
 
@@ -2815,7 +2820,7 @@ public sealed partial class AutomationController : IDisposable
 
                 var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
                     window,
-                    request.Locator!,
+                    locatorTarget.Value,
                     request.AutoWait ? timeoutMs : 0,
                     pollIntervalMs,
                     request.AutoWait ? stableMs : 0,
@@ -2841,15 +2846,19 @@ public sealed partial class AutomationController : IDisposable
                     element = request.AutoWait
                         ? await ResolveUiaElementWithWaitAsync(
                             window,
-                            request.Locator!,
+                            locatorTarget.Value,
                             controlWalker,
                             rawWalker,
                             timeoutMs,
                             pollIntervalMs,
                             ActionKind.SetValue,
                             cancellationToken)
-                        : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.SetValue);
+                        : ResolveElement(window, locatorTarget.Value, controlWalker, rawWalker, ActionKind.SetValue);
                 }
+            }
+            else
+            {
+                throw new InvalidOperationException("Unknown element target shape.");
             }
 
             TryScrollIntoView(element);
@@ -4025,12 +4034,13 @@ public sealed partial class AutomationController : IDisposable
         var trace = BeginTraceSpan("wait_for");
         try
         {
-        var hasLocator = request.Locator is not null;
-        var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
-        if (hasLocator == hasElementId)
-        {
-            throw new ArgumentException("wait_for requires exactly one of: locator OR elementId.");
-        }
+        var target = ElementTarget.Parse(
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
+            operationName: "wait_for");
+        var locatorTarget = target as ElementTarget.ByLocator;
+        var elementIdTarget = target as ElementTarget.ByElementId;
 
         var state = ParseWaitForState(request.State);
 
@@ -4052,18 +4062,18 @@ public sealed partial class AutomationController : IDisposable
         var automation = EnsureAutomation();
 
         var backendForLocator = request.Backend;
-        if (hasLocator && backendForLocator == InspectionBackend.Auto)
+        if (locatorTarget is not null && backendForLocator == InspectionBackend.Auto)
         {
             var autoClient = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
             backendForLocator = autoClient is not null ? InspectionBackend.Wpf : InspectionBackend.Uia;
         }
 
-        if (hasElementId)
+        if (elementIdTarget is not null)
         {
-            var elementId = request.ElementId!.Trim();
+            var elementId = elementIdTarget.Value;
             var handle = RequireHandle(elementId);
 
-            if (request.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            if (elementIdTarget.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
             {
                 throw new ArgumentException("windowHandle does not match the elementId window.");
             }
@@ -4094,9 +4104,9 @@ public sealed partial class AutomationController : IDisposable
             }
         }
 
-        if (hasLocator && backendForLocator == InspectionBackend.Wpf)
+        if (locatorTarget is not null && backendForLocator == InspectionBackend.Wpf)
         {
-            var uiaWindow = request.WindowHandle is long requestedHandle
+            var uiaWindow = locatorTarget.WindowHandle is long requestedHandle
                 ? FindWindowByHandle(application, automation, requestedHandle)
                 : FindMainWindow(application, automation);
 
@@ -4106,7 +4116,7 @@ public sealed partial class AutomationController : IDisposable
                 stateText: request.State,
                 state,
                 windowHandle: hwnd,
-                locator: request.Locator,
+                locator: locatorTarget.Value,
                 xpath: null,
                 timeoutMs,
                 pollIntervalMs,
@@ -4125,9 +4135,9 @@ public sealed partial class AutomationController : IDisposable
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
 
-        if (hasElementId)
+        if (elementIdTarget is not null)
         {
-            var elementId = request.ElementId!.Trim();
+            var elementId = elementIdTarget.Value;
             var handle = RequireHandle(elementId);
 
             xpathHint = handle.XPath;
@@ -4143,11 +4153,12 @@ public sealed partial class AutomationController : IDisposable
         }
         else
         {
-            window = request.WindowHandle is long requestedHandle
+            var locator = locatorTarget!.Value;
+            window = locatorTarget.WindowHandle is long requestedHandle
                 ? FindWindowByHandle(application, automation, requestedHandle)
                 : FindMainWindow(application, automation);
 
-            xpathHint = request.Locator?.XPath;
+            xpathHint = locator.XPath;
         }
 
         var start = Stopwatch.GetTimestamp();
@@ -4165,13 +4176,13 @@ public sealed partial class AutomationController : IDisposable
             AutomationElement? element;
             try
             {
-                if (hasElementId)
+                if (elementIdTarget is not null)
                 {
-                    element = ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out _);
+                    element = ResolveUiaElementById(window, rawWalker, elementIdTarget.Value, out _);
                 }
                 else
                 {
-                    element = TryResolveWithMissingAsNull(window, request.Locator!, controlWalker, rawWalker, ActionKind.Inspect);
+                    element = TryResolveWithMissingAsNull(window, locatorTarget!.Value, controlWalker, rawWalker, ActionKind.Inspect);
                 }
             }
             catch
@@ -7777,22 +7788,21 @@ public sealed partial class AutomationController : IDisposable
         var trace = BeginTraceSpan("get_path_to_element");
         try
         {
-        var hasLocator = locator is not null;
-        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
-        if (hasLocator == hasElementId)
-        {
-            throw new ArgumentException("get_path_to_element requires exactly one of: locator OR elementId.");
-        }
+        var target = ElementTarget.Parse(
+            locator,
+            elementId,
+            windowHandle,
+            operationName: "get_path_to_element");
 
         var application = EnsureAttached();
         var automation = EnsureAutomation();
 
-        if (hasElementId)
+        if (target is ElementTarget.ByElementId elementIdTarget)
         {
-            var id = elementId!.Trim();
+            var id = elementIdTarget.Value;
             var handle = RequireHandle(id);
 
-            if (windowHandle is not null && windowHandle.Value != handle.WindowHandle)
+            if (elementIdTarget.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
             {
                 throw new ArgumentException("windowHandle does not match the elementId window.");
             }
@@ -7827,7 +7837,7 @@ public sealed partial class AutomationController : IDisposable
                         IncludeOffViewport: true,
                         MaxNodes: 8000)
                     : null;
-                var target = new WpfAgentTarget(
+                var wpfAgentTarget = new WpfAgentTarget(
                     handle.WindowHandle,
                     request.Locator,
                     handle.WpfAgentElementId,
@@ -7840,7 +7850,7 @@ public sealed partial class AutomationController : IDisposable
                     AgentMethods.GetPath,
                     request,
                     fallbackRequest,
-                    target,
+                    wpfAgentTarget,
                     cancellationToken).ConfigureAwait(false);
                 _elementHandles.TryUpdateWpfPath(id, wpfResponse.XPath);
                 trace?.SetSummary($"{wpfResponse.BackendUsed} {wpfResponse.XPath}");
@@ -7864,12 +7874,13 @@ public sealed partial class AutomationController : IDisposable
             return uiaResponseFromId;
         }
 
+        var locatorTarget = (ElementTarget.ByLocator)target;
         if (backend == InspectionBackend.Wpf)
         {
-            var resolvedWindowHandle = windowHandle ?? FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
+            var resolvedWindowHandle = locatorTarget.WindowHandle ?? FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
             var request = new GetWpfPathRequest(
                 WindowHandle: resolvedWindowHandle,
-                Locator: locator,
+                Locator: locatorTarget.Value,
                 RootXPath: null,
                 VisibleOnly: true,
                 MaxNodes: 8000);
@@ -7879,13 +7890,13 @@ public sealed partial class AutomationController : IDisposable
             return wpfResponse;
         }
 
-        var window = windowHandle is long requestedWindowHandle
+        var window = locatorTarget.WindowHandle is long requestedWindowHandle
             ? FindWindowByHandle(application, automation, requestedWindowHandle)
             : FindMainWindow(application, automation);
 
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
-        var element = ResolveElement(window, locator!, controlWalker, rawWalker);
+        var element = ResolveElement(window, locatorTarget.Value, controlWalker, rawWalker);
         var xpath = ComputeXPath(window, element, rawWalker);
 
         var responseUia = new GetPathToElementResponse(InspectionBackend.Uia, xpath);
@@ -7912,12 +7923,11 @@ public sealed partial class AutomationController : IDisposable
         var trace = BeginTraceSpan("get_element_properties");
         try
         {
-        var hasLocator = locator is not null;
-        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
-        if (hasLocator == hasElementId)
-        {
-            throw new ArgumentException("get_element_properties requires exactly one of: locator OR elementId.");
-        }
+        var target = ElementTarget.Parse(
+            locator,
+            elementId,
+            windowHandle,
+            operationName: "get_element_properties");
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -7932,9 +7942,9 @@ public sealed partial class AutomationController : IDisposable
         string xpath;
         UiaMappingDiagnostics? uiaMapping = null;
 
-        if (hasElementId)
+        if (target is ElementTarget.ByElementId elementIdTarget)
         {
-            var id = elementId!.Trim();
+            var id = elementIdTarget.Value;
             var handle = RequireHandle(id);
             if (handle.Backend != InspectionBackend.Uia &&
                 handle.Backend != InspectionBackend.Wpf)
@@ -7942,7 +7952,7 @@ public sealed partial class AutomationController : IDisposable
                 throw new InvalidOperationException($"elementId '{id}' has unsupported backend '{handle.Backend}'.");
             }
 
-            if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+            if (elementIdTarget.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
             {
                 throw new ArgumentException("windowHandle does not match the elementId window.");
             }
@@ -7970,13 +7980,14 @@ public sealed partial class AutomationController : IDisposable
         }
         else
         {
-            window = windowHandle is long requestedHandle
+            var locatorTarget = (ElementTarget.ByLocator)target;
+            window = locatorTarget.WindowHandle is long requestedHandle
                 ? FindWindowByHandle(application, automation, requestedHandle)
                 : FindMainWindow(application, automation);
 
             var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
                 window,
-                locator!,
+                locatorTarget.Value,
                 timeoutMs: 0,
                 pollIntervalMs: 100,
                 stableMs: 0,
@@ -7995,7 +8006,7 @@ public sealed partial class AutomationController : IDisposable
             }
             else
             {
-                element = ResolveElement(window, locator!, controlWalker, rawWalker);
+                element = ResolveElement(window, locatorTarget.Value, controlWalker, rawWalker);
                 xpath = ComputeXPath(window, element, rawWalker);
             }
         }
@@ -8071,12 +8082,11 @@ public sealed partial class AutomationController : IDisposable
         var trace = BeginTraceSpan("get_uia_locators");
         try
         {
-            var hasLocator = locator is not null;
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
-            if (hasLocator == hasElementId)
-            {
-                throw new ArgumentException("get_uia_locators requires exactly one of: locator OR elementId.");
-            }
+            var target = ElementTarget.Parse(
+                locator,
+                elementId,
+                windowHandle,
+                operationName: "get_uia_locators");
 
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -8091,9 +8101,9 @@ public sealed partial class AutomationController : IDisposable
             WpfLocatorIdentity? wpf = null;
             UiaMappingDiagnostics? uiaMapping = null;
 
-            if (hasElementId)
+            if (target is ElementTarget.ByElementId elementIdTarget)
             {
-                var id = elementId!.Trim();
+                var id = elementIdTarget.Value;
                 var handle = RequireHandle(id);
                 if (handle.Backend != InspectionBackend.Uia &&
                     handle.Backend != InspectionBackend.Wpf)
@@ -8101,7 +8111,7 @@ public sealed partial class AutomationController : IDisposable
                     throw new InvalidOperationException($"elementId '{id}' has unsupported backend '{handle.Backend}'.");
                 }
 
-                if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+                if (elementIdTarget.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
                 {
                     throw new ArgumentException("windowHandle does not match the elementId window.");
                 }
@@ -8130,22 +8140,23 @@ public sealed partial class AutomationController : IDisposable
             }
             else
             {
-                window = windowHandle is long requestedHandle
+                var locatorTarget = (ElementTarget.ByLocator)target;
+                window = locatorTarget.WindowHandle is long requestedHandle
                     ? FindWindowByHandle(application, automation, requestedHandle)
                     : FindMainWindow(application, automation);
 
                 try
                 {
-                    element = ResolveElement(window, locator!, controlWalker, rawWalker);
+                    element = ResolveElement(window, locatorTarget.Value, controlWalker, rawWalker);
                     uiaXPath = ComputeXPath(window, element, rawWalker);
 
-                    if (HasStableWpfLocator(locator!))
+                    if (HasStableWpfLocator(locatorTarget.Value))
                     {
                         try
                         {
                             var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
                                 window,
-                                locator!,
+                                locatorTarget.Value,
                                 timeoutMs: 0,
                                 pollIntervalMs: 100,
                                 stableMs: 0,
@@ -8173,7 +8184,7 @@ public sealed partial class AutomationController : IDisposable
                 {
                     var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
                         window,
-                        locator!,
+                        locatorTarget.Value,
                         timeoutMs: 0,
                         pollIntervalMs: 100,
                         stableMs: 0,

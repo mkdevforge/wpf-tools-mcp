@@ -45,6 +45,29 @@ internal abstract record ElementTarget
         return new ByElementId(id, windowHandle);
     }
 
+    public static ElementTarget? ParseOptional(
+        ElementLocator? locator,
+        string? elementId,
+        long? windowHandle,
+        string operationName)
+    {
+        var hasLocator = locator is not null;
+        var id = string.IsNullOrWhiteSpace(elementId) ? null : elementId.Trim();
+        var hasElementId = id is not null;
+
+        if (hasLocator && hasElementId)
+        {
+            throw new ArgumentException($"invalid_request: {operationName} requires at most one of locator OR elementId.");
+        }
+
+        if (id is null)
+        {
+            return locator is null ? null : new ByLocator(locator, windowHandle);
+        }
+
+        return new ByElementId(id, windowHandle);
+    }
+
     private static string CreateExactlyOneTargetError(string? operationName) =>
         string.IsNullOrWhiteSpace(operationName)
             ? "invalid_request: provide exactly one of locator OR elementId."

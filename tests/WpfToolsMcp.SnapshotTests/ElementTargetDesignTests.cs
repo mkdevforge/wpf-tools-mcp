@@ -57,4 +57,19 @@ public sealed class ElementTargetDesignTests
 
         Assert.That(ex?.Message, Does.Contain("invalid_request: windowHandle is required with elementId."));
     }
+
+    [Test]
+    public void ParseOptional_allows_absent_target_and_rejects_mixed_target()
+    {
+        Assert.That(ElementTarget.ParseOptional(null, null, null, "type_text"), Is.Null);
+
+        var ex = Assert.Throws<ArgumentException>(
+            () => ElementTarget.ParseOptional(
+                new ElementLocator(AutomationId: "Basic_TextBox"),
+                "uia_123",
+                null,
+                "type_text"));
+
+        Assert.That(ex?.Message, Does.Contain("invalid_request: type_text requires at most one of locator OR elementId."));
+    }
 }

@@ -244,13 +244,15 @@ public static class CoreInspectionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var target = ElementTarget.Parse(locator?.ToElementLocator(), elementId, windowHandle, operationName: "get_element_properties");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
                 () => automation.GetElementPropertiesAsync(
-                    locator?.ToElementLocator(),
-                    elementId,
-                    hasElementId ? windowHandle : effectiveWindowHandle,
+                    requestTarget.Locator,
+                    requestTarget.ElementId,
+                    requestTarget.WindowHandle,
                     cancellationToken),
                 cancellationToken);
         });
@@ -265,13 +267,15 @@ public static class CoreInspectionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var target = ElementTarget.Parse(locator?.ToElementLocator(), elementId, windowHandle, operationName: "get_uia_locators");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
                 () => automation.GetUiaLocatorsAsync(
-                    locator?.ToElementLocator(),
-                    elementId,
-                    hasElementId ? windowHandle : effectiveWindowHandle,
+                    requestTarget.Locator,
+                    requestTarget.ElementId,
+                    requestTarget.WindowHandle,
                     cancellationToken),
                 cancellationToken);
         });
@@ -422,12 +426,13 @@ public static class CoreInteractionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            var target = ElementTarget.Parse(locator?.ToElementLocator(), elementId, null, operationName: "wait_for");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId);
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
             var request = new WaitForRequest(
-                Locator: locator?.ToElementLocator(),
-                ElementId: elementId,
-                WindowHandle: hasElementId ? null : effectiveWindowHandle,
+                Locator: requestTarget.Locator,
+                ElementId: requestTarget.ElementId,
+                WindowHandle: requestTarget.WindowHandle,
                 Backend: InspectionBackend.Auto,
                 State: state,
                 TimeoutMs: timeoutMs,
@@ -447,14 +452,16 @@ public static class CoreInteractionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            var target = ElementTarget.Parse(locator?.ToElementLocator(), elementId, null, operationName: "click_element");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId);
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
                 () => automation.ClickElementAsync(
                     new ClickElementRequest(
-                        Locator: locator?.ToElementLocator(),
-                        ElementId: elementId,
-                        WindowHandle: hasElementId ? null : effectiveWindowHandle,
+                        Locator: requestTarget.Locator,
+                        ElementId: requestTarget.ElementId,
+                        WindowHandle: requestTarget.WindowHandle,
                         ClickType: ParseClickType(clickType)),
                     cancellationToken),
                 cancellationToken);
@@ -470,15 +477,17 @@ public static class CoreInteractionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            var target = ElementTarget.ParseOptional(locator?.ToElementLocator(), elementId, null, operationName: "type_text");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId);
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var requestTarget = target?.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
                 () => automation.TypeTextAsync(
                     new TypeTextRequest(
-                        Locator: locator?.ToElementLocator(),
+                        Locator: requestTarget?.Locator,
                         Text: text,
-                        ElementId: elementId,
-                        WindowHandle: hasElementId ? null : effectiveWindowHandle),
+                        ElementId: requestTarget?.ElementId,
+                        WindowHandle: requestTarget?.WindowHandle ?? effectiveWindowHandle),
                     cancellationToken),
                 cancellationToken);
         });
@@ -494,16 +503,18 @@ public static class CoreInteractionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            var target = ElementTarget.Parse(locator?.ToElementLocator(), elementId, null, operationName: "set_value");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId);
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
                 () => automation.SetValueAsync(
                     new SetValueRequest(
-                        Locator: locator?.ToElementLocator(),
+                        Locator: requestTarget.Locator,
                         Value: value,
                         Text: text,
-                        ElementId: elementId,
-                        WindowHandle: hasElementId ? null : effectiveWindowHandle),
+                        ElementId: requestTarget.ElementId,
+                        WindowHandle: requestTarget.WindowHandle),
                     cancellationToken),
                 cancellationToken);
         });
@@ -542,14 +553,16 @@ public static class CoreInteractionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            var target = ElementTarget.Parse(locator?.ToElementLocator(), elementId, null, operationName: "invoke");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId);
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
                 () => automation.InvokeAsync(
                     new InvokeRequest(
-                        Locator: locator?.ToElementLocator(),
-                        ElementId: elementId,
-                        WindowHandle: hasElementId ? null : effectiveWindowHandle),
+                        Locator: requestTarget.Locator,
+                        ElementId: requestTarget.ElementId,
+                        WindowHandle: requestTarget.WindowHandle),
                     cancellationToken),
                 cancellationToken);
         });

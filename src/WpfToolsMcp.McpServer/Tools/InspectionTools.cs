@@ -54,10 +54,20 @@ public static class InspectionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var target = ElementTarget.Parse(
+                locator,
+                elementId,
+                windowHandle,
+                operationName: "get_element_properties");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
-                () => automation.GetElementPropertiesAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, cancellationToken),
+                () => automation.GetElementPropertiesAsync(
+                    requestTarget.Locator,
+                    requestTarget.ElementId,
+                    requestTarget.WindowHandle,
+                    cancellationToken),
                 cancellationToken);
         });
 
@@ -71,10 +81,20 @@ public static class InspectionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var target = ElementTarget.Parse(
+                locator,
+                elementId,
+                windowHandle,
+                operationName: "get_uia_locators");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
-                () => automation.GetUiaLocatorsAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, cancellationToken),
+                () => automation.GetUiaLocatorsAsync(
+                    requestTarget.Locator,
+                    requestTarget.ElementId,
+                    requestTarget.WindowHandle,
+                    cancellationToken),
                 cancellationToken);
         });
 
@@ -146,10 +166,21 @@ public static class InspectionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var target = ElementTarget.Parse(
+                locator,
+                elementId,
+                windowHandle,
+                operationName: "get_path_to_element");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
-                () => automation.GetPathToElementAsync(backend, locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, cancellationToken),
+                () => automation.GetPathToElementAsync(
+                    backend,
+                    requestTarget.Locator,
+                    requestTarget.ElementId,
+                    requestTarget.WindowHandle,
+                    cancellationToken),
                 cancellationToken);
         });
 

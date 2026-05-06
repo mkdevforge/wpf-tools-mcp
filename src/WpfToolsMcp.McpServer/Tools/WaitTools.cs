@@ -26,12 +26,17 @@ public static class WaitTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            var target = ElementTarget.Parse(
+                locator,
+                elementId,
+                windowHandle,
+                operationName: "wait_for");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
             var request = new WaitForRequest(
-                Locator: locator,
-                ElementId: elementId,
-                WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                Locator: requestTarget.Locator,
+                ElementId: requestTarget.ElementId,
+                WindowHandle: requestTarget.WindowHandle,
                 Backend: backend,
                 State: state,
                 TimeoutMs: timeoutMs,

@@ -58,26 +58,21 @@ public sealed partial class AutomationController
         string? elementId,
         long? windowHandle)
     {
-        var hasLocator = locator is not null;
-        var hasElementId = !string.IsNullOrWhiteSpace(elementId);
-        if (hasLocator == hasElementId)
+        var target = ElementTarget.Parse(locator, elementId, windowHandle, operationName: toolName);
+        if (target is ElementTarget.ByLocator locatorTarget)
         {
-            throw new ArgumentException($"{toolName} requires exactly one of: locator OR elementId.");
+            return new WpfAgentTarget(locatorTarget.WindowHandle, locatorTarget.Value, null, null, null, null);
         }
 
-        if (!hasElementId)
-        {
-            return new WpfAgentTarget(windowHandle, locator, null, null, null, null);
-        }
-
-        var id = elementId!.Trim();
+        var elementIdTarget = (ElementTarget.ByElementId)target;
+        var id = elementIdTarget.Value;
         var handle = RequireHandle(id);
         if (handle.Backend != InspectionBackend.Wpf)
         {
             throw new InvalidOperationException($"elementId '{id}' is not a WPF handle.");
         }
 
-        if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+        if (elementIdTarget.WindowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
         {
             throw new ArgumentException("windowHandle does not match the elementId window.");
         }

@@ -165,14 +165,20 @@ public static class InteractionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            var target = ElementTarget.Parse(
+                locator,
+                elementId,
+                windowHandle,
+                operationName: "invoke");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
                 () => automation.InvokeAsync(
                     new InvokeRequest(
-                        Locator: locator,
-                        ElementId: elementId,
-                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        Locator: requestTarget.Locator,
+                        ElementId: requestTarget.ElementId,
+                        WindowHandle: requestTarget.WindowHandle,
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
                         PollIntervalMs: pollIntervalMs,
@@ -196,15 +202,21 @@ public static class InteractionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            var target = ElementTarget.ParseOptional(
+                locator,
+                elementId,
+                windowHandle,
+                operationName: "type_text");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var requestTarget = target?.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
                 () => automation.TypeTextAsync(
                     new TypeTextRequest(
-                        Locator: locator,
+                        Locator: requestTarget?.Locator,
                         Text: text,
-                        ElementId: elementId,
-                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        ElementId: requestTarget?.ElementId,
+                        WindowHandle: requestTarget?.WindowHandle ?? effectiveWindowHandle,
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
                         PollIntervalMs: pollIntervalMs,
@@ -229,16 +241,22 @@ public static class InteractionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            var target = ElementTarget.Parse(
+                locator,
+                elementId,
+                windowHandle,
+                operationName: "set_value");
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
-            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            var requestTarget = target.WithInheritedWindowHandle(effectiveWindowHandle);
+
             return automation.RunExclusiveAsync(
                 () => automation.SetValueAsync(
                     new SetValueRequest(
-                        Locator: locator,
+                        Locator: requestTarget.Locator,
                         Value: value,
                         Text: text,
-                        ElementId: elementId,
-                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        ElementId: requestTarget.ElementId,
+                        WindowHandle: requestTarget.WindowHandle,
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
                         PollIntervalMs: pollIntervalMs,
