@@ -112,7 +112,7 @@ public static class InteractionTools
                         Locator: requestTarget.Locator,
                         ElementId: requestTarget.ElementId,
                         WindowHandle: requestTarget.WindowHandle,
-                        ClickType: ParseClickType(clickType),
+                        ClickType: ToolOptionParsers.ParseClickType(clickType),
                         ClickMode: ParseClickMode(clickMode),
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
@@ -378,42 +378,6 @@ public static class InteractionTools
                     cancellationToken),
                 cancellationToken);
         });
-
-    private static ClickType ParseClickType(string? clickType)
-    {
-        if (string.IsNullOrWhiteSpace(clickType))
-        {
-            return ClickType.Single;
-        }
-
-        var value = clickType.Trim();
-        if (value.Equals("single", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("left", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("leftClick", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("left_click", StringComparison.OrdinalIgnoreCase))
-        {
-            return ClickType.Single;
-        }
-
-        if (value.Equals("double", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("doubleClick", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("double_click", StringComparison.OrdinalIgnoreCase))
-        {
-            return ClickType.Double;
-        }
-
-        if (value.Equals("right", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("rightClick", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("right_click", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("context", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("contextMenu", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("context_menu", StringComparison.OrdinalIgnoreCase))
-        {
-            return ClickType.Right;
-        }
-
-        throw new ArgumentException($"Unknown clickType '{clickType}'. Valid values: single, double, right.");
-    }
 
     private static ClickMode ParseClickMode(string? clickMode)
     {

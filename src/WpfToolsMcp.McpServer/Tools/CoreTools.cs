@@ -462,7 +462,7 @@ public static class CoreInteractionTools
                         Locator: requestTarget.Locator,
                         ElementId: requestTarget.ElementId,
                         WindowHandle: requestTarget.WindowHandle,
-                        ClickType: ParseClickType(clickType)),
+                        ClickType: ToolOptionParsers.ParseClickType(clickType)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -617,31 +617,4 @@ public static class CoreInteractionTools
                 cancellationToken);
         });
 
-    private static ClickType ParseClickType(string? clickType)
-    {
-        if (string.IsNullOrWhiteSpace(clickType))
-        {
-            return ClickType.Single;
-        }
-
-        var value = clickType.Trim();
-        if (value.Equals("single", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("left", StringComparison.OrdinalIgnoreCase))
-        {
-            return ClickType.Single;
-        }
-
-        if (value.Equals("double", StringComparison.OrdinalIgnoreCase))
-        {
-            return ClickType.Double;
-        }
-
-        if (value.Equals("right", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("context", StringComparison.OrdinalIgnoreCase))
-        {
-            return ClickType.Right;
-        }
-
-        throw new ArgumentException($"Unknown clickType '{clickType}'. Valid values: single, double, right.");
-    }
 }
