@@ -302,6 +302,41 @@ public sealed class ToolProfileTests
     }
 
     [Test]
+    public async Task Default_profile_click_element_accepts_diagnostics_click_alias()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(
+            serverExe,
+            toolProfile: null,
+            environmentVariables: new Dictionary<string, string?> { ["WPF_TOOLS_MCP_TOOL_PROFILE"] = null });
+
+        var launch = await LaunchPrimaryTestAppAsync(mcp);
+        try
+        {
+            var click = await mcp.CallToolAsync<ClickElementResponse>("click_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["locator"] = new Dictionary<string, object?> { ["automationId"] = "Basic_Button" },
+                ["clickType"] = "leftClick"
+            });
+
+            Assert.That(click.Clicked, Is.True);
+
+            var clickedStatus = await mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["locator"] = new Dictionary<string, object?> { ["automationId"] = "Basic_ClickStatus" }
+            });
+
+            Assert.That(clickedStatus.Element.Name, Does.Contain("Clicks: 1"));
+        }
+        finally
+        {
+            await CloseSessionBestEffortAsync(mcp, launch.SessionId);
+        }
+    }
+
+    [Test]
     public async Task Default_profile_attach_to_app_by_pid()
     {
         var serverExe = McpServerPaths.FindMcpServerExecutable();
