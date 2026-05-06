@@ -1,7 +1,7 @@
 # Tool Input Grammar Drifts By Profile
 
 - ID: 004
-- Status: Review
+- Status: Done
 - Priority: P3
 - Source: review finding
 - References:
@@ -45,3 +45,4 @@ Move click type parsing to a shared helper or use enum binding with a shared con
 - This is intentionally small and independent.
 - 2026-05-06: Selected after completing `002c`. First validation target is a focused profile grammar test proving a diagnostics-only alias, such as `leftClick`, works through the core-profile `click_element`.
 - 2026-05-06: Red coverage committed in `b431eda`; `Default_profile_click_element_accepts_diagnostics_click_alias` failed because core `click_element` rejected `leftClick`. Implementation committed in `4e85dd7`; both core and diagnostics now delegate click type parsing to `ToolOptionParsers`. Validation: the new focused alias test passed, `ToolOptionParsersDesignTests` passed, and `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter "FullyQualifiedName~ToolProfileTests"` passed with 12 tests. Commands emit the existing `System.Diagnostics.EventLog` version conflict warning.
+- 2026-05-06: Review completed. No follow-up item was added.
