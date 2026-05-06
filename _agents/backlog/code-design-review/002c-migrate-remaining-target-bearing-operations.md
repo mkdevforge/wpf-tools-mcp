@@ -1,7 +1,7 @@
 # Migrate Remaining Target-Bearing Operations
 
 - ID: 002c
-- Status: In Progress
+- Status: Review
 - Priority: P2
 - Source: split from 002
 - References:
@@ -46,3 +46,4 @@ Migrate operations in small groups, starting with interaction tools that share a
 ## Notes
 
 - 2026-05-06: Selected for implementation after `002b`. First validation target is an invalid-target boundary test for a migrated non-click operation, followed by focused interaction, wait, and inspection snapshots for locator and element-id flows.
+- 2026-05-06: Implementation committed in `d01f03a`. Shared target parsing now covers the listed interaction, wait, and inspection paths at the MCP boundary and automation controller layer; drag, select, and scroll secondary target validation was left operation-specific. Validation so far: `dotnet test tests\WpfToolsMcp.SnapshotTests\WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore --filter "FullyQualifiedName~McpToolErrorsDesignTests.SetValue_rejects_missing_target_before_session_lookup|FullyQualifiedName~ElementTargetDesignTests"` passed with 6 tests, and the focused interaction/wait/inspection snapshot filter passed with 21 tests. Both commands emit the existing `System.Diagnostics.EventLog` version conflict warning.
