@@ -1,7 +1,7 @@
 # Migrate Remaining Target-Bearing Operations
 
 - ID: 002c
-- Status: Pending
+- Status: In Progress
 - Priority: P2
 - Source: split from 002
 - References:
@@ -42,3 +42,7 @@ Migrate operations in small groups, starting with interaction tools that share a
 ## QA Review
 
 - 2026-05-06: Split from 002. This is intentionally after `002a` and `002b` because broad migration should happen only after the target parser and locator-shape validation are proven.
+
+## Notes
+
+- 2026-05-06: Selected for implementation after `002b`. First validation target is an invalid-target boundary test for a migrated non-click operation, followed by focused interaction, wait, and inspection snapshots for locator and element-id flows.
