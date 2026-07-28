@@ -203,8 +203,8 @@ internal sealed class AgentClient : IAsyncDisposable
         _pipe.Dispose();
 
         await _mutex.WaitAsync();
-        _mutex.Release();
-        _mutex.Dispose();
+        // Keep the semaphore held. Disposing it can race callers that are still
+        // unwinding from the cancellation above and will release it in finally.
         _disposeCts.Dispose();
     }
 

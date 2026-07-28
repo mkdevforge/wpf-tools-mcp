@@ -80,9 +80,11 @@ public sealed class AgentClientLifecycleTests
             var request = await PipeProtocol.ReadAsync<AgentRequest>(server, requestTimeout.Token);
             Assert.That(request.Method, Is.EqualTo("ping"));
 
+            var queuedCallTask = client.CallAsync<string>("queued", null, CancellationToken.None);
             await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
 
             Assert.ThrowsAsync<ObjectDisposedException>(async () => _ = await callTask);
+            Assert.ThrowsAsync<ObjectDisposedException>(async () => _ = await queuedCallTask);
             Assert.ThrowsAsync<ObjectDisposedException>(async () =>
                 _ = await client.CallAsync<string>("ping", null, CancellationToken.None));
 
