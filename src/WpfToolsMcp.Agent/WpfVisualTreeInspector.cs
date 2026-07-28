@@ -26,6 +26,7 @@ namespace WpfToolsMcp.Agent;
 
 internal static class WpfVisualTreeInspector
 {
+    private static string? _activeHighlightOwnerId;
     private static IDisposable? _activeHighlight;
     private static DispatcherTimer? _highlightTimer;
     private static Brush? _savedHighlightBorderBrush;
@@ -36,30 +37,27 @@ internal static class WpfVisualTreeInspector
     private sealed class WpfElementHandleStore
     {
         private readonly object _sync = new();
-        private readonly ConditionalWeakTable<DependencyObject, HandleEntry> _byObject = new();
-        private readonly Dictionary<string, WeakReference<DependencyObject>> _byId = new(StringComparer.Ordinal);
+        private readonly ConditionalWeakTable<DependencyObject, ElementOwnerHandles> _byObject = new();
+        private readonly Dictionary<string, HandleRegistration> _byId = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, HashSet<string>> _idsByOwner = new(StringComparer.Ordinal);
         private readonly LinkedList<string> _lru = new();
         private readonly Dictionary<string, LinkedListNode<string>> _lruNodes = new(StringComparer.Ordinal);
         private readonly int _capacity = GetHandleCapacity();
 
-        public string Register(DependencyObject element)
+        public string Register(string ownerId, DependencyObject element)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
             ArgumentNullException.ThrowIfNull(element);
 
             lock (_sync)
             {
-                if (_byObject.TryGetValue(element, out var existing) &&
-                    existing.Active &&
-                    _byId.ContainsKey(existing.Id))
+                var ownerHandles = _byObject.GetOrCreateValue(element);
+                if (ownerHandles.Ids.TryGetValue(ownerId, out var existingId) &&
+                    _byId.TryGetValue(existingId, out var existing) &&
+                    string.Equals(existing.OwnerId, ownerId, StringComparison.Ordinal))
                 {
-                    Touch(existing.Id);
-                    return existing.Id;
-                }
-
-                var entry = existing ?? new HandleEntry();
-                if (existing is null)
-                {
-                    _byObject.Add(element, entry);
+                    Touch(existingId);
+                    return existingId;
                 }
 
                 EvictIfNeeded();
@@ -72,9 +70,15 @@ internal static class WpfVisualTreeInspector
                         continue;
                     }
 
-                    entry.Id = id;
-                    entry.Active = true;
-                    _byId[id] = new WeakReference<DependencyObject>(element);
+                    ownerHandles.Ids[ownerId] = id;
+                    _byId[id] = new HandleRegistration(ownerId, new WeakReference<DependencyObject>(element));
+                    if (!_idsByOwner.TryGetValue(ownerId, out var ownerIds))
+                    {
+                        ownerIds = new HashSet<string>(StringComparer.Ordinal);
+                        _idsByOwner[ownerId] = ownerIds;
+                    }
+
+                    ownerIds.Add(id);
                     _lruNodes[id] = _lru.AddFirst(id);
                     return id;
                 }
@@ -83,8 +87,9 @@ internal static class WpfVisualTreeInspector
             throw new InvalidOperationException("Failed to allocate unique WPF element handle.");
         }
 
-        public DependencyObject Resolve(long windowHandle, string elementId)
+        public DependencyObject Resolve(string ownerId, long windowHandle, string elementId)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
             if (windowHandle == 0)
             {
                 throw new ArgumentException("WindowHandle is required when resolving a WPF element handle.");
@@ -96,10 +101,11 @@ internal static class WpfVisualTreeInspector
             }
 
             var id = elementId.Trim();
-            WeakReference<DependencyObject>? reference;
+            HandleRegistration registration;
             lock (_sync)
             {
-                if (!_byId.TryGetValue(id, out reference))
+                if (!_byId.TryGetValue(id, out registration) ||
+                    !string.Equals(registration.OwnerId, ownerId, StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException($"wpf_handle_stale:not_found: '{id}'.");
                 }
@@ -107,16 +113,16 @@ internal static class WpfVisualTreeInspector
                 Touch(id);
             }
 
-            if (!reference.TryGetTarget(out var element))
+            if (!registration.Reference.TryGetTarget(out var element))
             {
-                Release(id);
+                Release(ownerId, id);
                 throw new InvalidOperationException($"wpf_handle_stale:collected: '{id}'.");
             }
 
             var window = GetContainingWindow(element);
             if (window is null)
             {
-                Release(id);
+                Release(ownerId, id);
                 throw new InvalidOperationException($"wpf_handle_stale:detached: '{id}'.");
             }
 
@@ -130,8 +136,9 @@ internal static class WpfVisualTreeInspector
             return element;
         }
 
-        public bool Release(string elementId)
+        public bool Release(string ownerId, string elementId)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
             if (string.IsNullOrWhiteSpace(elementId))
             {
                 return false;
@@ -140,24 +147,25 @@ internal static class WpfVisualTreeInspector
             var id = elementId.Trim();
             lock (_sync)
             {
-                if (!_byId.Remove(id, out var reference))
+                return RemoveRegistration(id, ownerId);
+            }
+        }
+
+        public void ReleaseOwner(string ownerId)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+
+            lock (_sync)
+            {
+                if (!_idsByOwner.TryGetValue(ownerId, out var ownerIds))
                 {
-                    return false;
+                    return;
                 }
 
-                if (_lruNodes.Remove(id, out var node))
+                foreach (var id in ownerIds.ToArray())
                 {
-                    _lru.Remove(node);
+                    _ = RemoveRegistration(id, ownerId);
                 }
-
-                if (reference.TryGetTarget(out var element) &&
-                    _byObject.TryGetValue(element, out var entry) &&
-                    string.Equals(entry.Id, id, StringComparison.Ordinal))
-                {
-                    entry.Active = false;
-                }
-
-                return true;
             }
         }
 
@@ -174,18 +182,47 @@ internal static class WpfVisualTreeInspector
         {
             while (_byId.Count >= _capacity && _lru.Last is { } last)
             {
-                var id = last.Value;
-                _lru.RemoveLast();
-                _lruNodes.Remove(id);
-
-                if (_byId.Remove(id, out var reference) &&
-                    reference.TryGetTarget(out var element) &&
-                    _byObject.TryGetValue(element, out var entry) &&
-                    string.Equals(entry.Id, id, StringComparison.Ordinal))
+                if (!RemoveRegistration(last.Value, requiredOwnerId: null))
                 {
-                    entry.Active = false;
+                    _lru.RemoveLast();
+                    _lruNodes.Remove(last.Value);
                 }
             }
+        }
+
+        private bool RemoveRegistration(string id, string? requiredOwnerId)
+        {
+            if (!_byId.TryGetValue(id, out var registration) ||
+                (requiredOwnerId is not null &&
+                 !string.Equals(registration.OwnerId, requiredOwnerId, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            _byId.Remove(id);
+            if (_lruNodes.Remove(id, out var node))
+            {
+                _lru.Remove(node);
+            }
+
+            if (_idsByOwner.TryGetValue(registration.OwnerId, out var ownerIds))
+            {
+                ownerIds.Remove(id);
+                if (ownerIds.Count == 0)
+                {
+                    _idsByOwner.Remove(registration.OwnerId);
+                }
+            }
+
+            if (registration.Reference.TryGetTarget(out var element) &&
+                _byObject.TryGetValue(element, out var ownerHandles) &&
+                ownerHandles.Ids.TryGetValue(registration.OwnerId, out var mappedId) &&
+                string.Equals(mappedId, id, StringComparison.Ordinal))
+            {
+                ownerHandles.Ids.Remove(registration.OwnerId);
+            }
+
+            return true;
         }
 
         private static string CreateRandomId()
@@ -215,11 +252,14 @@ internal static class WpfVisualTreeInspector
             return 20_000;
         }
 
-        private sealed class HandleEntry
+        private sealed class ElementOwnerHandles
         {
-            public string Id { get; set; } = "";
-            public bool Active { get; set; }
+            public Dictionary<string, string> Ids { get; } = new(StringComparer.Ordinal);
         }
+
+        private readonly record struct HandleRegistration(
+            string OwnerId,
+            WeakReference<DependencyObject> Reference);
     }
 
     private readonly record struct WpfTreeFieldSet(
@@ -1259,9 +1299,13 @@ internal static class WpfVisualTreeInspector
         return true;
     }
 
-    private static ElementRef BuildElementRefWpf(DependencyObject element, string xpath, FindReturnFields returnFields)
+    private static ElementRef BuildElementRefWpf(
+        string ownerId,
+        DependencyObject element,
+        string xpath,
+        FindReturnFields returnFields)
     {
-        var elementIdWpf = ElementHandles.Register(element);
+        var elementIdWpf = ElementHandles.Register(ownerId, element);
 
         if (returnFields == FindReturnFields.Standard)
         {
@@ -1283,8 +1327,12 @@ internal static class WpfVisualTreeInspector
             ElementIdWpf: elementIdWpf);
     }
 
-    public static GetVisualTreeResponse GetVisualTree(GetWpfVisualTreeRequestV2 request, CancellationToken cancellationToken)
+    public static GetVisualTreeResponse GetVisualTree(
+        string ownerId,
+        GetWpfVisualTreeRequestV2 request,
+        CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
         var depth = request.Depth <= 0 ? 1 : request.Depth;
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 5000);
 
@@ -1326,7 +1374,10 @@ internal static class WpfVisualTreeInspector
             Warnings: null);
     }
 
-    public static FindElementsResponse FindElements(FindElementsWpfRequest request, CancellationToken cancellationToken)
+    public static FindElementsResponse FindElements(
+        string ownerId,
+        FindElementsWpfRequest request,
+        CancellationToken cancellationToken)
     {
         var query = request.Query;
         if (query is null ||
@@ -1385,7 +1436,7 @@ internal static class WpfVisualTreeInspector
             if (IsQueryMatchWpf(current, query) &&
                 (!request.InteractiveOnly || IsInteractiveWpf(current, request.InteractiveMode)))
             {
-                matches.Add(BuildElementRefWpf(current, currentXPath, request.ReturnFields));
+                matches.Add(BuildElementRefWpf(ownerId, current, currentXPath, request.ReturnFields));
                 if (matches.Count >= maxResults)
                 {
                     truncated = true;
@@ -1719,6 +1770,7 @@ internal static class WpfVisualTreeInspector
     }
 
     private static (DependencyObject Element, string XPath) ResolveTargetElement(
+        string ownerId,
         Window window,
         VisualTreeService treeService,
         DependencyObject rootObject,
@@ -1748,7 +1800,7 @@ internal static class WpfVisualTreeInspector
                 throw new ArgumentException("invalid_request: windowHandle is required with elementId.");
             }
 
-            var element = ElementHandles.Resolve(hwnd, elementId!.Trim());
+            var element = ElementHandles.Resolve(ownerId, hwnd, elementId!.Trim());
             var chain = BuildXPathChainForElement(
                 treeService,
                 window,
@@ -2010,7 +2062,10 @@ internal static class WpfVisualTreeInspector
         return true;
     }
 
-    public static GetPathToElementResponse GetPath(GetWpfPathRequest request, CancellationToken cancellationToken)
+    public static GetPathToElementResponse GetPath(
+        string ownerId,
+        GetWpfPathRequest request,
+        CancellationToken cancellationToken)
     {
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
 
@@ -2027,6 +2082,7 @@ internal static class WpfVisualTreeInspector
         }
 
         var resolved = ResolveTargetElement(
+            ownerId,
             window,
             treeService,
             rootObject,
@@ -2044,7 +2100,10 @@ internal static class WpfVisualTreeInspector
         return new GetPathToElementResponse(InspectionBackend.Wpf, resolved.XPath);
     }
 
-    public static ElementRef ResolveElement(ResolveWpfElementRequest request, CancellationToken cancellationToken)
+    public static ElementRef ResolveElement(
+        string ownerId,
+        ResolveWpfElementRequest request,
+        CancellationToken cancellationToken)
     {
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
 
@@ -2061,6 +2120,7 @@ internal static class WpfVisualTreeInspector
         }
 
         var resolved = ResolveTargetElement(
+            ownerId,
             window,
             treeService,
             rootObject,
@@ -2075,10 +2135,13 @@ internal static class WpfVisualTreeInspector
             maxNodes,
             cancellationToken);
 
-        return BuildElementRefWpf(resolved.Element, resolved.XPath, request.ReturnFields);
+        return BuildElementRefWpf(ownerId, resolved.Element, resolved.XPath, request.ReturnFields);
     }
 
-    public static SetValueResponse SetValue(SetWpfValueRequest request, CancellationToken cancellationToken)
+    public static SetValueResponse SetValue(
+        string ownerId,
+        SetWpfValueRequest request,
+        CancellationToken cancellationToken)
     {
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
         var hasText = request.Text is not null;
@@ -2092,6 +2155,7 @@ internal static class WpfVisualTreeInspector
         using var treeService = new VisualTreeService();
 
         var resolved = ResolveTargetElement(
+            ownerId,
             window,
             treeService,
             rootObject: window,
@@ -2147,13 +2211,17 @@ internal static class WpfVisualTreeInspector
             $"set_value_unsupported_wpf_target: WPF type '{element.GetType().Name}' does not expose a supported value target for this input. Supported WPF targets: {supported}.");
     }
 
-    public static InvokeResponse Invoke(InvokeWpfRequest request, CancellationToken cancellationToken)
+    public static InvokeResponse Invoke(
+        string ownerId,
+        InvokeWpfRequest request,
+        CancellationToken cancellationToken)
     {
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
 
         var resolved = ResolveTargetElement(
+            ownerId,
             window,
             treeService,
             rootObject: window,
@@ -2197,7 +2265,10 @@ internal static class WpfVisualTreeInspector
             $"invoke_unsupported_wpf_target: WPF type '{element.GetType().Name}' does not expose Invoke, Toggle, or SelectionItem automation patterns.");
     }
 
-    public static BringIntoViewWpfResponse BringIntoView(BringIntoViewWpfRequest request, CancellationToken cancellationToken)
+    public static BringIntoViewWpfResponse BringIntoView(
+        string ownerId,
+        BringIntoViewWpfRequest request,
+        CancellationToken cancellationToken)
     {
         if (request.WindowHandle == 0)
         {
@@ -2218,7 +2289,7 @@ internal static class WpfVisualTreeInspector
         try
         {
             element = hasElementId
-                ? ElementHandles.Resolve(request.WindowHandle, request.ElementId!.Trim())
+                ? ElementHandles.Resolve(ownerId, request.WindowHandle, request.ElementId!.Trim())
                 : ResolveByXPath(treeService, window, NormalizeXPath(request.XPath!), visibleOnly: false, cancellationToken);
         }
         catch (Exception ex)
@@ -2267,14 +2338,25 @@ internal static class WpfVisualTreeInspector
         }
     }
 
-    public static ReleaseElementResponse ReleaseElement(ReleaseWpfElementRequest request)
+    public static ReleaseElementResponse ReleaseElement(string ownerId, ReleaseWpfElementRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return new ReleaseElementResponse(ElementHandles.Release(request.ElementId));
+        return new ReleaseElementResponse(ElementHandles.Release(ownerId, request.ElementId));
     }
 
-    public static HighlightWpfElementResponse HighlightElement(HighlightWpfElementRequest request, CancellationToken cancellationToken)
+    public static void ReleaseOwnerResources(string ownerId)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        ElementHandles.ReleaseOwner(ownerId);
+        ClearHighlight(ownerId);
+    }
+
+    public static HighlightWpfElementResponse HighlightElement(
+        string ownerId,
+        HighlightWpfElementRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
         var maxNodes = 2000;
 
         var window = ResolveWindow(request.WindowHandle);
@@ -2290,6 +2372,7 @@ internal static class WpfVisualTreeInspector
         }
 
         var resolved = ResolveTargetElement(
+            ownerId,
             window,
             treeService,
             rootObject,
@@ -2331,23 +2414,27 @@ internal static class WpfVisualTreeInspector
             return new HighlightWpfElementResponse(Highlighted: false, Reason: "not_supported");
         }
 
+        _activeHighlightOwnerId = ownerId;
         _activeHighlight = highlight;
 
         _highlightTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(durationMs)
         };
-        _highlightTimer.Tick += (_, _) =>
-        {
-            ClearHighlight();
-        };
+        _highlightTimer.Tick += (_, _) => ClearHighlight(ownerId);
         _highlightTimer.Start();
 
         return new HighlightWpfElementResponse(Highlighted: true);
     }
 
-    private static void ClearHighlight()
+    private static void ClearHighlight(string? ownerId = null)
     {
+        if (ownerId is not null &&
+            !string.Equals(_activeHighlightOwnerId, ownerId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         try
         {
             if (_highlightTimer is not null)
@@ -2369,6 +2456,7 @@ internal static class WpfVisualTreeInspector
         }
         finally
         {
+            _activeHighlightOwnerId = null;
             _activeHighlight = null;
         }
 
@@ -2443,7 +2531,10 @@ internal static class WpfVisualTreeInspector
         }
     }
 
-    public static PickWpfElementAtPointResponse PickElementAtPoint(PickWpfElementAtPointRequest request, CancellationToken cancellationToken)
+    public static PickWpfElementAtPointResponse PickElementAtPoint(
+        string ownerId,
+        PickWpfElementAtPointRequest request,
+        CancellationToken cancellationToken)
     {
         var maxAncestors = Math.Clamp(request.MaxAncestors, 0, 50);
 
@@ -2460,7 +2551,7 @@ internal static class WpfVisualTreeInspector
         var chain = BuildXPathChainForElement(treeService, window, hit, visibleOnly: true, maxNodes: 200_000, cancellationToken);
         var (pickedElement, pickedXPath) = chain[^1];
 
-        var elementRef = BuildElementRefWpf(pickedElement, pickedXPath, request.ReturnFields);
+        var elementRef = BuildElementRefWpf(ownerId, pickedElement, pickedXPath, request.ReturnFields);
 
         IReadOnlyList<ElementRef>? ancestors = null;
         if (request.IncludeAncestors)
@@ -2472,7 +2563,7 @@ internal static class WpfVisualTreeInspector
             }
 
             ancestors = candidateAncestors
-                .Select(a => BuildElementRefWpf(a.Element, a.XPath, FindReturnFields.Minimal))
+                .Select(a => BuildElementRefWpf(ownerId, a.Element, a.XPath, FindReturnFields.Minimal))
                 .ToArray();
         }
 
@@ -2862,7 +2953,10 @@ internal static class WpfVisualTreeInspector
         return null;
     }
 
-    public static GetBindingInfoResponse GetBindingInfo(GetBindingInfoRequest request, CancellationToken cancellationToken)
+    public static GetBindingInfoResponse GetBindingInfo(
+        string ownerId,
+        GetBindingInfoRequest request,
+        CancellationToken cancellationToken)
     {
         var maxProperties = Math.Clamp(request.MaxProperties, 1, 50_000);
         var valueFormat = string.IsNullOrWhiteSpace(request.ValueFormat) ? "string" : request.ValueFormat;
@@ -2871,6 +2965,7 @@ internal static class WpfVisualTreeInspector
         using var treeService = new VisualTreeService();
 
         var resolved = ResolveTargetElement(
+            ownerId,
             window,
             treeService,
             rootObject: window,
@@ -2888,7 +2983,7 @@ internal static class WpfVisualTreeInspector
         var element = resolved.Element;
         var xpath = resolved.XPath;
 
-        var elementRef = BuildElementRefWpf(element, xpath, FindReturnFields.Standard);
+        var elementRef = BuildElementRefWpf(ownerId, element, xpath, FindReturnFields.Standard);
 
         var properties = new HashSet<DependencyProperty>(GetDependencyPropertiesCached(element.GetType()));
         try
@@ -3144,7 +3239,10 @@ internal static class WpfVisualTreeInspector
         }
     }
 
-    public static GetBindingErrorsResponse GetBindingErrors(GetBindingErrorsRequest request, CancellationToken cancellationToken)
+    public static GetBindingErrorsResponse GetBindingErrors(
+        string ownerId,
+        GetBindingErrorsRequest request,
+        CancellationToken cancellationToken)
     {
         var depth = request.Depth <= 0 ? 1 : request.Depth;
         var maxErrors = Math.Clamp(request.MaxErrors, 1, 5000);
@@ -3247,8 +3345,12 @@ internal static class WpfVisualTreeInspector
             TruncatedReason: truncatedReason);
     }
 
-    public static GetUiaCoverageReportResponse GetUiaCoverageReport(GetUiaCoverageReportRequest request, CancellationToken cancellationToken)
+    public static GetUiaCoverageReportResponse GetUiaCoverageReport(
+        string ownerId,
+        GetUiaCoverageReportRequest request,
+        CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
         var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
         var maxFindings = Math.Clamp(request.MaxFindings, 1, 5000);
         var visibleOnly = request.VisibleOnly;
@@ -3301,7 +3403,7 @@ internal static class WpfVisualTreeInspector
 
                 consideredNodes++;
 
-                var elementRef = BuildElementRefWpf(element, xpath, FindReturnFields.Standard);
+                var elementRef = BuildElementRefWpf(ownerId, element, xpath, FindReturnFields.Standard);
 
                 var elementFindings = AnalyzeCoverageForElement(element, elementRef, isInteractive);
                 foreach (var finding in elementFindings)
@@ -4051,7 +4153,10 @@ internal static class WpfVisualTreeInspector
                fullName.StartsWith("System.Windows.Media.", StringComparison.Ordinal);
     }
 
-    public static GetDataContextResponse GetDataContext(GetDataContextRequest request, CancellationToken cancellationToken)
+    public static GetDataContextResponse GetDataContext(
+        string ownerId,
+        GetDataContextRequest request,
+        CancellationToken cancellationToken)
     {
         var maxDepth = Math.Clamp(request.MaxDepth, 0, 25);
         var maxPropertiesPerObject = Math.Clamp(request.MaxPropertiesPerObject, 1, 5000);
@@ -4061,6 +4166,7 @@ internal static class WpfVisualTreeInspector
         using var treeService = new VisualTreeService();
 
         var resolved = ResolveTargetElement(
+            ownerId,
             window,
             treeService,
             rootObject: window,
@@ -4164,7 +4270,10 @@ internal static class WpfVisualTreeInspector
             Warnings: warnings.Count > 0 ? warnings : null);
     }
 
-    public static GetComputedPropertiesResponse GetComputedProperties(GetComputedPropertiesRequest request, CancellationToken cancellationToken)
+    public static GetComputedPropertiesResponse GetComputedProperties(
+        string ownerId,
+        GetComputedPropertiesRequest request,
+        CancellationToken cancellationToken)
     {
         var includeSources = request.IncludeSources;
         var includeDefault = request.IncludeDefault;
@@ -4176,6 +4285,7 @@ internal static class WpfVisualTreeInspector
         using var treeService = new VisualTreeService();
 
         var resolved = ResolveTargetElement(
+            ownerId,
             window,
             treeService,
             rootObject: window,
@@ -4193,7 +4303,7 @@ internal static class WpfVisualTreeInspector
         var element = resolved.Element;
         var xpath = resolved.XPath;
 
-        var elementRef = BuildElementRefWpf(element, xpath, FindReturnFields.Standard);
+        var elementRef = BuildElementRefWpf(ownerId, element, xpath, FindReturnFields.Standard);
 
         var propertyNames = request.PropertyNames?
             .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -4319,7 +4429,10 @@ internal static class WpfVisualTreeInspector
             Warnings: warnings.Count > 0 ? warnings : null);
     }
 
-    public static GetStyleChainResponse GetStyleChain(GetStyleChainRequest request, CancellationToken cancellationToken)
+    public static GetStyleChainResponse GetStyleChain(
+        string ownerId,
+        GetStyleChainRequest request,
+        CancellationToken cancellationToken)
     {
         var includeThemeStyle = request.IncludeThemeStyle;
         var includeResourceKeys = request.IncludeResourceKeys;
@@ -4329,6 +4442,7 @@ internal static class WpfVisualTreeInspector
         using var treeService = new VisualTreeService();
 
         var resolved = ResolveTargetElement(
+            ownerId,
             window,
             treeService,
             rootObject: window,
@@ -4346,7 +4460,7 @@ internal static class WpfVisualTreeInspector
         var element = resolved.Element;
         var xpath = resolved.XPath;
 
-        var elementRef = BuildElementRefWpf(element, xpath, FindReturnFields.Standard);
+        var elementRef = BuildElementRefWpf(ownerId, element, xpath, FindReturnFields.Standard);
 
         var warnings = new List<string>();
         var styles = new List<StyleChainEntry>();
@@ -4431,7 +4545,10 @@ internal static class WpfVisualTreeInspector
             Warnings: warnings.Count > 0 ? warnings : null);
     }
 
-    public static GetTemplateInfoResponse GetTemplateInfo(GetTemplateInfoRequest request, CancellationToken cancellationToken)
+    public static GetTemplateInfoResponse GetTemplateInfo(
+        string ownerId,
+        GetTemplateInfoRequest request,
+        CancellationToken cancellationToken)
     {
         var includeNamedElements = request.IncludeNamedElements;
         var includeResourceKeys = request.IncludeResourceKeys;
@@ -4442,6 +4559,7 @@ internal static class WpfVisualTreeInspector
         using var treeService = new VisualTreeService();
 
         var resolved = ResolveTargetElement(
+            ownerId,
             window,
             treeService,
             rootObject: window,
@@ -4459,7 +4577,7 @@ internal static class WpfVisualTreeInspector
         var element = resolved.Element;
         var xpath = resolved.XPath;
 
-        var elementRef = BuildElementRefWpf(element, xpath, FindReturnFields.Standard);
+        var elementRef = BuildElementRefWpf(ownerId, element, xpath, FindReturnFields.Standard);
 
         var warnings = new List<string>();
 

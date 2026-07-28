@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -26,7 +27,9 @@ public sealed partial class AutomationController : IDisposable
     private Application? _application;
     private UIA3Automation? _automation;
     private readonly SemaphoreSlim _toolMutex = new(1, 1);
+    private readonly string _resourceOwnerId = Guid.NewGuid().ToString("N");
     private LastHighlightRequest? _lastHighlight;
+    private int _disposeStarted;
 
     private static readonly int UiDelayMs = GetEnvInt("WPF_TOOLS_MCP_UI_DELAY_MS", defaultValue: 0, minValue: 0, maxValue: 1000);
     private static readonly int UiDelayScrollMs = GetEnvInt("WPF_TOOLS_MCP_UI_SCROLL_DELAY_MS", defaultValue: 15, minValue: 0, maxValue: 1000);
@@ -61,20 +64,39 @@ public sealed partial class AutomationController : IDisposable
     private sealed record LastHighlightRequest(Rect Bounds, string Color, int Thickness, DateTime ExpiresAtUtc);
 
     public bool IsAttached => IsApplicationRunning(_application);
+    internal bool IsDisposing => Volatile.Read(ref _disposeStarted) != 0;
 
     public void Dispose()
     {
-        Cleanup();
-        _toolMutex.Dispose();
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
+        {
+            return;
+        }
+
+        _toolMutex.Wait();
+        try
+        {
+            HighlightOverlay.Hide(_resourceOwnerId);
+            _lastHighlight = null;
+            _traceSession = null;
+            _elementHandles.Clear();
+            Cleanup();
+        }
+        finally
+        {
+            _toolMutex.Release();
+        }
     }
 
     public async Task RunExclusiveAsync(Func<Task> action, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(action);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
 
         await _toolMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
             await action().ConfigureAwait(false);
         }
         finally
@@ -86,10 +108,12 @@ public sealed partial class AutomationController : IDisposable
     public async Task<T> RunExclusiveAsync<T>(Func<Task<T>> action, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(action);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
 
         await _toolMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
             return await action().ConfigureAwait(false);
         }
         finally
@@ -535,68 +559,131 @@ public sealed partial class AutomationController : IDisposable
         }
     }
 
-    public Task<CloseAppResponse> CloseAsync(CloseAppRequest request, CancellationToken cancellationToken = default)
+    public Task<CloseAppResponse> CloseAsync(CloseAppRequest request, CancellationToken cancellationToken = default) =>
+        EndApplicationAsync(
+            traceName: "close_session",
+            timeoutMs: request.TimeoutMs,
+            closeRequested: true,
+            forceTerminationRequested: request.Force,
+            cancellationToken);
+
+    public Task<CloseAppResponse> CloseApplicationAsync(int timeoutMs, CancellationToken cancellationToken = default) =>
+        EndApplicationAsync(
+            traceName: "close_app",
+            timeoutMs,
+            closeRequested: true,
+            forceTerminationRequested: false,
+            cancellationToken);
+
+    public Task<CloseAppResponse> TerminateApplicationAsync(int timeoutMs, CancellationToken cancellationToken = default) =>
+        EndApplicationAsync(
+            traceName: "terminate_app",
+            timeoutMs,
+            closeRequested: false,
+            forceTerminationRequested: true,
+            cancellationToken);
+
+    private async Task<CloseAppResponse> EndApplicationAsync(
+        string traceName,
+        int timeoutMs,
+        bool closeRequested,
+        bool forceTerminationRequested,
+        CancellationToken cancellationToken)
     {
-        var trace = BeginTraceSpan("close_session");
+        var trace = BeginTraceSpan(traceName);
         try
         {
-        var timeout = request.TimeoutMs <= 0 ? 5000 : request.TimeoutMs;
-        var application = _application;
-        if (application is null)
-        {
-            var response = new CloseAppResponse(
-                Closed: true,
-                ProcessExited: true,
-                ProcessAlreadyExited: true);
-            trace?.SetSummary($"closed={response.Closed} already_exited=true");
-            return Task.FromResult(response);
-        }
+            cancellationToken.ThrowIfCancellationRequested();
 
-        if (!IsApplicationRunning(application))
-        {
-            Cleanup();
-            var response = new CloseAppResponse(
-                Closed: true,
-                ProcessExited: true,
-                ProcessAlreadyExited: true);
-            trace?.SetSummary($"closed={response.Closed}");
-            return Task.FromResult(response);
-        }
+            var timeout = Math.Clamp(timeoutMs <= 0 ? 5000 : timeoutMs, 100, 120_000);
+            var application = _application;
+            if (application is null || !IsApplicationRunning(application))
+            {
+                var alreadyExited = CreateCloseAppResponse(
+                    processExited: true,
+                    processAlreadyExited: true,
+                    closeRequested,
+                    closeRequestDispatched: false,
+                    forceTerminationRequested,
+                    forceTerminationAttempted: false);
+                trace?.SetSummary("process_exited=true already_exited=true");
+                return alreadyExited;
+            }
 
-        var closedGracefully = false;
-        try
-        {
-            application.CloseTimeout = TimeSpan.FromMilliseconds(timeout);
-            closedGracefully = application.Close(killIfCloseFails: request.Force);
-        }
-        catch (InvalidOperationException)
-        {
-            Cleanup();
-            return Task.FromResult(new CloseAppResponse(
-                Closed: true,
-                ProcessExited: true,
-                ProcessAlreadyExited: true));
-        }
-
-        if (!closedGracefully && request.Force)
-        {
+            Process process;
             try
             {
-                application.Kill();
+                process = Process.GetProcessById(application.ProcessId);
             }
-            catch (InvalidOperationException)
+            catch (ArgumentException)
             {
+                var alreadyExited = CreateCloseAppResponse(
+                    processExited: true,
+                    processAlreadyExited: true,
+                    closeRequested,
+                    closeRequestDispatched: false,
+                    forceTerminationRequested,
+                    forceTerminationAttempted: false);
+                trace?.SetSummary("process_exited=true already_exited=true");
+                return alreadyExited;
             }
-        }
 
-        var closed = WaitForApplicationExit(application, Math.Max(timeout, 1000));
-        Cleanup();
-        var result = new CloseAppResponse(
-            Closed: closed,
-            ProcessExited: closed,
-            ProcessAlreadyExited: false);
-        trace?.SetSummary($"closed={result.Closed} graceful={closedGracefully} force={request.Force}");
-        return Task.FromResult(result);
+            using (process)
+            {
+                if (TryObserveProcessExit(process))
+                {
+                    var alreadyExited = CreateCloseAppResponse(
+                        processExited: true,
+                        processAlreadyExited: true,
+                        closeRequested,
+                        closeRequestDispatched: false,
+                        forceTerminationRequested,
+                        forceTerminationAttempted: false);
+                    trace?.SetSummary("process_exited=true already_exited=true");
+                    return alreadyExited;
+                }
+
+                var closeRequestDispatched = false;
+                var forceTerminationAttempted = false;
+                var processExited = false;
+
+                if (closeRequested)
+                {
+                    closeRequestDispatched = TryDispatchCloseRequest(process);
+                    processExited = await WaitForProcessExitAsync(process, timeout, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (!processExited && forceTerminationRequested)
+                {
+                    if (TryObserveProcessExit(process))
+                    {
+                        processExited = true;
+                    }
+                    else
+                    {
+                        var terminationDispatched = TryTerminateProcess(process, out forceTerminationAttempted);
+                        processExited = terminationDispatched
+                            ? await WaitForProcessExitAsync(process, timeout, cancellationToken).ConfigureAwait(false)
+                            : TryObserveProcessExit(process);
+                    }
+                }
+
+                if (!processExited)
+                {
+                    processExited = TryObserveProcessExit(process);
+                }
+
+                var result = CreateCloseAppResponse(
+                    processExited,
+                    processAlreadyExited: false,
+                    closeRequested,
+                    closeRequestDispatched,
+                    forceTerminationRequested,
+                    forceTerminationAttempted);
+                trace?.SetSummary(
+                    $"process_exited={result.ProcessExited} close_requested={closeRequested} close_dispatched={closeRequestDispatched} force_requested={forceTerminationRequested} force_attempted={forceTerminationAttempted}");
+                return result;
+            }
         }
         catch (Exception ex)
         {
@@ -605,7 +692,122 @@ public sealed partial class AutomationController : IDisposable
         }
         finally
         {
+            Cleanup();
             trace?.Dispose();
+        }
+    }
+
+    private static CloseAppResponse CreateCloseAppResponse(
+        bool processExited,
+        bool processAlreadyExited,
+        bool closeRequested,
+        bool closeRequestDispatched,
+        bool forceTerminationRequested,
+        bool forceTerminationAttempted) =>
+        new(
+            Closed: processExited,
+            ProcessExited: processExited,
+            ProcessAlreadyExited: processAlreadyExited)
+        {
+            CloseRequested = closeRequested,
+            CloseRequestDispatched = closeRequestDispatched,
+            ForceTerminationRequested = forceTerminationRequested,
+            ForceTerminationAttempted = forceTerminationAttempted
+        };
+
+    private static bool TryDispatchCloseRequest(Process process)
+    {
+        try
+        {
+            return !process.HasExited && process.CloseMainWindow();
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryTerminateProcess(Process process, out bool attempted)
+    {
+        attempted = false;
+        try
+        {
+            if (process.HasExited)
+            {
+                return false;
+            }
+
+            attempted = true;
+            process.Kill();
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static async Task<bool> WaitForProcessExitAsync(
+        Process process,
+        int timeoutMs,
+        CancellationToken cancellationToken)
+    {
+        if (TryObserveProcessExit(process))
+        {
+            return true;
+        }
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
+
+        try
+        {
+            await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return TryObserveProcessExit(process);
+        }
+        catch (InvalidOperationException)
+        {
+            return TryObserveProcessExit(process);
+        }
+        catch (Win32Exception)
+        {
+            return TryObserveProcessExit(process);
+        }
+    }
+
+    private static bool TryObserveProcessExit(Process process)
+    {
+        try
+        {
+            return process.HasExited;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (Win32Exception)
+        {
+            return false;
         }
     }
 
@@ -8905,38 +9107,6 @@ public sealed partial class AutomationController : IDisposable
         {
             return false;
         }
-    }
-
-    private static bool WaitForApplicationExit(Application application, int timeoutMs)
-    {
-        if (!IsApplicationRunning(application))
-        {
-            return true;
-        }
-
-        try
-        {
-            using var process = Process.GetProcessById(application.ProcessId);
-            if (process.HasExited)
-            {
-                return true;
-            }
-
-            if (process.WaitForExit(Math.Clamp(timeoutMs, 50, 60_000)))
-            {
-                return true;
-            }
-        }
-        catch (ArgumentException)
-        {
-            return true;
-        }
-        catch (InvalidOperationException)
-        {
-            return true;
-        }
-
-        return !IsApplicationRunning(application);
     }
 
     private UIA3Automation EnsureAutomation() =>

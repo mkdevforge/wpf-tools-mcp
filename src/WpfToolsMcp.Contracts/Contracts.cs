@@ -46,7 +46,27 @@ public sealed record CloseAppResponse(
     bool Closed,
     bool SessionRemoved = false,
     bool ProcessExited = false,
-    bool ProcessAlreadyExited = false);
+    bool ProcessAlreadyExited = false)
+{
+    public bool CloseRequested { get; init; }
+
+    public bool CloseRequestDispatched { get; init; }
+
+    public bool ForceTerminationRequested { get; init; }
+
+    public bool ForceTerminationAttempted { get; init; }
+}
+
+public sealed record DetachSessionResponse(
+    int Pid,
+    bool SessionRemoved,
+    bool ProcessWasRunning,
+    bool ProcessStillRunning)
+{
+    public bool ProcessWasRunningObserved { get; init; }
+
+    public bool ProcessStillRunningObserved { get; init; }
+}
 
 public sealed record BackendCapabilityState(string Backend, string State);
 

@@ -16,13 +16,34 @@ internal sealed class AgentClient : IAsyncDisposable
 
     private readonly NamedPipeClientStream _pipe;
     private readonly SemaphoreSlim _mutex = new(1, 1);
+    private readonly CancellationTokenSource _disposeCts = new();
+    private int _disposeStarted;
+    private int _faulted;
 
     private AgentClient(NamedPipeClientStream pipe)
     {
         _pipe = pipe;
     }
 
-    public bool IsConnected => _pipe.IsConnected;
+    public bool IsConnected
+    {
+        get
+        {
+            if (Volatile.Read(ref _faulted) != 0 || Volatile.Read(ref _disposeStarted) != 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                return _pipe.IsConnected;
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
+            }
+        }
+    }
 
     public static async Task<AgentClient> ConnectAsync(
         string pipeName,
@@ -72,6 +93,8 @@ internal sealed class AgentClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(method);
 
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
+
         if (!_pipe.IsConnected)
         {
             throw new InvalidOperationException("Agent pipe is not connected.");
@@ -79,21 +102,31 @@ internal sealed class AgentClient : IAsyncDisposable
 
         var request = new AgentRequest(Guid.NewGuid().ToString("N"), method, @params);
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
         cts.CancelAfter(DefaultCallTimeout);
         var callToken = cts.Token;
 
         var lockTaken = false;
+        var ioStarted = false;
+        var responseReceived = false;
         try
         {
             await _mutex.WaitAsync(callToken);
             lockTaken = true;
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
+            if (Volatile.Read(ref _faulted) != 0 || !_pipe.IsConnected)
+            {
+                throw new InvalidOperationException("Agent pipe is not connected.");
+            }
 
+            ioStarted = true;
             await PipeProtocol.WriteAsync(_pipe, request, callToken);
             var response = await PipeProtocol.ReadAsync<AgentResponse>(_pipe, callToken);
+            responseReceived = true;
 
             if (!string.Equals(response.Id, request.Id, StringComparison.Ordinal))
             {
+                PoisonConnection();
                 throw new InvalidOperationException("Agent protocol error: response ID mismatch.");
             }
 
@@ -111,11 +144,44 @@ internal sealed class AgentClient : IAsyncDisposable
 
             return response.Result;
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
         {
+            throw new ObjectDisposedException(nameof(AgentClient));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            if (ioStarted)
+            {
+                PoisonConnection();
+            }
+
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            if (ioStarted)
+            {
+                PoisonConnection();
+            }
+
             throw new TimeoutException(
                 $"Agent call '{method}' timed out after {DefaultCallTimeout.TotalSeconds:0.###}s. " +
                 "Set WPF_TOOLS_MCP_AGENT_CALL_TIMEOUT_MS to override.");
+        }
+        catch (Exception) when (
+            _disposeCts.IsCancellationRequested &&
+            Volatile.Read(ref _faulted) == 0)
+        {
+            throw new ObjectDisposedException(nameof(AgentClient));
+        }
+        catch
+        {
+            if (ioStarted && !responseReceived)
+            {
+                PoisonConnection();
+            }
+
+            throw;
         }
         finally
         {
@@ -128,15 +194,46 @@ internal sealed class AgentClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
+        {
+            return;
+        }
+
+        _disposeCts.Cancel();
+        _pipe.Dispose();
+
         await _mutex.WaitAsync();
+        _mutex.Release();
+        _mutex.Dispose();
+        _disposeCts.Dispose();
+    }
+
+    private void PoisonConnection()
+    {
+        if (Interlocked.Exchange(ref _faulted, 1) != 0)
+        {
+            return;
+        }
+
         try
         {
             _pipe.Dispose();
         }
-        finally
+        catch
         {
-            _mutex.Release();
-            _mutex.Dispose();
+        }
+
+        _ = CompleteFaultedDisposalAsync();
+    }
+
+    private async Task CompleteFaultedDisposalAsync()
+    {
+        try
+        {
+            await DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
         }
     }
 

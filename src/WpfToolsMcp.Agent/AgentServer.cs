@@ -44,6 +44,7 @@ internal static class AgentServer
                 continue;
             }
 
+            RemoveCompletedConnectionTasks(connectionTasks);
             connectionTasks.Add(Task.Run(() => RunConnectionAsync(pipe, cancellationToken), CancellationToken.None));
         }
 
@@ -68,33 +69,53 @@ internal static class AgentServer
     private static async Task RunConnectionAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
     {
         await using var _ = pipe.ConfigureAwait(false);
+        var ownerId = Guid.NewGuid().ToString("N");
 
-        while (pipe.IsConnected && !cancellationToken.IsCancellationRequested)
+        try
         {
-            AgentRequest request;
+            while (pipe.IsConnected && !cancellationToken.IsCancellationRequested)
+            {
+                AgentRequest request;
+                try
+                {
+                    request = await PipeProtocol.ReadAsync<AgentRequest>(pipe, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    break;
+                }
+
+                var response = await HandleAsync(ownerId, request, cancellationToken).ConfigureAwait(false);
+
+                try
+                {
+                    await PipeProtocol.WriteAsync(pipe, response, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    break;
+                }
+            }
+        }
+        finally
+        {
             try
             {
-                request = await PipeProtocol.ReadAsync<AgentRequest>(pipe, cancellationToken).ConfigureAwait(false);
+                UiThreadLatency.ReleaseOwner(ownerId);
             }
             catch
             {
-                break;
+                // Best-effort teardown; WPF-owned resources still need cleanup below.
             }
 
-            var response = await HandleAsync(request, cancellationToken).ConfigureAwait(false);
-
-            try
-            {
-                await PipeProtocol.WriteAsync(pipe, response, cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-                break;
-            }
+            await ReleaseOwnerResourcesAsync(ownerId).ConfigureAwait(false);
         }
     }
 
-    private static async Task<AgentResponse> HandleAsync(AgentRequest request, CancellationToken cancellationToken)
+    private static async Task<AgentResponse> HandleAsync(
+        string ownerId,
+        AgentRequest request,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -108,7 +129,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<GetWpfVisualTreeRequestV2>(JsonOptions)
                             ?? new GetWpfVisualTreeRequestV2();
 
-                        var response = WpfVisualTreeInspector.GetVisualTree(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.GetVisualTree(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -128,7 +149,7 @@ internal static class AgentServer
                                 Error: new AgentError("Application.Current.Dispatcher is not available. Is the target a WPF app?"));
                         }
 
-                        var response = UiThreadLatency.Start(dispatcher, typedRequest);
+                        var response = UiThreadLatency.Start(ownerId, dispatcher, typedRequest);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -139,7 +160,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<PerformanceStopRequest>(JsonOptions)
                             ?? throw new InvalidOperationException("Missing request params.");
 
-                        var response = UiThreadLatency.Stop(typedRequest.RunId);
+                        var response = UiThreadLatency.Stop(ownerId, typedRequest.RunId);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -151,7 +172,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<FindElementsWpfRequest>(JsonOptions)
                             ?? new FindElementsWpfRequest();
 
-                        var response = WpfVisualTreeInspector.FindElements(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.FindElements(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -163,7 +184,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<GetWpfPathRequest>(JsonOptions)
                             ?? new GetWpfPathRequest();
 
-                        var response = WpfVisualTreeInspector.GetPath(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.GetPath(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -175,7 +196,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<ResolveWpfElementRequest>(JsonOptions)
                             ?? new ResolveWpfElementRequest();
 
-                        var response = WpfVisualTreeInspector.ResolveElement(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.ResolveElement(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -187,7 +208,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<SetWpfValueRequest>(JsonOptions)
                             ?? new SetWpfValueRequest();
 
-                        var response = WpfVisualTreeInspector.SetValue(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.SetValue(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -199,7 +220,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<InvokeWpfRequest>(JsonOptions)
                             ?? new InvokeWpfRequest();
 
-                        var response = WpfVisualTreeInspector.Invoke(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.Invoke(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -211,7 +232,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<BringIntoViewWpfRequest>(JsonOptions)
                             ?? throw new InvalidOperationException("Missing request params.");
 
-                        var response = WpfVisualTreeInspector.BringIntoView(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.BringIntoView(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -223,7 +244,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<ReleaseWpfElementRequest>(JsonOptions)
                             ?? throw new InvalidOperationException("Missing request params.");
 
-                        var response = WpfVisualTreeInspector.ReleaseElement(typedRequest);
+                        var response = WpfVisualTreeInspector.ReleaseElement(ownerId, typedRequest);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -235,7 +256,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<HighlightWpfElementRequest>(JsonOptions)
                             ?? new HighlightWpfElementRequest();
 
-                        var response = WpfVisualTreeInspector.HighlightElement(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.HighlightElement(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -247,7 +268,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<PickWpfElementAtPointRequest>(JsonOptions)
                             ?? new PickWpfElementAtPointRequest();
 
-                        var response = WpfVisualTreeInspector.PickElementAtPoint(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.PickElementAtPoint(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -259,7 +280,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<GetBindingInfoRequest>(JsonOptions)
                             ?? new GetBindingInfoRequest();
 
-                        var response = WpfVisualTreeInspector.GetBindingInfo(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.GetBindingInfo(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -271,7 +292,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<GetBindingErrorsRequest>(JsonOptions)
                             ?? new GetBindingErrorsRequest();
 
-                        var response = WpfVisualTreeInspector.GetBindingErrors(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.GetBindingErrors(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -283,7 +304,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<GetUiaCoverageReportRequest>(JsonOptions)
                             ?? new GetUiaCoverageReportRequest();
 
-                        var response = WpfVisualTreeInspector.GetUiaCoverageReport(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.GetUiaCoverageReport(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -295,7 +316,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<GetDataContextRequest>(JsonOptions)
                             ?? new GetDataContextRequest();
 
-                        var response = WpfVisualTreeInspector.GetDataContext(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.GetDataContext(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -307,7 +328,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<GetComputedPropertiesRequest>(JsonOptions)
                             ?? new GetComputedPropertiesRequest();
 
-                        var response = WpfVisualTreeInspector.GetComputedProperties(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.GetComputedProperties(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -319,7 +340,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<GetStyleChainRequest>(JsonOptions)
                             ?? new GetStyleChainRequest();
 
-                        var response = WpfVisualTreeInspector.GetStyleChain(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.GetStyleChain(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -331,7 +352,7 @@ internal static class AgentServer
                         var typedRequest = request.Params?.Deserialize<GetTemplateInfoRequest>(JsonOptions)
                             ?? new GetTemplateInfoRequest();
 
-                        var response = WpfVisualTreeInspector.GetTemplateInfo(typedRequest, cancellationToken);
+                        var response = WpfVisualTreeInspector.GetTemplateInfo(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
@@ -350,6 +371,48 @@ internal static class AgentServer
                 request.Id,
                 Ok: false,
                 Error: new AgentError(ex.Message, ex.ToString()));
+        }
+    }
+
+    private static async Task ReleaseOwnerResourcesAsync(string ownerId)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        try
+        {
+            if (dispatcher.CheckAccess())
+            {
+                WpfVisualTreeInspector.ReleaseOwnerResources(ownerId);
+                return;
+            }
+
+            var operation = dispatcher.InvokeAsync(
+                () => WpfVisualTreeInspector.ReleaseOwnerResources(ownerId),
+                DispatcherPriority.Send);
+            await operation.Task.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The target dispatcher may be shutting down while the pipe disconnects.
+        }
+    }
+
+    private static void RemoveCompletedConnectionTasks(List<Task> connectionTasks)
+    {
+        for (var i = connectionTasks.Count - 1; i >= 0; i--)
+        {
+            var task = connectionTasks[i];
+            if (!task.IsCompleted)
+            {
+                continue;
+            }
+
+            _ = task.Exception;
+            connectionTasks.RemoveAt(i);
         }
     }
 

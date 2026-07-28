@@ -84,7 +84,47 @@ public static class CoreAppTools
                 cancellationToken));
     }
 
-    [McpServerTool(Name = "close_session"), Description("Remove a session and close the attached application; Closed means the session was removed, with process state reported separately.")]
+    [McpServerTool(Name = "detach_session"), Description("Remove an inspection session and release its resources without closing or terminating the target application.")]
+    public static Task<DetachSessionResponse> DetachSession(
+        SessionManager sessions,
+        SubscriptionManager subscriptions,
+        [Description("Session ID")] string sessionId,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+            sessions.DetachSessionAsync(
+                sessionId,
+                () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
+                cancellationToken));
+
+    [McpServerTool(Name = "close_app"), Description("Request a graceful application close, remove the inspection session, and report the close request and observed process outcome separately.")]
+    public static Task<CloseAppResponse> CloseApp(
+        SessionManager sessions,
+        SubscriptionManager subscriptions,
+        [Description("Session ID")] string sessionId,
+        [Description("Wait timeout (ms) for process exit")] int timeoutMs = 5000,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+            sessions.CloseApplicationAsync(
+                sessionId,
+                timeoutMs,
+                () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
+                cancellationToken));
+
+    [McpServerTool(Name = "terminate_app"), Description("Forcefully terminate the target application, remove the inspection session, and report the observed process outcome.")]
+    public static Task<CloseAppResponse> TerminateApp(
+        SessionManager sessions,
+        SubscriptionManager subscriptions,
+        [Description("Session ID")] string sessionId,
+        [Description("Wait timeout (ms) for process exit")] int timeoutMs = 5000,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+            sessions.TerminateApplicationAsync(
+                sessionId,
+                timeoutMs,
+                () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
+                cancellationToken));
+
+    [McpServerTool(Name = "close_session"), Description("Compatibility path that removes the session and closes the application, optionally force-terminating it. Prefer detach_session, close_app, or terminate_app for explicit intent.")]
     public static Task<CloseAppResponse> CloseSession(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -92,10 +132,11 @@ public static class CoreAppTools
         [Description("Force kill if graceful close fails")] bool force = false,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
-        {
-            subscriptions.UnsubscribeAllForSession(sessionId);
-            return sessions.CloseSessionAsync(sessionId, new CloseAppRequest(force), cancellationToken);
-        });
+            sessions.CloseSessionAsync(
+                sessionId,
+                new CloseAppRequest(force),
+                () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
+                cancellationToken));
 
     [McpServerTool(Name = "list_sessions"), Description("List active sessions; BackendCapabilities lists confirmed-ready backends, and BackendCapabilityStates reports ready/unavailable/not_initialized.")]
     public static Task<ListSessionsResponse> ListSessions(

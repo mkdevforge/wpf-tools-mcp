@@ -33,6 +33,10 @@
     Closed: true,
     SessionRemoved: true,
     ProcessExited: true,
-    ProcessAlreadyExited: true
+    ProcessAlreadyExited: true,
+    CloseRequested: true,
+    CloseRequestDispatched: false,
+    ForceTerminationRequested: true,
+    ForceTerminationAttempted: false
   }
 }

@@ -952,6 +952,16 @@ public sealed partial class AutomationController
             }
         }
 
+        public void Clear()
+        {
+            lock (_sync)
+            {
+                _entries.Clear();
+                _lru.Clear();
+                _lruNodes.Clear();
+            }
+        }
+
         public bool TryUpdateUiaRuntimeId(string elementId, int[] runtimeId)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(elementId);
