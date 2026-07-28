@@ -14,6 +14,7 @@ public static class InteractionTools
         [Description("Session ID")] string sessionId,
         [Description("Native window handle")] long? windowHandle = null,
         [Description("Window title (exact match first, then contains)")] string? title = null,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default)
     {
         if (windowHandle is not null && !string.IsNullOrWhiteSpace(title))
@@ -22,7 +23,13 @@ public static class InteractionTools
         }
 
         return McpToolErrors.RunAsync(() =>
-            sessions.SetActiveWindowAsync(sessionId, new FocusWindowRequest(windowHandle, title), cancellationToken));
+            sessions.SetActiveWindowAsync(
+                sessionId,
+                new FocusWindowRequest(
+                    windowHandle,
+                    title,
+                    sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
+                cancellationToken));
     }
 
     [McpServerTool(Name = "get_active_window"), Description("Get the active window for this session.")]
@@ -43,6 +50,7 @@ public static class InteractionTools
         [Description("Height (pixels)")] int? height = null,
         [Description("Clamp the resulting bounds to the virtual screen")] bool clampToVirtualScreen = true,
         [Description("Bring window to foreground first")] bool ensureForeground = true,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -56,7 +64,8 @@ public static class InteractionTools
                         Width: width,
                         Height: height,
                         ClampToVirtualScreen: clampToVirtualScreen,
-                        EnsureForeground: ensureForeground),
+                        EnsureForeground: ensureForeground,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -68,6 +77,7 @@ public static class InteractionTools
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Target window state")] WindowState state = WindowState.Normal,
         [Description("Bring window to foreground first")] bool ensureForeground = true,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -77,7 +87,8 @@ public static class InteractionTools
                     new SetWindowStateRequest(
                         WindowHandle: effectiveWindowHandle,
                         State: state,
-                        EnsureForeground: ensureForeground),
+                        EnsureForeground: ensureForeground,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -95,6 +106,7 @@ public static class InteractionTools
         [Description("Auto-wait for actionability")] bool autoWait = true,
         [Description("Polling interval (ms)")] int pollIntervalMs = 100,
         [Description("Stable duration (ms)")] int stableMs = 150,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -111,7 +123,8 @@ public static class InteractionTools
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
                         PollIntervalMs: pollIntervalMs,
-                        StableMs: stableMs),
+                        StableMs: stableMs,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -127,6 +140,7 @@ public static class InteractionTools
         [Description("Click type: single | double")] MouseClickType clickType = MouseClickType.Single,
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Bring window to foreground first")] bool ensureForeground = true,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -140,7 +154,8 @@ public static class InteractionTools
                         Button: button,
                         ClickType: clickType,
                         WindowHandle: effectiveWindowHandle,
-                        EnsureForeground: ensureForeground),
+                        EnsureForeground: ensureForeground,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -156,6 +171,7 @@ public static class InteractionTools
         [Description("Auto-wait for actionability")] bool autoWait = true,
         [Description("Polling interval (ms)")] int pollIntervalMs = 100,
         [Description("Stable duration (ms)")] int stableMs = 150,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -170,7 +186,8 @@ public static class InteractionTools
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
                         PollIntervalMs: pollIntervalMs,
-                        StableMs: stableMs),
+                        StableMs: stableMs,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -187,6 +204,7 @@ public static class InteractionTools
         [Description("Auto-wait for actionability")] bool autoWait = true,
         [Description("Polling interval (ms)")] int pollIntervalMs = 100,
         [Description("Stable duration (ms)")] int stableMs = 150,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -202,7 +220,8 @@ public static class InteractionTools
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
                         PollIntervalMs: pollIntervalMs,
-                        StableMs: stableMs),
+                        StableMs: stableMs,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -220,6 +239,7 @@ public static class InteractionTools
         [Description("Auto-wait for actionability")] bool autoWait = true,
         [Description("Polling interval (ms)")] int pollIntervalMs = 100,
         [Description("Stable duration (ms)")] int stableMs = 150,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -236,7 +256,8 @@ public static class InteractionTools
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
                         PollIntervalMs: pollIntervalMs,
-                        StableMs: stableMs),
+                        StableMs: stableMs,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -256,6 +277,7 @@ public static class InteractionTools
         [Description("Auto-wait for actionability")] bool autoWait = true,
         [Description("Polling interval (ms)")] int pollIntervalMs = 100,
         [Description("Stable duration (ms)")] int stableMs = 150,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -274,7 +296,8 @@ public static class InteractionTools
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
                         PollIntervalMs: pollIntervalMs,
-                        StableMs: stableMs),
+                        StableMs: stableMs,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -292,6 +315,7 @@ public static class InteractionTools
         [Description("Auto-wait for actionability")] bool autoWait = true,
         [Description("Polling interval (ms)")] int pollIntervalMs = 100,
         [Description("Stable duration (ms)")] int stableMs = 150,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -308,7 +332,8 @@ public static class InteractionTools
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
                         PollIntervalMs: pollIntervalMs,
-                        StableMs: stableMs),
+                        StableMs: stableMs,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -330,6 +355,7 @@ public static class InteractionTools
         [Description("Auto-wait for actionability")] bool autoWait = true,
         [Description("Polling interval (ms)")] int pollIntervalMs = 100,
         [Description("Stable duration (ms)")] int stableMs = 150,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -350,7 +376,8 @@ public static class InteractionTools
                         TimeoutMs: timeoutMs,
                         AutoWait: autoWait,
                         PollIntervalMs: pollIntervalMs,
-                        StableMs: stableMs),
+                        StableMs: stableMs,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });

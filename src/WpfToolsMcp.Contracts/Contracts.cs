@@ -8,13 +8,37 @@ public sealed record LaunchAppRequest(
     IReadOnlyList<string>? Args = null,
     string? WorkingDirectory = null,
     int WaitForMainWindowMs = 15000,
-    bool ReuseExistingInstance = true);
+    bool ReuseExistingInstance = true,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
-public sealed record LaunchAppResponse(string SessionId, int Pid, string ProcessName);
+public sealed record LaunchAppResponse(
+    string SessionId,
+    int Pid,
+    string ProcessName,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
-public sealed record AttachToAppRequest(int? Pid = null, string? ProcessName = null);
+public sealed record AttachToAppRequest(
+    int? Pid = null,
+    string? ProcessName = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
-public sealed record AttachToAppResponse(string SessionId, int Pid, string ProcessName);
+public sealed record AttachToAppResponse(
+    string SessionId,
+    int Pid,
+    string ProcessName,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
+
+public sealed record InteractionPolicy(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? AllowForegroundActivation = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? AllowPhysicalInput = null);
+
+public sealed record InteractionEffects(
+    bool Semantic = false,
+    bool ForegroundActivated = false,
+    bool WindowRestored = false,
+    bool MouseInput = false,
+    bool KeyboardInput = false,
+    bool CursorMoved = false);
 
 public sealed record CloseAppRequest(bool Force = false, int TimeoutMs = 5000);
 
@@ -34,7 +58,8 @@ public sealed record SessionInfo(
     string ActiveWindowTitle,
     string CreatedAtUtc,
     IReadOnlyList<string> BackendCapabilities,
-    IReadOnlyList<BackendCapabilityState> BackendCapabilityStates);
+    IReadOnlyList<BackendCapabilityState> BackendCapabilityStates,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
 public sealed record ListSessionsResponse(IReadOnlyList<SessionInfo> Sessions);
 
@@ -337,9 +362,16 @@ public sealed record HighlightElementResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TakeScreenshotResponse? Screenshot = null);
 
-public sealed record FocusWindowRequest(long? WindowHandle = null, string? Title = null);
+public sealed record FocusWindowRequest(
+    long? WindowHandle = null,
+    string? Title = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
-public sealed record FocusWindowResponse(bool Focused, long Handle, string Title);
+public sealed record FocusWindowResponse(
+    bool Focused,
+    long Handle,
+    string Title,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum WindowState
@@ -356,24 +388,28 @@ public sealed record SetWindowBoundsRequest(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Width = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Height = null,
     bool ClampToVirtualScreen = true,
-    bool EnsureForeground = true);
+    bool EnsureForeground = true,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
 public sealed record SetWindowBoundsResponse(
     bool Updated,
     long WindowHandleUsed,
     Rect PreviousBounds,
     Rect NewBounds,
-    bool WasClamped);
+    bool WasClamped,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record SetWindowStateRequest(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WindowHandle = null,
     WindowState State = WindowState.Normal,
-    bool EnsureForeground = true);
+    bool EnsureForeground = true,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
 public sealed record SetWindowStateResponse(
     bool Updated,
     long WindowHandleUsed,
-    WindowState State);
+    WindowState State,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record DisplayInfo(
     string DeviceName,
@@ -434,9 +470,13 @@ public sealed record ClickElementRequest(
     int TimeoutMs = 5000,
     bool AutoWait = true,
     int PollIntervalMs = 100,
-    int StableMs = 150);
+    int StableMs = 150,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
-public sealed record ClickElementResponse(bool Clicked, string MethodUsed);
+public sealed record ClickElementResponse(
+    bool Clicked,
+    string MethodUsed,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record MouseClickRequest(
     int X,
@@ -445,14 +485,17 @@ public sealed record MouseClickRequest(
     MouseButtonKind Button = MouseButtonKind.Left,
     MouseClickType ClickType = MouseClickType.Single,
     long? WindowHandle = null,
-    bool EnsureForeground = true);
+    bool EnsureForeground = true,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
 public sealed record MouseClickResponse(
     bool Clicked,
     int XScreen,
     int YScreen,
     MouseCoordinateSpace CoordSpaceUsed,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MethodUsed = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record InvokeRequest(
     ElementLocator? Locator = null,
@@ -461,9 +504,13 @@ public sealed record InvokeRequest(
     int TimeoutMs = 5000,
     bool AutoWait = true,
     int PollIntervalMs = 100,
-    int StableMs = 150);
+    int StableMs = 150,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
-public sealed record InvokeResponse(bool Invoked);
+public sealed record InvokeResponse(
+    bool Invoked,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MethodUsed = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record TypeTextRequest(
     ElementLocator? Locator = null,
@@ -473,9 +520,13 @@ public sealed record TypeTextRequest(
     int TimeoutMs = 5000,
     bool AutoWait = true,
     int PollIntervalMs = 100,
-    int StableMs = 150);
+    int StableMs = 150,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
-public sealed record TypeTextResponse(bool Typed, string MethodUsed);
+public sealed record TypeTextResponse(
+    bool Typed,
+    string MethodUsed,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record SetValueRequest(
     ElementLocator? Locator = null,
@@ -486,9 +537,13 @@ public sealed record SetValueRequest(
     int TimeoutMs = 5000,
     bool AutoWait = true,
     int PollIntervalMs = 100,
-    int StableMs = 150);
+    int StableMs = 150,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
-public sealed record SetValueResponse(bool Set, string MethodUsed);
+public sealed record SetValueResponse(
+    bool Set,
+    string MethodUsed,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record SelectItemRequest(
     ElementLocator? Locator = null,
@@ -501,9 +556,13 @@ public sealed record SelectItemRequest(
     int TimeoutMs = 5000,
     bool AutoWait = true,
     int PollIntervalMs = 100,
-    int StableMs = 150);
+    int StableMs = 150,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
-public sealed record SelectItemResponse(bool Selected);
+public sealed record SelectItemResponse(
+    bool Selected,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MethodUsed = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record ScrollToElementRequest(
     ElementLocator? Locator = null,
@@ -514,9 +573,13 @@ public sealed record ScrollToElementRequest(
     int TimeoutMs = 5000,
     bool AutoWait = true,
     int PollIntervalMs = 100,
-    int StableMs = 150);
+    int StableMs = 150,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
-public sealed record ScrollToElementResponse(bool Scrolled, string MethodUsed);
+public sealed record ScrollToElementResponse(
+    bool Scrolled,
+    string MethodUsed,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record DragRequest(
     ElementLocator? Locator = null,
@@ -531,7 +594,8 @@ public sealed record DragRequest(
     int TimeoutMs = 5000,
     bool AutoWait = true,
     int PollIntervalMs = 100,
-    int StableMs = 150);
+    int StableMs = 150,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
 public sealed record WaitForRequest(
     ElementLocator? Locator = null,
@@ -563,7 +627,10 @@ public sealed record WaitForResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WaitForObservation? LastObservation = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FailureReason = null);
 
-public sealed record DragResponse(bool Dragged, string MethodUsed);
+public sealed record DragResponse(
+    bool Dragged,
+    string MethodUsed,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record FindElementsQuery(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AutomationIdEquals = null,
@@ -677,6 +744,14 @@ public sealed record SetWpfValueRequest(
     [property: JsonPropertyName("elementId")] string? ElementId = null,
     string? Text = null,
     double? Value = null,
+    bool VisibleOnly = true,
+    bool IncludeOffViewport = true,
+    int MaxNodes = 2000);
+
+public sealed record InvokeWpfRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
     bool VisibleOnly = true,
     bool IncludeOffViewport = true,
     int MaxNodes = 2000);

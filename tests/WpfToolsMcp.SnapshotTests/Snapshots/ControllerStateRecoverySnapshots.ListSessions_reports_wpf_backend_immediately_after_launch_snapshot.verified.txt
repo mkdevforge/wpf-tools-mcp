@@ -1,8 +1,12 @@
-{
+﻿{
   Launch: {
     SessionId: <session>,
     Pid: -1,
-    ProcessName: WpfToolsMcp.TestApp
+    ProcessName: WpfToolsMcp.TestApp,
+    InteractionPolicy: {
+      AllowForegroundActivation: true,
+      AllowPhysicalInput: true
+    }
   },
   Session: {
     SessionId: <session>,
@@ -23,6 +27,10 @@
         Backend: wpf,
         State: ready
       }
-    ]
+    ],
+    InteractionPolicy: {
+      AllowForegroundActivation: true,
+      AllowPhysicalInput: true
+    }
   }
 }

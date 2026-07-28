@@ -33,6 +33,9 @@ internal static class TestAppPaths
 
     public static string FindMinimalTestAppExecutable() => FindExecutable("WpfToolsMcp.TestApp.Minimal", "WpfToolsMcp.TestApp.Minimal");
 
+    public static string FindFocusProbeTestAppExecutable() =>
+        FindExecutable("WpfToolsMcp.TestApp.FocusProbe", "WpfToolsMcp.TestApp.FocusProbe");
+
     public static string FindDataGridTestAppExecutable() => FindExecutable("WpfToolsMcp.TestApp.DataGrid", "WpfToolsMcp.TestApp.DataGrid");
 
     public static string FindDialogsTestAppExecutable() => FindExecutable("WpfToolsMcp.TestApp.Dialogs", "WpfToolsMcp.TestApp.Dialogs");

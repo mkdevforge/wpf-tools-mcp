@@ -1,0 +1,145 @@
+<Window x:Class="WpfToolsMcp.TestApp.FocusProbe.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        AutomationProperties.AutomationId="FocusProbe_Window"
+        Title="WPF Tools MCP FocusProbe TestApp"
+        Width="640"
+        Height="620"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        Left="120"
+        Top="120"
+        Background="White"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Grid AutomationProperties.AutomationId="FocusProbe_Root"
+          Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   AutomationProperties.AutomationId="FocusProbe_Heading"
+                   Text="Focus and interaction probe"
+                   FontSize="24"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,18" />
+
+        <UniformGrid Grid.Row="1"
+                     Columns="3"
+                     Margin="0,0,0,18">
+            <TextBlock x:Name="ReadyStatus"
+                       AutomationProperties.AutomationId="FocusProbe_ReadyStatus"
+                       Text="Ready"
+                       Margin="0,0,12,0" />
+            <TextBlock x:Name="ActivationCountStatus"
+                       AutomationProperties.AutomationId="FocusProbe_ActivationCount"
+                       Text="Activated: 0"
+                       Margin="0,0,12,0" />
+            <TextBlock x:Name="DeactivationCountStatus"
+                       AutomationProperties.AutomationId="FocusProbe_DeactivationCount"
+                       Text="Deactivated: 0" />
+        </UniformGrid>
+
+        <StackPanel Grid.Row="2"
+                    Margin="0,0,0,18">
+            <Button AutomationProperties.AutomationId="FocusProbe_Button"
+                    AutomationProperties.Name="Run semantic probe action"
+                    Content="Run semantic probe action"
+                    Width="180"
+                    HorizontalAlignment="Left"
+                    Click="ProbeButton_Click" />
+            <TextBlock x:Name="ButtonStatus"
+                       AutomationProperties.AutomationId="FocusProbe_ButtonStatus"
+                       Text="Semantic invokes: 0"
+                       Margin="0,6,0,0" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3"
+                    Margin="0,0,0,18">
+            <Border AutomationProperties.AutomationId="FocusProbe_PhysicalFallbackTarget"
+                    AutomationProperties.Name="Physical fallback target"
+                    Width="210"
+                    Height="40"
+                    HorizontalAlignment="Left"
+                    Background="#FFE8EDF2"
+                    BorderBrush="#FF65717C"
+                    BorderThickness="1"
+                    MouseLeftButtonUp="PhysicalFallbackTarget_MouseLeftButtonUp">
+                <TextBlock Text="Physical fallback target"
+                           IsHitTestVisible="False"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
+            </Border>
+            <TextBlock x:Name="PhysicalFallbackStatus"
+                       AutomationProperties.AutomationId="FocusProbe_PhysicalFallbackStatus"
+                       Text="Physical clicks: 0"
+                       Margin="0,6,0,0" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="4"
+                    Margin="0,0,0,18">
+            <Border x:Name="KeyboardFallbackTarget"
+                    AutomationProperties.AutomationId="FocusProbe_KeyboardFallbackTarget"
+                    AutomationProperties.Name="Keyboard fallback target"
+                    Width="210"
+                    Height="40"
+                    Focusable="True"
+                    HorizontalAlignment="Left"
+                    Background="#FFF3E8D5"
+                    BorderBrush="#FF8A6D3B"
+                    BorderThickness="1"
+                    PreviewMouseLeftButtonDown="KeyboardFallbackTarget_PreviewMouseLeftButtonDown"
+                    PreviewKeyDown="KeyboardFallbackTarget_PreviewKeyDown"
+                    PreviewTextInput="KeyboardFallbackTarget_PreviewTextInput">
+                <TextBlock Text="Keyboard fallback target"
+                           IsHitTestVisible="False"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
+            </Border>
+            <TextBlock x:Name="KeyboardFallbackStatus"
+                       AutomationProperties.AutomationId="FocusProbe_KeyboardFallbackStatus"
+                       Text="Keyboard text: (empty)"
+                       Margin="0,6,0,0" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="5"
+                    Margin="0,0,0,18">
+            <TextBlock Text="Editable value"
+                       Margin="0,0,0,4" />
+            <TextBox AutomationProperties.AutomationId="FocusProbe_TextBox"
+                     Text="Focus probe text"
+                     Width="260"
+                     HorizontalAlignment="Left" />
+        </StackPanel>
+
+        <Grid Grid.Row="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="260" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <ListBox x:Name="ProbeListBox"
+                     Grid.Column="0"
+                     AutomationProperties.AutomationId="FocusProbe_ListBox"
+                     Height="150"
+                     SelectionChanged="ProbeListBox_SelectionChanged" />
+
+            <TextBlock x:Name="SelectionStatus"
+                       Grid.Column="1"
+                       AutomationProperties.AutomationId="FocusProbe_SelectionStatus"
+                       Text="Selected: (none)"
+                       Margin="18,0,0,0"
+                       VerticalAlignment="Top" />
+        </Grid>
+    </Grid>
+</Window>

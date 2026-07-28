@@ -63,6 +63,7 @@ internal static class McpToolErrors
             "wpf_handle_stale" => first,
             "no_hit_at_point" => first,
             "invalid_request" => first,
+            "interaction_policy_blocked" => first,
             _ => null
         };
     }

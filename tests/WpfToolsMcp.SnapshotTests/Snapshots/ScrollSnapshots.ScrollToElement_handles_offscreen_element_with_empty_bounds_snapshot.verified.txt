@@ -7,7 +7,14 @@
   BeforeBounds: {},
   Scroll: {
     Scrolled: true,
-    MethodUsed: wpf_bringIntoView
+    MethodUsed: wpf_bringIntoView,
+    Effects: {
+      Semantic: true,
+      WindowRestored: false,
+      MouseInput: false,
+      KeyboardInput: false,
+      CursorMoved: false
+    }
   },
   AfterIsOffscreen: false,
   AfterBounds: {
@@ -16,7 +23,14 @@
   },
   Click: {
     Clicked: true,
-    MethodUsed: mouse
+    MethodUsed: mouse,
+    Effects: {
+      Semantic: false,
+      WindowRestored: false,
+      MouseInput: true,
+      KeyboardInput: false,
+      CursorMoved: true
+    }
   },
   Status: Clicks: 1
 }

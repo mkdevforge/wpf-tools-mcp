@@ -1,7 +1,14 @@
-﻿{
+{
   Click: {
     Clicked: true,
-    MethodUsed: invoke
+    MethodUsed: wpf_invoke,
+    Effects: {
+      Semantic: true,
+      WindowRestored: false,
+      MouseInput: false,
+      KeyboardInput: false,
+      CursorMoved: false
+    }
   },
   Status: Clicks: 1
 }

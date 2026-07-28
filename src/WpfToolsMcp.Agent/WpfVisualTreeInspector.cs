@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
@@ -2144,6 +2145,56 @@ internal static class WpfVisualTreeInspector
             : "TextBox.Text, PasswordBox.Password, editable ComboBox.Text, or RangeBase.Value";
         throw new InvalidOperationException(
             $"set_value_unsupported_wpf_target: WPF type '{element.GetType().Name}' does not expose a supported value target for this input. Supported WPF targets: {supported}.");
+    }
+
+    public static InvokeResponse Invoke(InvokeWpfRequest request, CancellationToken cancellationToken)
+    {
+        var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
+        var window = ResolveWindow(request.WindowHandle);
+        using var treeService = new VisualTreeService();
+
+        var resolved = ResolveTargetElement(
+            window,
+            treeService,
+            rootObject: window,
+            rootXPath: "/Window",
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
+            request.VisibleOnly,
+            request.IncludeOffViewport,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
+            maxNodes,
+            cancellationToken);
+
+        var element = resolved.Element;
+        if (GetIsEnabledWpf(element) is false)
+        {
+            throw new InvalidOperationException($"element_disabled: invoke target WPF type '{element.GetType().Name}' is disabled.");
+        }
+
+        var peer = TryCreateAutomationPeer(element);
+        if (peer?.GetPattern(PatternInterface.Invoke) is IInvokeProvider invokeProvider)
+        {
+            invokeProvider.Invoke();
+            return new InvokeResponse(Invoked: true, MethodUsed: "wpf_invoke");
+        }
+
+        if (peer?.GetPattern(PatternInterface.Toggle) is IToggleProvider toggleProvider)
+        {
+            toggleProvider.Toggle();
+            return new InvokeResponse(Invoked: true, MethodUsed: "wpf_toggle");
+        }
+
+        if (peer?.GetPattern(PatternInterface.SelectionItem) is ISelectionItemProvider selectionItemProvider)
+        {
+            selectionItemProvider.Select();
+            return new InvokeResponse(Invoked: true, MethodUsed: "wpf_selectionItem");
+        }
+
+        throw new InvalidOperationException(
+            $"invoke_unsupported_wpf_target: WPF type '{element.GetType().Name}' does not expose Invoke, Toggle, or SelectionItem automation patterns.");
     }
 
     public static BringIntoViewWpfResponse BringIntoView(BringIntoViewWpfRequest request, CancellationToken cancellationToken)

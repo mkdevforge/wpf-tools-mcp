@@ -204,8 +204,6 @@ public sealed partial class AutomationController
                         throw new InvalidOperationException("Window not found for highlight screenshot.");
                     }
 
-                    await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
-
                     var capture = CaptureScreenshotWithMetadata(
                         window,
                         requestedBounds: null,

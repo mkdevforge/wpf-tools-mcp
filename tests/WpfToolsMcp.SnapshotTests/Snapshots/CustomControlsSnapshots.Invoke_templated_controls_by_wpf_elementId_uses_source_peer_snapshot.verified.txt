@@ -1,4 +1,4 @@
-{
+﻿{
   Button: {
     Type: Button,
     AutomationId: Custom_TemplatedButton,
@@ -31,12 +31,10 @@
       Invoked: true
     },
     Toggle: {
-      Invoked: false,
-      Error: Tool 'invoke' failed: An error occurred invoking 'invoke': tool=Invoke: InvokePattern not supported for WPF element (WpfType=ToggleButton, AutomationId=Custom_TemplatedToggleButton, Name=TemplatedInvokeToggleButton); resolved UIA peer (ControlType=Button, AutomationId=Custom_TemplatedToggleButton, Name=Templated toggle).
+      Invoked: true
     },
     Radio: {
-      Invoked: false,
-      Error: Tool 'invoke' failed: An error occurred invoking 'invoke': tool=Invoke: InvokePattern not supported for WPF element (WpfType=RadioButton, AutomationId=Custom_TemplatedRadioButton, Name=TemplatedInvokeRadioButton); resolved UIA peer (ControlType=RadioButton, AutomationId=Custom_TemplatedRadioButton, Name=Templated radio).
+      Invoked: true
     }
   },
   Status: Templated invokes: button=1, toggle=0, radio=0

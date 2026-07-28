@@ -54,10 +54,15 @@ public static class CoreAppTools
         [Description("Executable path")] string exePath,
         [Description("Optional arguments")] string[]? args = null,
         [Description("Optional working directory")] string? workingDirectory = null,
+        [Description("Session interaction policy")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
             sessions.LaunchAppAsync(
-                new LaunchAppRequest(exePath, args, workingDirectory),
+                new LaunchAppRequest(
+                    ExePath: exePath,
+                    Args: args,
+                    WorkingDirectory: workingDirectory,
+                    InteractionPolicy: interactionPolicy),
                 cancellationToken));
 
     [McpServerTool(Name = "attach_to_app"), Description("Attach to an already running process.")]
@@ -65,6 +70,7 @@ public static class CoreAppTools
         SessionManager sessions,
         [Description("Process ID")] int? pid = null,
         [Description("Process name")] string? processName = null,
+        [Description("Session interaction policy")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default)
     {
         if (pid is not null && !string.IsNullOrWhiteSpace(processName))
@@ -73,7 +79,9 @@ public static class CoreAppTools
         }
 
         return McpToolErrors.RunAsync(() =>
-            sessions.AttachToAppAsync(new AttachToAppRequest(pid, processName), cancellationToken));
+            sessions.AttachToAppAsync(
+                new AttachToAppRequest(pid, processName, interactionPolicy),
+                cancellationToken));
     }
 
     [McpServerTool(Name = "close_session"), Description("Remove a session and close the attached application; Closed means the session was removed, with process state reported separately.")]
@@ -112,6 +120,7 @@ public static class CoreAppTools
         [Description("Session ID")] string sessionId,
         [Description("Native window handle")] long? windowHandle = null,
         [Description("Window title")] string? title = null,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default)
     {
         if (windowHandle is not null && !string.IsNullOrWhiteSpace(title))
@@ -120,7 +129,13 @@ public static class CoreAppTools
         }
 
         return McpToolErrors.RunAsync(() =>
-            sessions.SetActiveWindowAsync(sessionId, new FocusWindowRequest(windowHandle, title), cancellationToken));
+            sessions.SetActiveWindowAsync(
+                sessionId,
+                new FocusWindowRequest(
+                    windowHandle,
+                    title,
+                    sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
+                cancellationToken));
     }
 }
 
@@ -446,6 +461,7 @@ public static class CoreInteractionTools
         [Description("Element locator")] CoreElementLocator? locator = null,
         [Description("Element ID")] string? elementId = null,
         [Description("Click type: single, double, or right")] string? clickType = null,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -457,7 +473,8 @@ public static class CoreInteractionTools
                         Locator: locator?.ToElementLocator(),
                         ElementId: elementId,
                         WindowHandle: hasElementId ? null : effectiveWindowHandle,
-                        ClickType: ParseClickType(clickType)),
+                        ClickType: ParseClickType(clickType),
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -469,6 +486,7 @@ public static class CoreInteractionTools
         [Description("Text to enter")] string text,
         [Description("Element locator")] CoreElementLocator? locator = null,
         [Description("Element ID")] string? elementId = null,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -480,7 +498,8 @@ public static class CoreInteractionTools
                         Locator: locator?.ToElementLocator(),
                         Text: text,
                         ElementId: elementId,
-                        WindowHandle: hasElementId ? null : effectiveWindowHandle),
+                        WindowHandle: hasElementId ? null : effectiveWindowHandle,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -493,6 +512,7 @@ public static class CoreInteractionTools
         [Description("Text value to set for string-valued controls")] string? text = null,
         [Description("Element locator")] CoreElementLocator? locator = null,
         [Description("Element ID")] string? elementId = null,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -505,7 +525,8 @@ public static class CoreInteractionTools
                         Value: value,
                         Text: text,
                         ElementId: elementId,
-                        WindowHandle: hasElementId ? null : effectiveWindowHandle),
+                        WindowHandle: hasElementId ? null : effectiveWindowHandle,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -518,6 +539,7 @@ public static class CoreInteractionTools
         [Description("Container elementId")] string? elementId = null,
         [Description("Item text")] string? text = null,
         [Description("Item index")] int? index = null,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -530,7 +552,8 @@ public static class CoreInteractionTools
                         Text: text,
                         Index: index,
                         WindowHandle: hasElementId ? null : effectiveWindowHandle,
-                        ElementId: elementId),
+                        ElementId: elementId,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -541,6 +564,7 @@ public static class CoreInteractionTools
         [Description("Session ID")] string sessionId,
         [Description("Element locator")] CoreElementLocator? locator = null,
         [Description("Element ID")] string? elementId = null,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -551,7 +575,8 @@ public static class CoreInteractionTools
                     new InvokeRequest(
                         Locator: locator?.ToElementLocator(),
                         ElementId: elementId,
-                        WindowHandle: hasElementId ? null : effectiveWindowHandle),
+                        WindowHandle: hasElementId ? null : effectiveWindowHandle,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -562,6 +587,7 @@ public static class CoreInteractionTools
         [Description("Session ID")] string sessionId,
         [Description("Target locator")] CoreElementLocator? locator = null,
         [Description("Target elementId")] string? elementId = null,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -572,7 +598,8 @@ public static class CoreInteractionTools
                     new ScrollToElementRequest(
                         Locator: locator?.ToElementLocator(),
                         WindowHandle: hasElementId ? null : effectiveWindowHandle,
-                        ElementId: elementId),
+                        ElementId: elementId,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });
@@ -587,6 +614,7 @@ public static class CoreInteractionTools
         [Description("Target elementId")] string? targetElementId = null,
         [Description("Target X screen coordinate")] int? toX = null,
         [Description("Target Y screen coordinate")] int? toY = null,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -601,7 +629,8 @@ public static class CoreInteractionTools
                         ToX: toX,
                         ToY: toY,
                         ElementId: elementId,
-                        TargetElementId: targetElementId),
+                        TargetElementId: targetElementId,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
                     cancellationToken),
                 cancellationToken);
         });

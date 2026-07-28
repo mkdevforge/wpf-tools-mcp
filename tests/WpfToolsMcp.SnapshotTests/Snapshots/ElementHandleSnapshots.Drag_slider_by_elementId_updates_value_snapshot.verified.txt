@@ -12,7 +12,14 @@
   },
   Drag: {
     Dragged: true,
-    MethodUsed: mouse
+    MethodUsed: mouse,
+    Effects: {
+      Semantic: false,
+      WindowRestored: false,
+      MouseInput: true,
+      KeyboardInput: false,
+      CursorMoved: true
+    }
   },
   Value: 100.0
 }

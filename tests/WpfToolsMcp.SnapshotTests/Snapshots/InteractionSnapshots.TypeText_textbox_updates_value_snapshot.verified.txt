@@ -1,7 +1,14 @@
-﻿{
+{
   Typed: {
     Typed: true,
-    MethodUsed: keyboard
+    MethodUsed: wpf_textBoxText,
+    Effects: {
+      Semantic: true,
+      WindowRestored: false,
+      MouseInput: false,
+      KeyboardInput: false,
+      CursorMoved: false
+    }
   },
   Value: Hello from tests
 }

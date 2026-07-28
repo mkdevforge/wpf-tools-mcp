@@ -1,7 +1,14 @@
-{
+﻿{
   OpenDialog: {
     Clicked: true,
-    MethodUsed: mouse
+    MethodUsed: mouse,
+    Effects: {
+      Semantic: false,
+      WindowRestored: false,
+      MouseInput: true,
+      KeyboardInput: false,
+      CursorMoved: true
+    }
   },
   WindowsWhileDialogOpen: {
     ProcessName: WpfToolsMcp.TestApp.Dialogs,
@@ -28,11 +35,25 @@
   },
   Focus: {
     Focused: true,
-    Title: WPF Tools MCP Confirm Dialog
+    Title: WPF Tools MCP Confirm Dialog,
+    Effects: {
+      Semantic: false,
+      WindowRestored: false,
+      MouseInput: false,
+      KeyboardInput: false,
+      CursorMoved: false
+    }
   },
   ClickOk: {
     Clicked: true,
-    MethodUsed: invoke
+    MethodUsed: wpf_invoke,
+    Effects: {
+      Semantic: true,
+      WindowRestored: false,
+      MouseInput: false,
+      KeyboardInput: false,
+      CursorMoved: false
+    }
   },
   Status: Dialog: OK,
   WindowsAfterClose: {

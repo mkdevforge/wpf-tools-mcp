@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Input;
 using WpfToolsMcp.Contracts;
@@ -16,6 +17,8 @@ public sealed partial class AutomationController
         var trace = BeginTraceSpan("mouse_click");
         try
         {
+            var policy = InteractionPolicyResolver.Resolve(request.InteractionPolicy);
+            var effects = new InteractionEffectTracker();
             var application = EnsureAttached();
             var automation = EnsureAutomation();
 
@@ -37,13 +40,29 @@ public sealed partial class AutomationController
                         XScreen: request.X,
                         YScreen: request.Y,
                         CoordSpaceUsed: request.CoordSpace,
-                        Error: "window_not_found");
+                        Error: "window_not_found",
+                        MethodUsed: "mouse",
+                        Effects: effects.ToContract());
                 }
 
                 if (request.EnsureForeground)
                 {
-                    await PrepareWindowForInteractionAsync(window, settleDelayMs: UiDelayWindowSettleMs, cancellationToken);
+                    await PrepareWindowForPhysicalInputAsync(
+                        window,
+                        operation: "mouse_click",
+                        policy,
+                        effects,
+                        semanticAlternative: "Use click_element for an element-targeted semantic action when available.",
+                        cancellationToken).ConfigureAwait(false);
                 }
+            }
+
+            if (!request.EnsureForeground)
+            {
+                EnsurePhysicalInputAllowed(
+                    operation: "mouse_click",
+                    policy,
+                    semanticAlternative: "Use click_element for an element-targeted semantic action when available.");
             }
 
             int xScreen;
@@ -66,7 +85,9 @@ public sealed partial class AutomationController
                             XScreen: request.X,
                             YScreen: request.Y,
                             CoordSpaceUsed: coordSpaceUsed,
-                            Error: "client_origin_unavailable");
+                            Error: "client_origin_unavailable",
+                            MethodUsed: "mouse",
+                            Effects: effects.ToContract());
                     }
 
                     xScreen = clientTopLeft.X + request.X;
@@ -85,13 +106,22 @@ public sealed partial class AutomationController
             };
 
             var point = new Point(xScreen, yScreen);
+            EnsureMouseClickWillNotActivateForeground(
+                request.CoordSpace,
+                new IntPtr(windowHandleUsed),
+                point,
+                policy);
+
+            var foregroundBeforeInput = GetForegroundWindow();
             switch (request.ClickType)
             {
                 case MouseClickType.Single:
                     Mouse.Click(point, mouseButton);
+                    effects.MarkMouseInput(cursorMoved: true);
                     break;
                 case MouseClickType.Double:
                     Mouse.DoubleClick(point, mouseButton);
+                    effects.MarkMouseInput(cursorMoved: true);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(request.ClickType), request.ClickType, "Unsupported click type.");
@@ -102,12 +132,20 @@ public sealed partial class AutomationController
                 await Task.Delay(UiDelayMs, cancellationToken);
             }
 
+            var foregroundAfterInput = GetForegroundWindow();
+            if (foregroundAfterInput != IntPtr.Zero && foregroundAfterInput != foregroundBeforeInput)
+            {
+                effects.MarkForegroundActivated();
+            }
+
             trace?.SetSummary($"clicked=true x={xScreen} y={yScreen} space={coordSpaceUsed} button={request.Button} type={request.ClickType}");
             return new MouseClickResponse(
                 Clicked: true,
                 XScreen: xScreen,
                 YScreen: yScreen,
-                CoordSpaceUsed: coordSpaceUsed);
+                CoordSpaceUsed: coordSpaceUsed,
+                MethodUsed: "mouse",
+                Effects: effects.ToContract());
         }
         catch (Exception ex)
         {
@@ -119,5 +157,69 @@ public sealed partial class AutomationController
             trace?.Dispose();
         }
     }
-}
 
+    private static void EnsureMouseClickWillNotActivateForeground(
+        MouseCoordinateSpace coordinateSpace,
+        IntPtr targetWindow,
+        Point screenPoint,
+        EffectiveInteractionPolicy policy)
+    {
+        var foreground = GetForegroundWindow();
+        var candidate = WindowFromPoint(new NativeMousePoint(screenPoint.X, screenPoint.Y));
+        var foregroundRoot = foreground == IntPtr.Zero ? IntPtr.Zero : GetRootOwnerWindow(foreground);
+        var candidateRoot = candidate == IntPtr.Zero ? IntPtr.Zero : GetRootOwnerWindow(candidate);
+        var targetRoot = targetWindow == IntPtr.Zero ? IntPtr.Zero : GetRootOwnerWindow(targetWindow);
+
+        if (!policy.AllowForegroundActivation)
+        {
+            var requestedTargetIsSafe = coordinateSpace != MouseCoordinateSpace.Client ||
+                                        (targetRoot != IntPtr.Zero && targetRoot == foregroundRoot);
+            var actualTargetIsSafe = candidateRoot != IntPtr.Zero && candidateRoot == foregroundRoot;
+            if (requestedTargetIsSafe && actualTargetIsSafe)
+            {
+                return;
+            }
+
+            throw InteractionPolicyResolver.Blocked(
+                operation: "mouse_click",
+                requiredEffect: "potential foreground activation from physical mouse input",
+                policySetting: "allowForegroundActivation",
+                alternative: "Use click_element for a semantic action, click within the current foreground window, or retry with interactionPolicy.allowForegroundActivation=true.");
+        }
+
+        if (coordinateSpace == MouseCoordinateSpace.Client &&
+            (candidateRoot == IntPtr.Zero || candidateRoot != targetRoot))
+        {
+            throw new InvalidOperationException(
+                "mouse_target_occluded: the requested client point is currently covered by another window. " +
+                "Use click_element for a semantic action, uncover the target, or foreground it explicitly before retrying.");
+        }
+    }
+
+    private static IntPtr GetRootOwnerWindow(IntPtr windowHandle)
+    {
+        var rootOwner = GetAncestor(windowHandle, GetAncestorRootOwner);
+        return rootOwner == IntPtr.Zero ? windowHandle : rootOwner;
+    }
+
+    private const uint GetAncestorRootOwner = 3;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct NativeMousePoint
+    {
+        internal NativeMousePoint(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+
+        internal readonly int X;
+        internal readonly int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(NativeMousePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr windowHandle, uint flags);
+}

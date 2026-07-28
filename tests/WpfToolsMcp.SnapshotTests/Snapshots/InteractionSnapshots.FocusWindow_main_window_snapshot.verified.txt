@@ -1,4 +1,11 @@
 {
   Focused: true,
-  Title: WPF Tools MCP TestApp
+  Title: WPF Tools MCP TestApp,
+  Effects: {
+    Semantic: false,
+    WindowRestored: false,
+    MouseInput: false,
+    KeyboardInput: false,
+    CursorMoved: false
+  }
 }
