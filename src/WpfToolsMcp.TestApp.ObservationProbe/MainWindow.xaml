@@ -1,0 +1,72 @@
+<Window x:Class="WpfToolsMcp.TestApp.ObservationProbe.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AutomationProperties.AutomationId="Observation_Window"
+        Title="WPF Tools MCP ObservationProbe TestApp"
+        Width="620"
+        Height="360"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        Left="180"
+        Top="160"
+        Background="White">
+    <StackPanel x:Name="RootPanel" Margin="24">
+        <TextBlock Text="Observation probe"
+                   FontSize="22"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <TextBox x:Name="ObservationTarget"
+                 AutomationProperties.AutomationId="Observation_Target"
+                 AutomationProperties.Name="Observation target"
+                 Text="{Binding Phase, Mode=OneWay}"
+                 IsEnabled="{Binding TargetIsEnabled, Mode=OneWay}"
+                 Width="{Binding TargetWidth, Mode=OneWay}"
+                 HorizontalAlignment="Left"
+                 Margin="0,0,0,20" />
+
+        <WrapPanel>
+            <Button x:Name="RunOrderedButton"
+                    AutomationProperties.AutomationId="Observation_RunOrdered"
+                    Content="Run ordered"
+                    Width="120"
+                    Margin="0,0,8,8"
+                    Click="RunOrdered_Click" />
+            <Button AutomationProperties.AutomationId="Observation_RunCoalesced"
+                    Content="Run coalesced"
+                    Width="120"
+                    Margin="0,0,8,8"
+                    Click="RunCoalesced_Click" />
+            <Button AutomationProperties.AutomationId="Observation_RunDropBurst"
+                    Content="Run drop burst"
+                    Width="120"
+                    Margin="0,0,8,8"
+                    Click="RunDropBurst_Click" />
+            <Button AutomationProperties.AutomationId="Observation_SetLarge"
+                    Content="Set large"
+                    Width="120"
+                    Margin="0,0,8,8"
+                    Click="SetLarge_Click" />
+            <Button AutomationProperties.AutomationId="Observation_SetSamePrefix"
+                    Content="Set same prefix"
+                    Width="120"
+                    Margin="0,0,8,8"
+                    Click="SetSamePrefix_Click" />
+            <Button AutomationProperties.AutomationId="Observation_RemoveTarget"
+                    Content="Remove target"
+                    Width="120"
+                    Margin="0,0,8,8"
+                    Click="RemoveTarget_Click" />
+            <Button AutomationProperties.AutomationId="Observation_OpenSecondary"
+                    Content="Open secondary"
+                    Width="120"
+                    Margin="0,0,8,8"
+                    Click="OpenSecondary_Click" />
+            <Button AutomationProperties.AutomationId="Observation_ChangeSecondary"
+                    Content="Change secondary"
+                    Width="120"
+                    Margin="0,0,0,8"
+                    Click="ChangeSecondary_Click" />
+        </WrapPanel>
+    </StackPanel>
+</Window>

@@ -63,6 +63,7 @@ public sealed class ToolProfileTests
         "set_window_state",
         "set_window_viewport",
         "subscribe_binding_errors",
+        "subscribe_property_changes",
         "trace_start",
         "trace_stop",
         "uia_coverage_report",

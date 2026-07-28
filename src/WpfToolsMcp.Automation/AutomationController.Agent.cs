@@ -380,6 +380,183 @@ public sealed partial class AutomationController
         return client is not null;
     }
 
+    public async Task<WpfStateObservation> ObserveStateStartAsync(
+        ObserveStateStartRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var trace = BeginTraceSpan("observe_state_start");
+        try
+        {
+            var target = PrepareWpfAgentTarget(
+                "subscribe_property_changes",
+                request.Locator,
+                request.ElementId,
+                request.WindowHandle);
+            var processId = EnsureAttached().ProcessId;
+            var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+            var effectiveRequest = request with
+            {
+                WindowHandle = target.WindowHandle,
+                Locator = target.Locator,
+                ElementId = target.AgentElementId
+            };
+            var fallbackRequest = target.RecoveryLocator is null
+                ? null
+                : effectiveRequest with { Locator = target.RecoveryLocator, ElementId = null };
+            var response = await CallWpfAgentTargetAsync<ObserveStateStartResponse>(
+                client,
+                "wpf/observe_state_start",
+                effectiveRequest,
+                fallbackRequest,
+                target,
+                cancellationToken).ConfigureAwait(false);
+            response = response with
+            {
+                Element = StripAgentElementId(response.Element, target.PublicElementId)
+            };
+            var observation = new WpfStateObservation(client, processId, response);
+            trace?.SetSummary(
+                $"id={response.ObservationId} watches={response.Watches.Count} durationMs={response.DurationMs}");
+            return observation;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
+    }
+
+    public async Task<ObserveStatePollResponse> ObserveStatePollAsync(
+        WpfStateObservation observation,
+        int maxBatch,
+        int maxPayloadChars,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        var client = GetOwningObservationClient(observation);
+        try
+        {
+            return await client.CallAsync<ObserveStatePollResponse>(
+                "wpf/observe_state_poll",
+                new ObserveStatePollRequest(observation.Started.ObservationId, maxBatch, maxPayloadChars),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!client.IsConnected)
+            {
+                observation.MarkLost();
+            }
+
+            throw;
+        }
+        catch (Exception ex) when (!client.IsConnected)
+        {
+            observation.MarkLost();
+            throw CreateObservationConnectionLostException(observation, ex);
+        }
+    }
+
+    public async Task<ObserveStateStopResponse> ObserveStateStopAsync(
+        WpfStateObservation observation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        var client = GetOwningObservationClient(observation);
+        try
+        {
+            var response = await client.CallAsync<ObserveStateStopResponse>(
+                "wpf/observe_state_stop",
+                new ObserveStateStopRequest(observation.Started.ObservationId),
+                cancellationToken).ConfigureAwait(false);
+            observation.MarkReleased();
+            return response;
+        }
+        catch (OperationCanceledException)
+        {
+            if (!client.IsConnected)
+            {
+                observation.MarkLost();
+            }
+
+            throw;
+        }
+        catch (Exception ex) when (!client.IsConnected)
+        {
+            observation.MarkLost();
+            throw CreateObservationConnectionLostException(observation, ex);
+        }
+    }
+
+    public async Task ReleaseObserveStateAsync(
+        WpfStateObservation observation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        if (observation.IsReleased || observation.IsLost)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = await ObserveStateStopAsync(observation, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!observation.Client.IsConnected)
+        {
+            observation.MarkLost();
+        }
+        catch (InvalidOperationException ex) when (IsObservationNotFound(ex))
+        {
+            observation.MarkReleased();
+        }
+        catch (InvalidOperationException ex) when (
+            ex.Message.StartsWith("observe_state_connection_lost:", StringComparison.Ordinal))
+        {
+            observation.MarkLost();
+        }
+    }
+
+    private AgentClient GetOwningObservationClient(WpfStateObservation observation)
+    {
+        if (observation.IsReleased)
+        {
+            throw new InvalidOperationException(
+                $"observe_state_released: observation '{observation.Started.ObservationId}' has been released.");
+        }
+
+        lock (_agentSync)
+        {
+            if (observation.IsLost ||
+                !ReferenceEquals(_agentClient, observation.Client) ||
+                _agentPid != observation.ProcessId ||
+                !observation.Client.IsConnected)
+            {
+                observation.MarkLost();
+                throw CreateObservationConnectionLostException(observation);
+            }
+
+            return observation.Client;
+        }
+    }
+
+    private static bool IsObservationNotFound(Exception ex) =>
+        ex.GetBaseException().Message.Contains("observe_state_not_found", StringComparison.OrdinalIgnoreCase);
+
+    private static InvalidOperationException CreateObservationConnectionLostException(
+        WpfStateObservation observation,
+        Exception? inner = null) =>
+        new(
+            $"observe_state_connection_lost: the agent connection that owns observation " +
+            $"'{observation.Started.ObservationId}' is no longer available.",
+            inner);
+
     public async Task<GetBindingInfoResponse> GetBindingInfoAsync(
         ElementLocator? locator = null,
         string? elementId = null,

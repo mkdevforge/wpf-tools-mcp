@@ -53,7 +53,7 @@ agent workflows:
 | Profile | Tools | Purpose |
 |---|---:|---|
 | `core` (default) | 28 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 50 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `diagnostics` | 51 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Enable the full profile with a command argument:
 
@@ -94,8 +94,46 @@ The `diagnostics` profile additionally exposes:
 - `pick_element_at_point`, `highlight_element`, `mouse_click`, `list_displays`,
   `set_window_bounds`, `set_window_viewport`, and `set_window_state`.
 - `get_style_chain`, `get_template_info`, and `uia_coverage_report`.
-- `subscribe_binding_errors`, `poll_subscription`, and `unsubscribe`.
+- `subscribe_binding_errors`, `subscribe_property_changes`,
+  `poll_subscription`, and `unsubscribe`.
 - `trace_start`, `trace_stop`, `performance_start`, and `performance_stop`.
+
+### Live WPF State Observation
+
+`subscribe_property_changes` observes one resolved WPF element for a bounded
+duration. Supply exactly one of `locator` or `elementId`, plus an allowlist of
+dependency-property names, DataContext paths, or both. DataContext paths use
+dotted identifiers such as `Phase` or `Nested.Mode`.
+
+The target agent attaches WPF change notifications on the element dispatcher.
+For an explicit window handle, it resolves the owning WPF `HwndSource` before
+traversal, so windows on secondary UI dispatchers are observed and released on
+their own dispatcher. The tool does not sample at `cadenceMs`: that value only
+controls how often the MCP server drains the target's bounded queue. A 30 ms
+transition can therefore be captured even when delivery occurs every 250 ms.
+The first poll returns
+`property_initial` events followed by ordered, timestamped `property_changed`
+events containing structured old and new values. Optional visual metadata adds
+bounds, visibility, and enabled state at observation time.
+
+Both target and server queues are bounded. `Dropped`, `Coalesced`, and
+`Truncated`, together with their cumulative totals, make lost, merged, or
+shortened evidence explicit. `maxValueLength` bounds scalar values and
+`maxPayloadChars` bounds serialized event payloads per poll. Completion remains
+pollable for a 60-second idle grace period, renewed by each poll, or until
+`unsubscribe`; detaching or ending the session releases the target-side handlers
+as part of session cleanup. Live and completed-retained property subscription
+handles are capped at eight per session and 64 per server process, bounding
+handler, worker, retention-task, and cancellation-source growth. A completed
+handle releases its slot on `unsubscribe` or after its idle grace expires.
+
+DataContext observation follows normal WPF binding notification behavior. It
+tracks dependency properties and `INotifyPropertyChanged` paths, but a plain CLR
+property that emits no notification cannot be observed without polling and is
+therefore best effort.
+
+Locator resolution is also bounded: `maxNodes` defaults to 5,000 and is capped
+at 20,000. Reusing a resolved `elementId` avoids that scan entirely.
 
 ### Desktop Interaction Policy
 

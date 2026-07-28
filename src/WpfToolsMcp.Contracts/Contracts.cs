@@ -943,10 +943,24 @@ public sealed record GetBindingErrorsResponse(
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SubscriptionKind
 {
-    BindingErrors
+    BindingErrors,
+    PropertyChanges
 }
 
 public sealed record SubscribeBindingErrorsResponse(string SubscriptionId);
+
+public sealed record SubscribePropertyChangesResponse(
+    string SubscriptionId,
+    ElementRef Element,
+    IReadOnlyList<ObserveStateWatch> Watches,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset ExpiresAtUtc,
+    int CadenceMs,
+    int DurationMs,
+    int MaxNodes,
+    int MaxQueue,
+    int MaxValueLength,
+    int MaxPayloadChars);
 
 public sealed record SubscriptionEvent(
     int Sequence,
@@ -956,7 +970,15 @@ public sealed record SubscriptionEvent(
 public sealed record PollSubscriptionResponse(
     IReadOnlyList<SubscriptionEvent> Events,
     int Dropped,
-    bool HasMore);
+    bool HasMore,
+    int DroppedTotal = 0,
+    int Coalesced = 0,
+    int CoalescedTotal = 0,
+    int Truncated = 0,
+    int TruncatedTotal = 0,
+    bool Completed = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CompletionReason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CompletedAtUtc = null);
 
 public sealed record UnsubscribeResponse(bool Unsubscribed);
 
