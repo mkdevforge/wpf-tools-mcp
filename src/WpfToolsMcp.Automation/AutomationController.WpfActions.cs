@@ -114,6 +114,55 @@ public sealed partial class AutomationController
         return message.Contains("set_value_unsupported_wpf_target:", StringComparison.OrdinalIgnoreCase);
     }
 
+    private async Task<InvokeResponse?> TryInvokeWpfAsync(
+        string publicElementId,
+        ElementHandle handle,
+        CancellationToken cancellationToken)
+    {
+        var request = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
+            ? new InvokeWpfRequest(
+                WindowHandle: handle.WindowHandle,
+                ElementId: handle.WpfAgentElementId,
+                MaxNodes: 8000)
+            : new InvokeWpfRequest(
+                WindowHandle: handle.WindowHandle,
+                Locator: CreateWpfHandleRecoveryLocator(handle),
+                MaxNodes: 8000);
+
+        var fallbackRequest = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
+            ? request with { Locator = CreateWpfHandleRecoveryLocator(handle), ElementId = null }
+            : null;
+        var target = new WpfAgentTarget(
+            handle.WindowHandle,
+            request.Locator,
+            handle.WpfAgentElementId,
+            publicElementId,
+            fallbackRequest?.Locator,
+            handle);
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await CallWpfAgentTargetAsync<InvokeResponse>(
+                client,
+                "wpf/invoke",
+                request,
+                fallbackRequest,
+                target,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex) when (IsWpfInvokeUnsupported(ex))
+        {
+            return null;
+        }
+    }
+
+    private static bool IsWpfInvokeUnsupported(Exception ex)
+    {
+        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        return message.Contains("invoke_unsupported_wpf_target:", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<BringIntoViewWpfResponse> BringIntoViewWpfAsync(
         long windowHandle,
         string xpath,

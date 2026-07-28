@@ -147,9 +147,9 @@ public sealed class ToolProfileTests
         Assert.That(GetInputPropertyNames(tools["get_computed_properties"]), Is.EqualTo(
             new[] { "elementId", "locator", "propertyNames", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["click_element"]), Is.EqualTo(
-            new[] { "clickType", "elementId", "locator", "sessionId" }));
+            new[] { "clickType", "elementId", "interactionPolicy", "locator", "sessionId" }));
         Assert.That(GetInputPropertyNames(tools["drag"]), Is.EqualTo(
-            new[] { "elementId", "locator", "sessionId", "targetElementId", "targetLocator", "toX", "toY" }));
+            new[] { "elementId", "interactionPolicy", "locator", "sessionId", "targetElementId", "targetLocator", "toX", "toY" }));
 
         foreach (var toolName in new[]
                  {
@@ -169,6 +169,116 @@ public sealed class ToolProfileTests
                 tools[toolName].JsonSchema.GetRawText().Length,
                 Is.LessThanOrEqualTo(4096),
                 $"{toolName} input schema exceeded the compact-profile character budget.");
+        }
+    }
+
+    [Test]
+    public async Task Core_profile_exposes_interaction_policy_on_session_and_action_tools()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(
+            serverExe,
+            toolProfile: null,
+            environmentVariables: new Dictionary<string, string?> { ["WPF_TOOLS_MCP_TOOL_PROFILE"] = null });
+
+        var tools = (await mcp.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var policyAwareTools = new[]
+        {
+            "launch_app",
+            "attach_to_app",
+            "set_active_window",
+            "click_element",
+            "invoke",
+            "type_text",
+            "set_value",
+            "select_item",
+            "scroll_to_element",
+            "drag"
+        };
+
+        foreach (var toolName in policyAwareTools)
+        {
+            Assert.That(
+                GetInputPropertyNames(tools[toolName]),
+                Does.Contain("interactionPolicy"),
+                $"{toolName} should expose a per-session or per-operation interaction policy.");
+            Assert.That(
+                GetInputObjectPropertyNames(tools[toolName], "interactionPolicy"),
+                Is.EqualTo(new[] { "allowForegroundActivation", "allowPhysicalInput" }),
+                $"{toolName} should expose the complete nested interaction policy.");
+        }
+    }
+
+    [Test]
+    public async Task Diagnostics_profile_exposes_interaction_policy_on_all_action_tools()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+
+        var tools = (await mcp.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var policyAwareTools = new[]
+        {
+            "launch_app",
+            "attach_to_app",
+            "set_active_window",
+            "set_window_bounds",
+            "set_window_state",
+            "click_element",
+            "mouse_click",
+            "invoke",
+            "type_text",
+            "set_value",
+            "select_item",
+            "scroll_to_element",
+            "drag"
+        };
+
+        foreach (var toolName in policyAwareTools)
+        {
+            Assert.That(
+                GetInputPropertyNames(tools[toolName]),
+                Does.Contain("interactionPolicy"),
+                $"{toolName} should expose a per-session or per-operation interaction policy.");
+            Assert.That(
+                GetInputObjectPropertyNames(tools[toolName], "interactionPolicy"),
+                Is.EqualTo(new[] { "allowForegroundActivation", "allowPhysicalInput" }),
+                $"{toolName} should expose the complete nested interaction policy.");
+        }
+    }
+
+    [Test]
+    public async Task Launch_policy_is_resolved_and_reported_by_the_session()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        var appExe = TestAppPaths.FindTestAppExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: null);
+
+        var launch = await mcp.CallToolAsync<LaunchAppResponse>("launch_app", new Dictionary<string, object?>
+        {
+            ["exePath"] = appExe,
+            ["workingDirectory"] = Path.GetDirectoryName(appExe)!,
+            ["interactionPolicy"] = new Dictionary<string, object?>
+            {
+                ["allowForegroundActivation"] = false
+            }
+        });
+
+        try
+        {
+            Assert.That(launch.InteractionPolicy, Is.Not.Null);
+            Assert.That(launch.InteractionPolicy!.AllowForegroundActivation, Is.False);
+            Assert.That(launch.InteractionPolicy.AllowPhysicalInput, Is.True);
+
+            var sessions = await mcp.CallToolAsync<ListSessionsResponse>(
+                "list_sessions",
+                new Dictionary<string, object?>());
+            var session = sessions.Sessions.Single(item => item.SessionId == launch.SessionId);
+
+            Assert.That(session.InteractionPolicy, Is.EqualTo(launch.InteractionPolicy));
+        }
+        finally
+        {
+            await CloseSessionBestEffortAsync(mcp, launch.SessionId);
         }
     }
 
@@ -601,6 +711,27 @@ public sealed class ToolProfileTests
         }
 
         return properties
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string[] GetInputObjectPropertyNames(McpClientTool tool, string inputPropertyName)
+    {
+        var schema = tool.JsonSchema;
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var inputProperties) ||
+            inputProperties.ValueKind != JsonValueKind.Object ||
+            !inputProperties.TryGetProperty(inputPropertyName, out var inputProperty) ||
+            inputProperty.ValueKind != JsonValueKind.Object ||
+            !inputProperty.TryGetProperty("properties", out var nestedProperties) ||
+            nestedProperties.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return nestedProperties
             .EnumerateObject()
             .Select(property => property.Name)
             .OrderBy(name => name, StringComparer.Ordinal)

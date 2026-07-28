@@ -1,16 +1,37 @@
-﻿{
+{
   SelectCell: {
     Clicked: true,
-    MethodUsed: mouse
+    MethodUsed: mouse,
+    Effects: {
+      Semantic: false,
+      WindowRestored: false,
+      MouseInput: true,
+      KeyboardInput: false,
+      CursorMoved: true
+    }
   },
   StatusBefore: Selected: Alice (Age=30),
   EnterEdit: {
     Clicked: true,
-    MethodUsed: mouse
+    MethodUsed: mouse,
+    Effects: {
+      Semantic: false,
+      WindowRestored: false,
+      MouseInput: true,
+      KeyboardInput: false,
+      CursorMoved: true
+    }
   },
   Typed: {
     Typed: true,
-    MethodUsed: keyboard
+    MethodUsed: wpf_textBoxText,
+    Effects: {
+      Semantic: true,
+      WindowRestored: false,
+      MouseInput: false,
+      KeyboardInput: false,
+      CursorMoved: false
+    }
   },
   StatusAfter: Selected: Alicia (Age=30)
 }

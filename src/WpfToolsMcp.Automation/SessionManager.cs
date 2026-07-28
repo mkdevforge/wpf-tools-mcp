@@ -10,12 +10,18 @@ public sealed class SessionManager : IDisposable
     {
         private readonly object _sync = new();
 
-        public SessionState(string sessionId, AutomationController controller, int pid, string processName)
+        public SessionState(
+            string sessionId,
+            AutomationController controller,
+            int pid,
+            string processName,
+            EffectiveInteractionPolicy interactionPolicy)
         {
             SessionId = sessionId;
             Controller = controller;
             Pid = pid;
             ProcessName = processName;
+            InteractionPolicy = interactionPolicy;
             CreatedAtUtc = DateTimeOffset.UtcNow.ToString("O");
         }
 
@@ -23,6 +29,7 @@ public sealed class SessionManager : IDisposable
         public AutomationController Controller { get; }
         public int Pid { get; }
         public string ProcessName { get; }
+        public EffectiveInteractionPolicy InteractionPolicy { get; }
         public string CreatedAtUtc { get; }
 
         public long ActiveWindowHandle { get; private set; }
@@ -87,7 +94,13 @@ public sealed class SessionManager : IDisposable
         {
             var launched = await controller.LaunchAsync(request, cancellationToken);
             var sessionId = CreateSessionId();
-            var session = new SessionState(sessionId, controller, launched.Pid, launched.ProcessName);
+            var interactionPolicy = InteractionPolicyResolver.Resolve(request.InteractionPolicy);
+            var session = new SessionState(
+                sessionId,
+                controller,
+                launched.Pid,
+                launched.ProcessName,
+                interactionPolicy);
 
             if (!_sessions.TryAdd(sessionId, session))
             {
@@ -95,7 +108,11 @@ public sealed class SessionManager : IDisposable
             }
 
             await InitializeActiveWindowAsync(session, cancellationToken);
-            return new LaunchAppResponse(sessionId, launched.Pid, launched.ProcessName);
+            return new LaunchAppResponse(
+                sessionId,
+                launched.Pid,
+                launched.ProcessName,
+                interactionPolicy.ToContract());
         }
         catch
         {
@@ -113,7 +130,13 @@ public sealed class SessionManager : IDisposable
         {
             var attached = await controller.AttachAsync(request, cancellationToken);
             var sessionId = CreateSessionId();
-            var session = new SessionState(sessionId, controller, attached.Pid, attached.ProcessName);
+            var interactionPolicy = InteractionPolicyResolver.Resolve(request.InteractionPolicy);
+            var session = new SessionState(
+                sessionId,
+                controller,
+                attached.Pid,
+                attached.ProcessName,
+                interactionPolicy);
 
             if (!_sessions.TryAdd(sessionId, session))
             {
@@ -121,7 +144,11 @@ public sealed class SessionManager : IDisposable
             }
 
             await InitializeActiveWindowAsync(session, cancellationToken);
-            return new AttachToAppResponse(sessionId, attached.Pid, attached.ProcessName);
+            return new AttachToAppResponse(
+                sessionId,
+                attached.Pid,
+                attached.ProcessName,
+                interactionPolicy.ToContract());
         }
         catch
         {
@@ -195,10 +222,10 @@ public sealed class SessionManager : IDisposable
                     session.SetActiveWindow(0, "");
                 }
 
-                var focused = await session.Controller.FocusWindowAsync(new FocusWindowRequest(), cancellationToken);
-                session.SetActiveWindow(focused.Handle, focused.Title);
+                var window = await session.Controller.GetWindowMetadataAsync(cancellationToken: cancellationToken);
+                session.SetActiveWindow(window.Handle, window.Title);
 
-                var result = new GetActiveWindowResponse(focused.Handle, focused.Title);
+                var result = new GetActiveWindowResponse(window.Handle, window.Title);
                 trace?.SetSummary($"handle={result.Handle} title={result.Title}");
                 return result;
             }
@@ -233,6 +260,16 @@ public sealed class SessionManager : IDisposable
         }
 
         return (session.Controller, effectiveHandle);
+    }
+
+    public InteractionPolicy ResolveInteractionPolicy(
+        string sessionId,
+        InteractionPolicy? operationOverride = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        var session = GetSession(sessionId);
+        return InteractionPolicyResolver.Resolve(operationOverride, session.InteractionPolicy).ToContract();
     }
 
     private static string CreateSessionId() => Guid.NewGuid().ToString("N");
@@ -281,7 +318,8 @@ public sealed class SessionManager : IDisposable
             ActiveWindowTitle: title,
             CreatedAtUtc: session.CreatedAtUtc,
             BackendCapabilities: capabilities,
-            BackendCapabilityStates: capabilityStates);
+            BackendCapabilityStates: capabilityStates,
+            InteractionPolicy: session.InteractionPolicy.ToContract());
     }
 
     private static async Task RefreshBackendCapabilitiesAsync(SessionState session, CancellationToken cancellationToken)
@@ -305,10 +343,10 @@ public sealed class SessionManager : IDisposable
     {
         try
         {
-            var focused = await session.Controller.RunExclusiveAsync(
-                () => session.Controller.FocusWindowAsync(new FocusWindowRequest(), cancellationToken),
+            var window = await session.Controller.RunExclusiveAsync(
+                () => session.Controller.GetWindowMetadataAsync(cancellationToken: cancellationToken),
                 cancellationToken);
-            session.SetActiveWindow(focused.Handle, focused.Title);
+            session.SetActiveWindow(window.Handle, window.Title);
         }
         catch
         {

@@ -14,7 +14,7 @@ When using AI coding assistants to build WPF applications, the developer is the 
 An MCP server that gives AI models the ability to see and interact with running WPF applications using a hybrid WPF-agent and FlaUI/UIA approach.
 
 - **Snoop** (Ms-PL-licensed) is injected into the target process to provide deep WPF-native inspection of the real visual tree, live binding status, DataContext objects, dependency property values, styles, and templates. Snoop.Core already handles hard WPF edge cases that would be costly to reimplement.
-- **FlaUI** (UIA3) operates out-of-process for window management, UIA inspection, and most interaction. The WPF agent also assists with WPF handle resolution, scrolling, and supported native value-setting paths when UIA alone is insufficient.
+- **FlaUI** (UIA3) operates out-of-process for window management, UIA inspection, semantic actions, and physical fallbacks. The WPF agent also assists with WPF handle resolution, scrolling, and supported native semantic actions.
 
 This hybrid gives the AI model WPF-native inspection depth alongside the interaction capability of an automation framework, without requiring source changes to the target application.
 
@@ -102,7 +102,7 @@ The injected agent (`WpfToolsMcp.Agent`) is a thin assembly that:
                           └───────────────────────────────┘
 ```
 
-The MCP server manages both channels in Phase 2. Backend-neutral inspection tools route through the named pipe for deep WPF data and fall back to FlaUI/UIA when they have a UIA equivalent. WPF-only diagnostics require the agent. Interaction is primarily handled by FlaUI, with agent-assisted WPF handle resolution and supported WPF-native actions. The MCP tool surface remains unified.
+The MCP server manages both channels in Phase 2. Backend-neutral inspection tools route through the named pipe for deep WPF data and fall back to FlaUI/UIA when they have a UIA equivalent. WPF-only diagnostics require the agent. Interaction is semantic-first across WPF-native and UIA patterns, with foreground and physical-input fallbacks only where needed and permitted. The MCP tool surface remains unified.
 
 ---
 
@@ -129,18 +129,18 @@ see `README.md` for the current profile split and configuration.
 | `get_uia_locators` | Export stable UIA locator recommendations for a WPF or UIA element | WPF/UIA identity, ranked locators, and FlaUI snippets |
 | `get_uia_tree` | Return a bounded UIA automation tree for a window or subtree | UIA identity, paths, and children |
 
-### Phase 1 — Interaction (FlaUI)
+### Phase 1 — Interaction (WPF / UIA)
 
 | Tool | Description | Parameters |
 |---|---|---|
-| `click_element` | Click an element | Locator strategy + optional click type (single/double/right) |
-| `mouse_click` | Click at a coordinate (Playwright-style) | `x`, `y`, `coordSpace` (screen/client), button, clickType |
-| `type_text` | Type text into a focused or specified element | Locator + text. Supports ValuePattern or keyboard input fallback. |
-| `set_value` | Set value directly via ValuePattern | Locator + value |
-| `select_item` | Select item in combo box, list box, tab control | Locator + item identifier (`text`, `index`, or `itemLocator`) |
-| `invoke` | Invoke a button or menu item via InvokePattern | Locator |
+| `click_element` | Click semantic-first, with mouse fallback when allowed | Locator strategy + optional click type (single/double/right) and click mode |
+| `mouse_click` | Send physical mouse input at a coordinate (Playwright-style) | `x`, `y`, `coordSpace` (screen/client), button, clickType |
+| `type_text` | Set text semantically, with keyboard input fallback when allowed | Locator + text |
+| `set_value` | Set a value through WPF-native or UIA value semantics | Locator + value |
+| `select_item` | Select semantically, with mouse fallback when allowed | Locator + item identifier (`text`, `index`, or `itemLocator`) |
+| `invoke` | Invoke through WPF-native or UIA semantic patterns | Locator |
 | `scroll_to_element` | Scroll a container to bring an element into view | Locator of the target element |
-| `drag` | Drag from an element to another element or to screen coordinates | Source locator/elementId + target locator/elementId or `toX/toY` |
+| `drag` | Send physical pointer input from an element to another element or screen coordinates | Source locator/elementId + target locator/elementId or `toX/toY` |
 | `wait_for` | Wait for an element to satisfy a state | Locator/elementId + state + timeout |
 | `get_active_window` | Get the active window for this session | `sessionId` |
 | `set_active_window` | Bring a window to the foreground and set it as the session’s active window | `sessionId` + window handle or title |
@@ -151,10 +151,35 @@ see `README.md` for the current profile split and configuration.
 
 | Tool | Description | Parameters |
 |---|---|---|
-| `launch_app` | Start a WPF application | Executable path, optional arguments, working directory |
-| `attach_to_app` | Attach to an already-running process | Process name or PID |
+| `launch_app` | Start a WPF application and create a session | Executable path, optional arguments, working directory, interaction policy |
+| `attach_to_app` | Attach to an already-running process without activating it | Process name or PID, interaction policy |
 | `close_session` | Close a session (and close the attached application) | `sessionId` + graceful close with optional force kill timeout |
-| `list_sessions` | List active sessions and confirmed backend capability state | None |
+| `list_sessions` | List active sessions, effective interaction policies, and confirmed backend capability state | None |
+
+### Desktop Interaction Policy
+
+Read-only inspection, attachment, and screenshots do not activate the target or
+send physical input. A session receives an `interactionPolicy` at launch or
+attach. The compatibility default permits both foreground activation and
+physical input. A nullable policy supplied to an individual interaction or
+window operation overrides only its non-null fields; omitted fields inherit the
+session values.
+
+The strict background policy is
+`{ "allowForegroundActivation": false, "allowPhysicalInput": false }`.
+Semantic WPF/UIA actions remain available under that policy. If an operation
+would need forbidden foreground activation or physical input, it fails before
+that fallback with `interaction_policy_blocked`. Callers can use a
+narrow per-operation override, `set_active_window` for intentional activation,
+or an explicit physical operation such as `mouse_click`, `drag`, or
+`click_element` with `clickMode: "mouseAlways"`.
+
+Interaction responses expose `Effects` for the mechanism actually used:
+`Semantic`, `ForegroundActivated`, `WindowRestored`, `MouseInput`,
+`KeyboardInput`, and `CursorMoved`; where available, `MethodUsed` identifies the
+specific path. The policy and effects cover automation performed by this
+server. Code reached by a semantic invocation can independently open, restore,
+or activate the application's own windows.
 
 ### Phase 2 — Upgraded inspection (Snoop, in-process)
 
@@ -225,6 +250,8 @@ large app with scenario pages:
 - `WpfToolsMcp.TestApp.DeeplyNested`: deep paths and traversal limits.
 - `WpfToolsMcp.TestApp.Dialogs`: modal windows and window targeting.
 - `WpfToolsMcp.TestApp.DynamicContent`: changing trees and stale handles.
+- `WpfToolsMcp.TestApp.FocusProbe`: foreground ownership, cursor preservation,
+  activation counters, and semantic versus physical fallback behavior.
 - `WpfToolsMcp.TestApp.Scroll`: off-viewport discovery and scrolling.
 - `WpfToolsMcp.TestApp.Tabs`: tab selection with nested selectable content.
 - `WpfToolsMcp.TestApp.TreeView`: hierarchical selection.

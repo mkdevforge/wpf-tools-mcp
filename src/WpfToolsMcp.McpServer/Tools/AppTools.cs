@@ -17,6 +17,7 @@ public static class AppTools
         [Description("Optional working directory")] string? workingDirectory = null,
         [Description("How long to wait for the app main window before considering fallback logic (ms)")] int waitForMainWindowMs = 15000,
         [Description("If launch cannot resolve a main window, try attaching to an existing instance")] bool reuseExistingInstance = true,
+        [Description("Session interaction policy")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
             sessions.LaunchAppAsync(
@@ -25,7 +26,8 @@ public static class AppTools
                     args,
                     workingDirectory,
                     waitForMainWindowMs,
-                    reuseExistingInstance),
+                    reuseExistingInstance,
+                    interactionPolicy),
                 cancellationToken));
 
     [McpServerTool(Name = "attach_to_app"), Description("Attach to an already running process.")]
@@ -33,6 +35,7 @@ public static class AppTools
         SessionManager sessions,
         [Description("Process ID")] int? pid = null,
         [Description("Process name (supports dotted names and optional .exe suffix)")] string? processName = null,
+        [Description("Session interaction policy")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default)
     {
         if (pid is not null && !string.IsNullOrWhiteSpace(processName))
@@ -41,7 +44,9 @@ public static class AppTools
         }
 
         return McpToolErrors.RunAsync(() =>
-            sessions.AttachToAppAsync(new AttachToAppRequest(pid, processName), cancellationToken));
+            sessions.AttachToAppAsync(
+                new AttachToAppRequest(pid, processName, interactionPolicy),
+                cancellationToken));
     }
 
     [McpServerTool(Name = "close_session"), Description("Remove a session and close the attached application; Closed means the session was removed, with process state reported separately.")]

@@ -1,5 +1,13 @@
-﻿{
+{
   Selected: {
-    Selected: true
+    Selected: true,
+    MethodUsed: comboBoxSelect,
+    Effects: {
+      Semantic: true,
+      WindowRestored: false,
+      MouseInput: false,
+      KeyboardInput: false,
+      CursorMoved: false
+    }
   }
 }

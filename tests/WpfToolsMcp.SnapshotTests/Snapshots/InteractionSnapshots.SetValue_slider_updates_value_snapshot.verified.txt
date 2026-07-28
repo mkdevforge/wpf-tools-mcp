@@ -1,7 +1,14 @@
-﻿{
+{
   Set: {
     Set: true,
-    MethodUsed: wpf_rangeBaseValue
+    MethodUsed: wpf_rangeBaseValue,
+    Effects: {
+      Semantic: true,
+      WindowRestored: false,
+      MouseInput: false,
+      KeyboardInput: false,
+      CursorMoved: false
+    }
   },
   Value: 70.0
 }

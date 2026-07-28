@@ -4,10 +4,11 @@ WPF Tools MCP is a Windows-only MCP server for inspecting, controlling, and
 diagnosing running WPF applications.
 
 - **Out-of-process automation:** FlaUI/UIA3 provides window management, UI
-  Automation inspection, screenshots, and most interaction.
+  Automation inspection, screenshots, semantic actions, and physical fallbacks.
 - **In-process WPF inspection:** an injected agent, built on Snoop, exposes the
   WPF visual tree, bindings, DataContext values, dependency properties, styles,
-  templates, highlighting, and UI-thread latency.
+  templates, highlighting, UI-thread latency, and supported WPF-native semantic
+  actions.
 - **Transport:** MCP uses stdio; the server and injected agent communicate over
   a current-user-only named pipe.
 
@@ -95,6 +96,52 @@ The `diagnostics` profile additionally exposes:
 - `subscribe_binding_errors`, `poll_subscription`, and `unsubscribe`.
 - `trace_start`, `trace_stop`, `performance_start`, and `performance_stop`.
 
+### Desktop Interaction Policy
+
+Attaching to a process, inspecting it, and taking screenshots do not activate
+the target window or send physical input. Interaction tools are semantic-first:
+they prefer WPF or UI Automation patterns and direct value operations that can
+run in the background, then use foreground activation or mouse/keyboard input
+only when a supported fallback requires it.
+
+Set an `interactionPolicy` on `launch_app` or `attach_to_app` to establish the
+session policy. Omitting it preserves compatibility: both foreground activation
+and physical input are allowed. Interaction and window operations accept a
+nullable per-operation override; each omitted field inherits its session value.
+For a background-only session, use:
+
+```json
+{
+  "interactionPolicy": {
+    "allowForegroundActivation": false,
+    "allowPhysicalInput": false
+  }
+}
+```
+
+Under this strict policy, semantic operations can still succeed without taking
+focus. An operation whose only remaining path requires a forbidden effect fails
+before that fallback with `interaction_policy_blocked`. A one-call override can
+allow only the needed effect. Use `set_active_window` when foreground activation
+is intentional; `mouse_click`, `drag`, or `click_element` with
+`clickMode: "mouseAlways"` are explicit physical-input choices.
+
+Interaction responses report what the tool actually did in `Effects`:
+
+| Field | Meaning |
+|---|---|
+| `Semantic` | Used a WPF/UIA pattern or direct semantic operation. |
+| `ForegroundActivated` | Brought the target window to the foreground. |
+| `WindowRestored` | Restored a window as part of the operation. |
+| `MouseInput` | Sent physical mouse input. |
+| `KeyboardInput` | Sent physical keyboard input. |
+| `CursorMoved` | Moved the system pointer. |
+
+Where available, `MethodUsed` provides the more specific mechanism. These
+fields describe MCP automation, not arbitrary side effects of the invoked
+application code. For example, a semantic command handler may independently
+open or activate one of its own windows.
+
 ### Response Budgets
 
 Responses are concise and bounded by default. Increase a tool's explicit limit
@@ -126,9 +173,10 @@ common-workflow rationale plus inventory and compact-schema contract coverage.
 
 ## Typical Workflow
 
-1. Call `launch_app` or `attach_to_app` and retain the returned `sessionId`.
-2. Use `list_windows` and `set_active_window` when the process owns more than
-   one top-level window.
+1. Call `launch_app` or `attach_to_app`, optionally set the session
+   `interactionPolicy`, and retain the returned `sessionId`.
+2. Use `list_windows` to choose among top-level windows. Call
+   `set_active_window` only when foreground activation is intended.
 3. Inspect with `get_visual_tree` or `find_elements`, then retain an
    `elementId` from `resolve_element` for follow-up calls.
 4. Interact, wait for the expected state, and inspect again to verify the
@@ -147,9 +195,9 @@ inspection, require successful injection.
   may still be available.
 - Injection can be blocked by process elevation, user boundaries, or endpoint
   security software.
-- UIA-based actions depend on useful automation peers and patterns. A custom
-  control with no actionable UIA peer may be inspectable through WPF but not
-  invokable through UI Automation.
+- Semantic actions depend on useful WPF or UIA automation peers and patterns. A
+  custom control without an actionable peer may remain inspectable but require
+  a physical fallback, if the session policy permits one.
 - Multi-monitor coordinates use the Windows virtual screen and may be negative.
 
 ## Development

@@ -1,6 +1,14 @@
-﻿{
+{
   Selected: {
-    Selected: true
+    Selected: true,
+    MethodUsed: selectionItem,
+    Effects: {
+      Semantic: true,
+      WindowRestored: false,
+      MouseInput: false,
+      KeyboardInput: false,
+      CursorMoved: false
+    }
   },
   Status: Selected: Item 75
 }
