@@ -156,6 +156,33 @@ public static class AgentTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "get_layout_context"), Description("Inspect WPF layout metrics, transforms, clipping, ancestors, nearby siblings, and Grid allocation via the injected agent.")]
+    public static Task<GetLayoutContextResponse> GetLayoutContext(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator (WPF XPath recommended)")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
+        [Description("Native window handle")] long? windowHandle = null,
+        [Description("Maximum ancestors returned (hard limit 32)")] int maxAncestors = 6,
+        [Description("Maximum nearby siblings returned across the ancestor chain (hard limit 128)")] int maxSiblings = 8,
+        [Description("Maximum Grid row/column definitions returned globally (hard limit 256)")] int maxGridDefinitions = 32,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.GetLayoutContextAsync(
+                    locator,
+                    elementId,
+                    hasElementId ? windowHandle : effectiveWindowHandle,
+                    maxAncestors,
+                    maxSiblings,
+                    maxGridDefinitions,
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "get_style_chain"), Description("Inspect the style chain for a WPF element via the injected agent.")]
     public static Task<GetStyleChainResponse> GetStyleChain(
         SessionManager sessions,

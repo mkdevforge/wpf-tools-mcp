@@ -52,8 +52,8 @@ agent workflows:
 
 | Profile | Tools | Purpose |
 |---|---:|---|
-| `core` (default) | 28 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 51 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `core` (default) | 29 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
+| `diagnostics` | 52 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Enable the full profile with a command argument:
 
@@ -85,7 +85,7 @@ The `core` profile exposes:
 - **Interaction and synchronization:** `click_element`, `invoke`, `type_text`,
   `set_value`, `select_item`, `scroll_to_element`, `drag`, `wait_for`.
 - **WPF diagnostics:** `get_binding_info`, `get_binding_errors`,
-  `get_data_context`, `get_computed_properties`.
+  `get_data_context`, `get_computed_properties`, `get_layout_context`.
 
 The `diagnostics` profile additionally exposes:
 
@@ -97,6 +97,39 @@ The `diagnostics` profile additionally exposes:
 - `subscribe_binding_errors`, `subscribe_property_changes`,
   `poll_subscription`, and `unsubscribe`.
 - `trace_start`, `trace_stop`, `performance_start`, and `performance_stop`.
+
+### WPF Layout Context
+
+`get_layout_context` is a bounded WPF-only relational snapshot for explaining
+why an element occupies its current space. It reports target layout metrics,
+nearest-first ancestors, relevant direct visual siblings, and allocation in
+ancestor `Grid` panels. Sibling selection prioritizes `GridSplitter` and
+grid-adjacent evidence; nested identities are compact and never allocate
+reusable element handles. Selected siblings include bounds in both their own
+parent and the common window coordinate space, plus physical screen bounds,
+so gaps can be compared even when the elements have different parents.
+
+WPF dimensions are DIPs unless a field is explicitly named
+`ScreenBoundsPhysicalPixels`; DPI scales are returned beside both coordinate
+systems. Configured `Auto` values and unbounded maximums use typed length
+states rather than JSON `NaN` or `Infinity`. For Grid definitions,
+`ConfiguredValue` is omitted for `Auto`, is a DIP size for `Pixel`, and is a
+weight for `Star`. Explicit clipping, layout clipping, empty clip geometry,
+`ClipToBounds`, layout transforms, render transforms, visual index, and panel
+z-order remain distinct evidence. Missing or inapplicable fields are reported
+with stable status/reason codes instead of zero-value guesses.
+
+The compact profile fixes the budgets at 6 ancestors, 8 siblings, and 32 Grid
+definitions. The diagnostics profile exposes those three controls, with agent
+hard limits of 32, 128, and 256 respectively. Counts and ordered truncation
+reasons distinguish discovered context from returned context. Unavailable
+evidence is independently capped at 128 records; reaching it adds
+`maxUnavailableEvidence` to `TruncatedReasons`.
+
+The tool requires an agent that advertises the layout-context capability. If a
+target still hosts an older injected agent, restart the target application,
+start a new MCP session, and attach again; the server rejects the unsupported
+call before sending it to that agent.
 
 ### Live WPF State Observation
 
@@ -279,6 +312,7 @@ complete controls live in the `diagnostics` profile when exposing them in
 | `get_element_properties` | Summary preset, at most 25 selected UIA properties; values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, with one shared 20,000-character serialized-value budget. XPaths over 2,000 characters are omitted rather than returned incomplete. | Select the `full` preset and an explicit `maxProperties` in `diagnostics` | `ReturnedProperties`, `SelectedProperties`, `ScannedProperties`, `Truncated`, `TruncatedReason`, `TruncatedReasons` |
 | `get_binding_errors` | Depth 6, at most 200 errors while scanning at most 2,000 nodes | Set the error, depth, and scan limits in `diagnostics` | `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_data_context` | Summary mode, depth 2, at most 50 properties per object and 2,000 characters per string | Use the additional mode and size controls in `diagnostics` | `Truncated` and bounded warnings |
+| `get_layout_context` | 6 nearest ancestors, 8 relevant siblings, 32 Grid definitions, and up to 128 unavailable-evidence records | Set `maxAncestors`, `maxSiblings`, or `maxGridDefinitions` in `diagnostics`; unavailable evidence keeps its fixed 128-record cap | Discovered/returned counts for ancestors, siblings, Grid contexts, definitions, and unavailable evidence; ordered `TruncatedReasons` including `maxUnavailableEvidence` |
 | `trace_stop` | Writes the complete trace artifact but returns no inline events | Set `includeEvents=true`; at most 100 events are returned by default and `maxEvents` is capped at 1,000 | `EventCount`, `ReturnedEventCount`, `Truncated`, `TruncatedReason` |
 
 When `Truncated` is true, `TruncatedReason` names the budget that was reached.
@@ -301,7 +335,8 @@ common-workflow rationale plus inventory and compact-schema contract coverage.
    `set_active_window` only when foreground activation is intended.
 3. For responsive-layout evidence, use `set_window_viewport` to establish the
    exact client size and request `includeViewport` with screenshots.
-4. Inspect with `get_visual_tree` or `find_elements`, then retain an
+4. Inspect with `get_visual_tree` or `find_elements`, use
+   `get_layout_context` for WPF spacing/allocation evidence, then retain an
    `elementId` from `resolve_element` for follow-up calls.
 5. Interact, wait for the expected state, and inspect again to verify the
    result.
@@ -310,8 +345,8 @@ common-workflow rationale plus inventory and compact-schema contract coverage.
 
 In the core profile, inspection tools that support both backends prefer the WPF
 agent and fall back when a UIA equivalent exists. Tree and search responses
-include fallback warnings. WPF-only tools, such as binding and DataContext
-inspection, require successful injection.
+include fallback warnings. WPF-only tools, such as binding, DataContext, and
+layout context inspection, require successful injection.
 
 ## Limitations
 

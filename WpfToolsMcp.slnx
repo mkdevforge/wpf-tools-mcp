@@ -15,6 +15,7 @@
     <Project Path="src/WpfToolsMcp.TestApp.DynamicContent/WpfToolsMcp.TestApp.DynamicContent.csproj" />
     <Project Path="src/WpfToolsMcp.TestApp.FocusProbe/WpfToolsMcp.TestApp.FocusProbe.csproj" />
     <Project Path="src/WpfToolsMcp.TestApp.LifecycleProbe/WpfToolsMcp.TestApp.LifecycleProbe.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.LayoutProbe/WpfToolsMcp.TestApp.LayoutProbe.csproj" />
     <Project Path="src/WpfToolsMcp.TestApp.ObservationProbe/WpfToolsMcp.TestApp.ObservationProbe.csproj" />
     <Project Path="src/WpfToolsMcp.TestApp.Scroll/WpfToolsMcp.TestApp.Scroll.csproj" />
     <Project Path="src/WpfToolsMcp.TestApp.Tabs/WpfToolsMcp.TestApp.Tabs.csproj" />

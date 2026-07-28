@@ -1,0 +1,274 @@
+<Window x:Class="WpfToolsMcp.TestApp.LayoutProbe.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AutomationProperties.AutomationId="LayoutProbe_Window"
+        Title="WPF Tools MCP LayoutProbe TestApp"
+        Width="900"
+        Height="650"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        Left="120"
+        Top="100"
+        Background="White"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Window.Resources>
+        <ControlTemplate x:Key="LayoutProbeButtonTemplate"
+                         TargetType="Button">
+            <Border x:Name="PART_Surface"
+                    AutomationProperties.AutomationId="LayoutProbe_TemplatePart"
+                    Padding="5"
+                    Background="#FFE0E7FF"
+                    BorderBrush="#FF4338CA"
+                    BorderThickness="1">
+                <ContentPresenter HorizontalAlignment="Center"
+                                  VerticalAlignment="Center" />
+            </Border>
+        </ControlTemplate>
+    </Window.Resources>
+
+    <Grid AutomationProperties.AutomationId="LayoutProbe_Root"
+          Width="820"
+          Height="570"
+          Background="White">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="360" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock AutomationProperties.AutomationId="LayoutProbe_Heading"
+                   Margin="12,8"
+                   FontSize="18"
+                   Text="Layout context probe" />
+
+        <Grid Grid.Row="1"
+              AutomationProperties.AutomationId="LayoutProbe_OuterGrid"
+              Margin="18,8,18,12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="240" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="190" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Row="0"
+                    Grid.Column="0"
+                    AutomationProperties.AutomationId="LayoutProbe_OuterDecoy"
+                    Height="16"
+                    Background="#FFE5E7EB" />
+
+            <Button Grid.Row="0"
+                    Grid.Column="2"
+                    AutomationProperties.AutomationId="LayoutProbe_TemplatedButton"
+                    Width="130"
+                    Height="28"
+                    HorizontalAlignment="Right"
+                    Template="{StaticResource LayoutProbeButtonTemplate}"
+                    Content="template owner" />
+
+            <Border Grid.Row="1"
+                    Grid.Column="0"
+                    Grid.ColumnSpan="3"
+                    AutomationProperties.AutomationId="LayoutProbe_PaddedCard"
+                    Margin="7,9,11,13"
+                    Padding="14,10,18,12"
+                    BorderBrush="#FF64748B"
+                    BorderThickness="2"
+                    Background="#FFF8FAFC">
+                <Grid AutomationProperties.AutomationId="LayoutProbe_AllocationGrid">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="54" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="180" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0"
+                               Grid.ColumnSpan="4"
+                               AutomationProperties.AutomationId="LayoutProbe_AllocationHeading"
+                               Margin="2"
+                               Text="Pixel, Auto, and Star allocation" />
+
+                    <Grid Grid.Row="1"
+                          Grid.Column="0"
+                          AutomationProperties.AutomationId="LayoutProbe_TargetHostGrid">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="0" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="0" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="0" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="0" />
+                            <ColumnDefinition Width="0" />
+                            <ColumnDefinition Width="0" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Row="1"
+                                Grid.Column="1"
+                                AutomationProperties.AutomationId="LayoutProbe_SpacingTarget"
+                                Width="120"
+                                Height="72"
+                                Margin="11,7,13,9"
+                                Padding="9,5,7,3"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Top"
+                                Panel.ZIndex="7"
+                                BorderBrush="#FF2563EB"
+                                BorderThickness="1"
+                                Background="#FFDBEAFE">
+                            <TextBlock Text="spacing target" />
+                        </Border>
+
+                        <Border Grid.Row="1"
+                                Grid.Column="1"
+                                AutomationProperties.AutomationId="LayoutProbe_NearDecoy"
+                                Width="38"
+                                Height="38"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Bottom"
+                                Background="#FFFDE68A" />
+
+                        <Border Grid.Row="1"
+                                Grid.Column="1"
+                                AutomationProperties.AutomationId="LayoutProbe_SecondDecoy"
+                                Width="30"
+                                Height="30"
+                                Margin="0,0,42,0"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Background="#FFFCA5A5" />
+
+                        <GridSplitter Grid.Row="0"
+                                      Grid.RowSpan="3"
+                                      Grid.Column="4"
+                                      AutomationProperties.AutomationId="LayoutProbe_UnrelatedSplitter"
+                                      Width="4"
+                                      HorizontalAlignment="Stretch"
+                                      ResizeDirection="Columns"
+                                      ResizeBehavior="PreviousAndCurrent"
+                                      Background="#FFDC2626" />
+                    </Grid>
+
+                    <Border Grid.Row="1"
+                            Grid.RowSpan="2"
+                            Grid.Column="1"
+                            AutomationProperties.AutomationId="LayoutProbe_DedicatedSpacer"
+                            Visibility="Hidden"
+                            Background="Transparent" />
+
+                    <Button Grid.Row="2"
+                            Grid.Column="3"
+                            AutomationProperties.AutomationId="LayoutProbe_AutoTarget"
+                            Margin="4"
+                            HorizontalAlignment="Left"
+                            Content="Auto width" />
+
+                    <GridSplitter Grid.Row="1"
+                                  Grid.RowSpan="2"
+                                  Grid.Column="2"
+                                  AutomationProperties.AutomationId="LayoutProbe_Splitter"
+                                  Width="8"
+                                  Margin="3,0,5,0"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  ResizeDirection="Columns"
+                                  ResizeBehavior="PreviousAndNext"
+                                  DragIncrement="2"
+                                  KeyboardIncrement="4"
+                                  ShowsPreview="True"
+                                  Background="#FF475569" />
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="2"
+                    Grid.Column="2"
+                    AutomationProperties.AutomationId="LayoutProbe_OuterPeer"
+                    Margin="4"
+                    Background="#FFE2E8F0" />
+        </Grid>
+
+        <Grid Grid.Row="2"
+              AutomationProperties.AutomationId="LayoutProbe_BottomGrid"
+              Margin="18,0,18,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    AutomationProperties.AutomationId="LayoutProbe_ClipHost"
+                    Width="300"
+                    Height="120"
+                    Padding="6"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    ClipToBounds="True"
+                    BorderBrush="#FF0F766E"
+                    BorderThickness="2"
+                    Background="#FFCCFBF1">
+                <Canvas AutomationProperties.AutomationId="LayoutProbe_TransformCanvas">
+                    <Border x:Name="EmptyClipTarget"
+                            AutomationProperties.AutomationId="LayoutProbe_EmptyClipTarget"
+                            Canvas.Left="12"
+                            Canvas.Top="12"
+                            Width="24"
+                            Height="24"
+                            Background="#FF0F766E" />
+
+                    <Border AutomationProperties.AutomationId="LayoutProbe_TransformedTarget"
+                            Canvas.Left="210"
+                            Canvas.Top="36"
+                            Width="96"
+                            Height="48"
+                            Panel.ZIndex="11"
+                            Background="#FF99F6E4"
+                            BorderBrush="#FF115E59"
+                            BorderThickness="1"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.Clip>
+                            <RectangleGeometry Rect="4,3,80,36" />
+                        </Border.Clip>
+                        <Border.LayoutTransform>
+                            <ScaleTransform ScaleX="1.05" ScaleY="1.1" />
+                        </Border.LayoutTransform>
+                        <Border.RenderTransform>
+                            <RotateTransform Angle="15" />
+                        </Border.RenderTransform>
+                        <TextBlock HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Text="transform" />
+                    </Border>
+                </Canvas>
+            </Border>
+
+            <Grid Grid.Column="2"
+                  AutomationProperties.AutomationId="LayoutProbe_ImplicitGrid"
+                  Width="180"
+                  Height="110"
+                  HorizontalAlignment="Right"
+                  VerticalAlignment="Top"
+                  Background="#FFF1F5F9">
+                <Border Grid.Row="4"
+                        Grid.Column="3"
+                        Grid.RowSpan="3"
+                        Grid.ColumnSpan="2"
+                        AutomationProperties.AutomationId="LayoutProbe_ImplicitTarget"
+                        Margin="8"
+                        Background="#FFDDD6FE" />
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

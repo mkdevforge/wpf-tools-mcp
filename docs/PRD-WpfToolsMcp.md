@@ -97,6 +97,7 @@ The injected agent (`WpfToolsMcp.Agent`) is a thin assembly that:
                           │     │  - Binding status      │ │
                           │     │  - DataContext          │ │
                           │     │  - Dependency props     │ │
+                          │     │  - Layout context       │ │
                           │     │  - Styles & templates   │ │
                           │     └───────────────────────┘ │
                           └───────────────────────────────┘
@@ -109,7 +110,7 @@ The MCP server manages both channels in Phase 2. Backend-neutral inspection tool
 ## MCP Tools
 
 The tables below describe the full `diagnostics` profile. The default `core`
-profile intentionally exposes a smaller 28-tool surface with compact schemas;
+profile intentionally exposes a smaller 29-tool surface with compact schemas;
 see `README.md` for the current profile split and configuration.
 
 ### Phase 1 — Inspection (FlaUI / UIA)
@@ -258,6 +259,7 @@ Phase 2 enriches existing tools and adds new ones. When the Snoop agent is avail
 | `unsubscribe` | Unsubscribe a subscription | Unsubscribe result |
 | `get_data_context` | Serialize the DataContext of an element | JSON representation of the DataContext object, its type, and property values. Configurable depth to avoid serializing the entire object graph. |
 | `get_computed_properties` | Inspect computed dependency property values | Effective values + optional value-source details |
+| `get_layout_context` | Explain a WPF element's current layout using bounded relational evidence | Target metrics, nearest-first ancestors, relevant siblings, Grid allocation/definitions, transforms, clipping, DPI/physical bounds, unavailable evidence, and deterministic counts/truncation |
 | `get_style_chain` | Inspect the applied style chain | Style/ThemeStyle and BasedOn chain summary |
 | `get_template_info` | Inspect the applied template | Template summary + optional named parts |
 | `uia_coverage_report` | Report UIA automation coverage gaps | Findings + suggestions (e.g., missing AutomationPeers/patterns) |
@@ -304,6 +306,10 @@ large app with scenario pages:
 - `WpfToolsMcp.TestApp.CustomControls`: user controls and templated controls.
 - `WpfToolsMcp.TestApp.DataGrid`: editing, selection, and complex traversal.
 - `WpfToolsMcp.TestApp.DeeplyNested`: deep paths and traversal limits.
+- `WpfToolsMcp.TestApp.LayoutProbe`: deterministic spacing, Pixel/Auto/Star
+  Grid allocation, dedicated spacer columns, splitter ownership, implicit
+  cells, empty and bounded clipping, transforms, z-order, and comparable
+  window-DIP/physical-screen bounds.
 - `WpfToolsMcp.TestApp.Dialogs`: modal windows and window targeting.
 - `WpfToolsMcp.TestApp.DynamicContent`: changing trees and stale handles.
 - `WpfToolsMcp.TestApp.FocusProbe`: foreground ownership, cursor preservation,
@@ -334,7 +340,7 @@ real stdio MCP server. Coverage includes:
 - session lifecycle, restart/reconnect, active-window recovery, and element
   handle recovery;
 - UIA and WPF tree inspection, locator export, properties, bindings,
-  DataContext, styles, templates, and coverage diagnostics;
+  DataContext, layout context, styles, templates, and coverage diagnostics;
 - clicks, invocation, typing, value setting, selection, drag, scrolling, and
   waits;
 - screenshots, annotations, highlighting, deterministic viewport sizing and
@@ -456,6 +462,7 @@ The MCP tool surface is extended — new tools are added and existing inspection
 
 #### P2-M2 — Deep diagnostics
 - New tool: `get_data_context` with configurable serialization depth and cycle detection
+- New tool: `get_layout_context` with compact default budgets and expanded diagnostics controls for WPF-only relational layout evidence
 - Planned `get_styles` tool (shipped as `get_style_chain` and `get_template_info`)
 - Separate BindingErrors and CustomControls test applications exercising Snoop-specific capabilities
 - Graceful fallback for backend-neutral inspection; WPF-only diagnostics report injection failures directly

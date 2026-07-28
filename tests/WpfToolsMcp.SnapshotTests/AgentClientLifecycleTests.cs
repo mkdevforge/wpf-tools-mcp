@@ -231,6 +231,61 @@ public sealed class AgentClientLifecycleTests
         }
     }
 
+    [Test]
+    public async Task Missing_layout_capability_does_not_write_or_poison_agent_pipe()
+    {
+        var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+
+        AgentClient? client = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var acceptTask = server.WaitForConnectionAsync(timeout.Token);
+            var clientTask = AgentClient.ConnectAsync(pipeName, TimeSpan.FromSeconds(2), timeout.Token);
+            await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
+            client = await clientTask;
+
+            var layoutCallInvoked = false;
+            var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                _ = await AutomationController.CallGetLayoutContextWhenSupportedAsync(
+                    new AgentCapabilitiesResponse(ProtocolVersion: 0, Capabilities: []),
+                    () =>
+                    {
+                        layoutCallInvoked = true;
+                        return client.CallAsync<string>("wpf/get_layout_context", null, CancellationToken.None);
+                    }));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(layoutCallInvoked, Is.False);
+                Assert.That(exception!.Message, Does.Contain("Restart the target application"));
+                Assert.That(exception.Message, Does.Contain("start a new MCP session"));
+            });
+
+            var pingTask = client.CallAsync<string>("ping", null, CancellationToken.None);
+            var request = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(request.Method, Is.EqualTo("ping"), "No layout request should reach a capability-missing agent.");
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(request.Id, Ok: true, Result: JsonValue.Create("pong")),
+                timeout.Token);
+            Assert.That(await pingTask.WaitAsync(TimeSpan.FromSeconds(2)), Is.EqualTo("pong"));
+        }
+        finally
+        {
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+        }
+    }
+
     private static async Task WaitUntilControllerDisposalStartsAsync(AutomationController controller)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();

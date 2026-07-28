@@ -487,6 +487,30 @@ public static class CoreWpfDiagnosticsTools
                     cancellationToken),
                 cancellationToken);
         });
+
+    [McpServerTool(Name = "get_layout_context"), Description("Inspect bounded WPF layout metrics and nearby visual context for an element.")]
+    public static Task<GetLayoutContextResponse> GetLayoutContext(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator")] CoreElementLocator? locator = null,
+        [Description("Element ID")] string? elementId = null,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.GetLayoutContextAsync(
+                    locator?.ToElementLocator(),
+                    elementId,
+                    hasElementId ? windowHandle : effectiveWindowHandle,
+                    maxAncestors: 6,
+                    maxSiblings: 8,
+                    maxGridDefinitions: 32,
+                    cancellationToken),
+                cancellationToken);
+        });
 }
 
 public static class CoreInteractionTools

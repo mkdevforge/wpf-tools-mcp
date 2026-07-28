@@ -130,10 +130,7 @@ internal static class AgentServer
                         Result: JsonSerializer.SerializeToNode(
                             new AgentCapabilitiesResponse(
                                 AgentProtocolCapabilities.CurrentProtocolVersion,
-                                [
-                                    AgentProtocolCapabilities.ResolveElementDetailed,
-                                    AgentProtocolCapabilities.FindElementsDiscoveryCounts
-                                ]),
+                                AgentProtocolCapabilities.Current),
                             JsonOptions));
                 case "wpf/get_visual_tree":
                     return await RunOnUiAsync(() =>
@@ -353,6 +350,18 @@ internal static class AgentServer
                             ?? new GetComputedPropertiesRequest();
 
                         var response = WpfVisualTreeInspector.GetComputedProperties(ownerId, typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case AgentProtocolCapabilities.GetLayoutContext:
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetLayoutContextRequest>(JsonOptions)
+                            ?? new GetLayoutContextRequest();
+
+                        var response = WpfVisualTreeInspector.GetLayoutContext(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,
