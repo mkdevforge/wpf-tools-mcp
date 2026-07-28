@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: |
+          dotnet restore src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj
+          dotnet restore tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj
+
+      - name: Build Snoop payloads
+        run: pwsh scripts/build-snoop.ps1 -Configuration Release
+
+      - name: Build
+        run: dotnet build src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj -c Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore

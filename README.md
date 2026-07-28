@@ -95,6 +95,35 @@ The `diagnostics` profile additionally exposes:
 - `subscribe_binding_errors`, `poll_subscription`, and `unsubscribe`.
 - `trace_start`, `trace_stop`, `performance_start`, and `performance_stop`.
 
+### Response Budgets
+
+Responses are concise and bounded by default. Increase a tool's explicit limit
+or select its expanded preset only when the extra evidence is needed. The
+complete controls live in the `diagnostics` profile when exposing them in
+`core` would make the common schema substantially larger.
+
+| Tool | Default response budget | Expanded evidence | Limit metadata |
+|---|---|---|---|
+| `get_visual_tree` | Depth 4, at most 500 nodes, minimal fields | Set `depth`, `maxNodes`, `preset`, or `fields` in `diagnostics` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
+| `get_uia_tree` | Depth 4, at most 200 nodes | Increase `depth` or `maxNodes` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
+| `find_elements` | At most 25 matches while scanning at most 5,000 nodes; minimal fields | Set `maxResults`, `maxNodes`, or `returnFields` in `diagnostics` | `ReturnedMatches`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
+| `get_element_properties` | Summary preset, at most 25 selected UIA properties; values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, with one shared 20,000-character serialized-value budget. XPaths over 2,000 characters are omitted rather than returned incomplete. | Select the `full` preset and an explicit `maxProperties` in `diagnostics` | `ReturnedProperties`, `SelectedProperties`, `ScannedProperties`, `Truncated`, `TruncatedReason`, `TruncatedReasons` |
+| `get_binding_errors` | Depth 6, at most 200 errors while scanning at most 2,000 nodes | Set the error, depth, and scan limits in `diagnostics` | `ScannedNodes`, `Truncated`, `TruncatedReason` |
+| `get_data_context` | Summary mode, depth 2, at most 50 properties per object and 2,000 characters per string | Use the additional mode and size controls in `diagnostics` | `Truncated` and bounded warnings |
+| `trace_stop` | Writes the complete trace artifact but returns no inline events | Set `includeEvents=true`; at most 100 events are returned by default and `maxEvents` is capped at 1,000 | `EventCount`, `ReturnedEventCount`, `Truncated`, `TruncatedReason` |
+
+When `Truncated` is true, `TruncatedReason` names the budget that was reached.
+Counts describe the work performed and the evidence returned, so callers can
+decide whether to narrow the request or deliberately raise a limit.
+
+### Tool Evolution Policy
+
+New diagnostic depth should extend an existing concept before it creates a new
+top-level tool. Specialist controls belong in the `diagnostics` profile. A new
+tool is justified only when it has an independent lifecycle or cannot form a
+coherent part of an existing operation. Adding a tool to `core` also requires a
+common-workflow rationale plus inventory and compact-schema contract coverage.
+
 ## Typical Workflow
 
 1. Call `launch_app` or `attach_to_app` and retain the returned `sessionId`.

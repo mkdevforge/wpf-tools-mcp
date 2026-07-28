@@ -32,6 +32,31 @@ public sealed partial class AutomationController : IDisposable
     private static readonly int UiDelayScrollMs = GetEnvInt("WPF_TOOLS_MCP_UI_SCROLL_DELAY_MS", defaultValue: 15, minValue: 0, maxValue: 1000);
     private static readonly int UiDelayWindowSettleMs = GetEnvInt("WPF_TOOLS_MCP_UI_WINDOW_SETTLE_MS", defaultValue: 25, minValue: 0, maxValue: 5000);
     private static readonly bool ScreenshotDebugEnabled = GetEnvFlag("WPF_TOOLS_MCP_DEBUG_SCREENSHOT");
+    private const int MaximumElementProperties = 200;
+    internal const int MaximumUiaMappingCandidates = 10;
+    private static readonly HashSet<string> SummaryElementPropertyNames = new(StringComparer.Ordinal)
+    {
+        "AcceleratorKey",
+        "AccessKey",
+        "AriaProperties",
+        "AriaRole",
+        "ClickablePoint",
+        "FrameworkId",
+        "FullDescription",
+        "HasKeyboardFocus",
+        "HelpText",
+        "IsContentElement",
+        "IsControlElement",
+        "IsKeyboardFocusable",
+        "IsPassword",
+        "IsRequiredForForm",
+        "ItemStatus",
+        "ItemType",
+        "LabeledBy",
+        "LocalizedControlType",
+        "Orientation",
+        "ProcessId"
+    };
 
     private sealed record LastHighlightRequest(Rect Bounds, string Color, int Thickness, DateTime ExpiresAtUtc);
 
@@ -7907,6 +7932,8 @@ public sealed partial class AutomationController : IDisposable
         ElementLocator? locator = null,
         string? elementId = null,
         long? windowHandle = null,
+        ElementPropertiesPreset preset = ElementPropertiesPreset.Summary,
+        int maxProperties = 25,
         CancellationToken cancellationToken = default)
     {
         var trace = BeginTraceSpan("get_element_properties");
@@ -7917,6 +7944,19 @@ public sealed partial class AutomationController : IDisposable
         if (hasLocator == hasElementId)
         {
             throw new ArgumentException("get_element_properties requires exactly one of: locator OR elementId.");
+        }
+
+        if (!Enum.IsDefined(preset))
+        {
+            throw new ArgumentOutOfRangeException(nameof(preset), preset, "Unsupported property preset.");
+        }
+
+        if (maxProperties is < 1 or > MaximumElementProperties)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maxProperties),
+                maxProperties,
+                $"maxProperties must be between 1 and {MaximumElementProperties}.");
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -8000,24 +8040,52 @@ public sealed partial class AutomationController : IDisposable
             }
         }
 
+        var valueBudget = new PropertyValueBudget();
+        var boundedXPath = BoundedPropertyValueSerializer.SerializeXPath(
+            xpath,
+            valueBudget,
+            out var xpathOmitted);
         var summary = new ElementSummary(
             ElementType: element.ControlType.ToString(),
-            AutomationId: GetAutomationId(element),
-            Name: GetName(element),
-            ClassName: GetClassName(element),
+            AutomationId: BoundedPropertyValueSerializer.SerializeString(GetAutomationId(element), valueBudget),
+            Name: BoundedPropertyValueSerializer.SerializeString(GetName(element), valueBudget),
+            ClassName: BoundedPropertyValueSerializer.SerializeString(GetClassName(element), valueBudget),
             Bounds: ToRect(element.BoundingRectangle),
             IsEnabled: element.IsEnabled,
             IsOffscreen: element.IsOffscreen,
-            XPath: xpath);
+            XPath: boundedXPath,
+            XPathOmitted: xpathOmitted ? true : null);
 
         var properties = new SortedDictionary<string, JsonNode?>(StringComparer.Ordinal);
-        PopulateProperties(element, properties);
+        var propertyCounts = PopulateProperties(element, properties, preset, maxProperties, valueBudget);
 
         var patterns = new SortedDictionary<string, JsonNode?>(StringComparer.Ordinal);
-        PopulatePatterns(element, patterns);
+        PopulatePatterns(element, patterns, valueBudget);
 
-        var response = new GetElementPropertiesResponse(summary, properties, patterns, uiaMapping);
-        trace?.SetSummary($"{summary.ElementType} {summary.XPath}");
+        var boundedUiaMapping = BoundUiaMappingDiagnostics(
+            uiaMapping,
+            valueBudget,
+            out var mappingCandidatesLimitReached);
+
+        var truncatedReasons = BoundedPropertyValueSerializer.GetTruncatedReasons(
+            propertyCounts.Truncated,
+            valueBudget,
+            mappingCandidatesLimitReached);
+        var truncatedReason = truncatedReasons.FirstOrDefault();
+
+        var response = new GetElementPropertiesResponse(
+            Element: summary,
+            Properties: properties,
+            Patterns: patterns,
+            UiaMapping: boundedUiaMapping,
+            Preset: preset,
+            ReturnedProperties: propertyCounts.Returned,
+            SelectedProperties: propertyCounts.Selected,
+            ScannedProperties: propertyCounts.Scanned,
+            Truncated: truncatedReason is not null,
+            TruncatedReason: truncatedReason,
+            TruncatedReasons: truncatedReasons.Count == 0 ? null : truncatedReasons);
+        trace?.SetSummary($"{summary.ElementType} {summary.XPath ?? "<xpath omitted>"}");
         return response;
         }
         catch (Exception ex)
@@ -10644,7 +10712,12 @@ public sealed partial class AutomationController : IDisposable
         return children;
     }
 
-    private static void PopulateProperties(AutomationElement element, IDictionary<string, JsonNode?> destination)
+    private static PropertyPopulationResult PopulateProperties(
+        AutomationElement element,
+        IDictionary<string, JsonNode?> destination,
+        ElementPropertiesPreset preset,
+        int maxProperties,
+        PropertyValueBudget valueBudget)
     {
         var props = element.Properties;
         var declaredType = typeof(AutomationElement).GetProperty(nameof(AutomationElement.Properties))?.PropertyType
@@ -10653,10 +10726,27 @@ public sealed partial class AutomationController : IDisposable
         var properties = declaredType
             .GetProperties(BindingFlags.Instance | BindingFlags.Public)
             .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
-            .OrderBy(p => p.Name, StringComparer.Ordinal);
+            .OrderBy(p => p.Name, StringComparer.Ordinal)
+            .ToArray();
 
-        foreach (var property in properties)
+        var selectedProperties = preset switch
         {
+            ElementPropertiesPreset.Summary => properties
+                .Where(property => SummaryElementPropertyNames.Contains(property.Name))
+                .ToArray(),
+            ElementPropertiesPreset.Full => properties,
+            _ => throw new ArgumentOutOfRangeException(nameof(preset), preset, "Unsupported property preset.")
+        };
+
+        var truncated = selectedProperties.Length > maxProperties;
+
+        foreach (var property in selectedProperties.Take(maxProperties))
+        {
+            if (valueBudget.IsCharacterLimitReached)
+            {
+                break;
+            }
+
             object? wrapper;
             try
             {
@@ -10664,7 +10754,15 @@ public sealed partial class AutomationController : IDisposable
             }
             catch (Exception ex)
             {
-                destination[property.Name] = JsonValue.Create($"<error: {ex.Message}>");
+                if (!BoundedPropertyValueSerializer.TrySerialize(
+                        $"<error: {ex.Message}>",
+                        valueBudget,
+                        out var error))
+                {
+                    break;
+                }
+
+                destination[property.Name] = error;
                 continue;
             }
 
@@ -10674,11 +10772,104 @@ public sealed partial class AutomationController : IDisposable
             }
 
             var value = TryGetWrapperValue(wrapper);
-            destination[property.Name] = ToJsonNode(value);
+            if (!BoundedPropertyValueSerializer.TrySerialize(value, valueBudget, out var serialized))
+            {
+                break;
+            }
+
+            destination[property.Name] = serialized;
         }
+
+        return new PropertyPopulationResult(
+            Returned: destination.Count,
+            Selected: selectedProperties.Length,
+            Scanned: properties.Length,
+            Truncated: truncated);
     }
 
-    private static void PopulatePatterns(AutomationElement element, IDictionary<string, JsonNode?> destination)
+    private readonly record struct PropertyPopulationResult(
+        int Returned,
+        int Selected,
+        int Scanned,
+        bool Truncated);
+
+    internal static UiaMappingDiagnostics? BoundUiaMappingDiagnostics(
+        UiaMappingDiagnostics? mapping,
+        PropertyValueBudget valueBudget,
+        out bool candidatesLimitReached)
+    {
+        candidatesLimitReached = false;
+        if (mapping is null)
+        {
+            return null;
+        }
+
+        var initialTruncation = valueBudget.Truncation;
+        var totalCandidates = mapping.TotalCandidates > 0
+            ? mapping.TotalCandidates
+            : mapping.Candidates.Count;
+        var selectedXPathOmitted = mapping.SelectedXPathOmitted == true;
+        string? selectedXPath = null;
+        if (mapping.SelectedXPath is not null)
+        {
+            selectedXPath = BoundedPropertyValueSerializer.SerializeXPath(
+                mapping.SelectedXPath,
+                valueBudget,
+                out selectedXPathOmitted);
+        }
+
+        var candidates = new List<UiaMappingCandidate>(
+            capacity: Math.Min(mapping.Candidates.Count, MaximumUiaMappingCandidates));
+        var anyCandidateXPathOmitted = false;
+        foreach (var candidate in mapping.Candidates.Take(MaximumUiaMappingCandidates))
+        {
+            if (valueBudget.IsCharacterLimitReached)
+            {
+                break;
+            }
+
+            var candidateXPathOmitted = candidate.XPathOmitted == true;
+            string? candidateXPath = null;
+            if (candidate.XPath is not null)
+            {
+                candidateXPath = BoundedPropertyValueSerializer.SerializeXPath(
+                    candidate.XPath,
+                    valueBudget,
+                    out candidateXPathOmitted);
+            }
+
+            anyCandidateXPathOmitted |= candidateXPathOmitted;
+            candidates.Add(new UiaMappingCandidate(
+                ElementType: candidate.ElementType,
+                AutomationId: BoundedPropertyValueSerializer.SerializeString(candidate.AutomationId, valueBudget),
+                Name: BoundedPropertyValueSerializer.SerializeString(candidate.Name, valueBudget),
+                ClassName: BoundedPropertyValueSerializer.SerializeString(candidate.ClassName, valueBudget),
+                Bounds: candidate.Bounds,
+                XPath: candidateXPath,
+                Score: candidate.Score,
+                XPathOmitted: candidateXPathOmitted ? true : null));
+        }
+
+        candidatesLimitReached = mapping.Truncated || totalCandidates > MaximumUiaMappingCandidates;
+        var mappingValueTruncated = valueBudget.Truncation != initialTruncation;
+
+        return new UiaMappingDiagnostics(
+            Ambiguous: mapping.Ambiguous,
+            SelectedXPath: selectedXPath,
+            Candidates: candidates,
+            ReturnedCandidates: candidates.Count,
+            TotalCandidates: totalCandidates,
+            Truncated: candidates.Count < totalCandidates ||
+                       selectedXPathOmitted ||
+                       anyCandidateXPathOmitted ||
+                       mappingValueTruncated,
+            SelectedXPathOmitted: selectedXPathOmitted ? true : null);
+    }
+
+    private static void PopulatePatterns(
+        AutomationElement element,
+        IDictionary<string, JsonNode?> destination,
+        PropertyValueBudget valueBudget)
     {
         var patternsObject = element.Patterns;
         var declaredType = typeof(AutomationElement).GetProperty(nameof(AutomationElement.Patterns))?.PropertyType
@@ -10691,6 +10882,11 @@ public sealed partial class AutomationController : IDisposable
 
         foreach (var patternProperty in patterns)
         {
+            if (valueBudget.IsCharacterLimitReached)
+            {
+                break;
+            }
+
             object? wrapper;
             try
             {
@@ -10698,10 +10894,18 @@ public sealed partial class AutomationController : IDisposable
             }
             catch (Exception ex)
             {
+                if (!BoundedPropertyValueSerializer.TrySerialize(
+                        ex.Message,
+                        valueBudget,
+                        out var error))
+                {
+                    break;
+                }
+
                 destination[patternProperty.Name] = new JsonObject
                 {
                     ["isSupported"] = false,
-                    ["error"] = ex.Message
+                    ["error"] = error
                 };
                 continue;
             }
@@ -10725,7 +10929,7 @@ public sealed partial class AutomationController : IDisposable
             var patternInstance = TryGetProperty(wrapper, "Pattern");
             if (patternInstance is not null)
             {
-                var values = ExtractPatternValues(patternProperty.Name, patternInstance);
+                var values = ExtractPatternValues(patternProperty.Name, patternInstance, valueBudget);
                 if (values.Count > 0)
                 {
                     json["values"] = values;
@@ -10736,55 +10940,62 @@ public sealed partial class AutomationController : IDisposable
         }
     }
 
-    private static JsonObject ExtractPatternValues(string patternName, object patternInstance)
+    private static JsonObject ExtractPatternValues(
+        string patternName,
+        object patternInstance,
+        PropertyValueBudget valueBudget)
     {
         var values = new JsonObject();
 
         switch (patternName)
         {
             case "Value":
-                AddPatternValue(values, patternInstance, "Value");
-                AddPatternValue(values, patternInstance, "IsReadOnly");
+                AddPatternValue(values, patternInstance, "Value", valueBudget);
+                AddPatternValue(values, patternInstance, "IsReadOnly", valueBudget);
                 break;
             case "Toggle":
-                AddPatternValue(values, patternInstance, "ToggleState");
+                AddPatternValue(values, patternInstance, "ToggleState", valueBudget);
                 break;
             case "RangeValue":
-                AddPatternValue(values, patternInstance, "Value");
-                AddPatternValue(values, patternInstance, "Minimum");
-                AddPatternValue(values, patternInstance, "Maximum");
-                AddPatternValue(values, patternInstance, "IsReadOnly");
+                AddPatternValue(values, patternInstance, "Value", valueBudget);
+                AddPatternValue(values, patternInstance, "Minimum", valueBudget);
+                AddPatternValue(values, patternInstance, "Maximum", valueBudget);
+                AddPatternValue(values, patternInstance, "IsReadOnly", valueBudget);
                 break;
             case "Scroll":
-                AddPatternValue(values, patternInstance, "HorizontallyScrollable");
-                AddPatternValue(values, patternInstance, "VerticallyScrollable");
-                AddPatternValue(values, patternInstance, "HorizontalScrollPercent");
-                AddPatternValue(values, patternInstance, "VerticalScrollPercent");
-                AddPatternValue(values, patternInstance, "HorizontalViewSize");
-                AddPatternValue(values, patternInstance, "VerticalViewSize");
+                AddPatternValue(values, patternInstance, "HorizontallyScrollable", valueBudget);
+                AddPatternValue(values, patternInstance, "VerticallyScrollable", valueBudget);
+                AddPatternValue(values, patternInstance, "HorizontalScrollPercent", valueBudget);
+                AddPatternValue(values, patternInstance, "VerticalScrollPercent", valueBudget);
+                AddPatternValue(values, patternInstance, "HorizontalViewSize", valueBudget);
+                AddPatternValue(values, patternInstance, "VerticalViewSize", valueBudget);
                 break;
             case "ExpandCollapse":
-                AddPatternValue(values, patternInstance, "ExpandCollapseState");
+                AddPatternValue(values, patternInstance, "ExpandCollapseState", valueBudget);
                 break;
             case "SelectionItem":
-                AddPatternValue(values, patternInstance, "IsSelected");
+                AddPatternValue(values, patternInstance, "IsSelected", valueBudget);
                 break;
             case "Selection":
-                AddPatternValue(values, patternInstance, "CanSelectMultiple");
-                AddPatternValue(values, patternInstance, "IsSelectionRequired");
+                AddPatternValue(values, patternInstance, "CanSelectMultiple", valueBudget);
+                AddPatternValue(values, patternInstance, "IsSelectionRequired", valueBudget);
                 break;
             case "Window":
-                AddPatternValue(values, patternInstance, "IsModal");
-                AddPatternValue(values, patternInstance, "IsTopmost");
-                AddPatternValue(values, patternInstance, "WindowInteractionState");
-                AddPatternValue(values, patternInstance, "WindowVisualState");
+                AddPatternValue(values, patternInstance, "IsModal", valueBudget);
+                AddPatternValue(values, patternInstance, "IsTopmost", valueBudget);
+                AddPatternValue(values, patternInstance, "WindowInteractionState", valueBudget);
+                AddPatternValue(values, patternInstance, "WindowVisualState", valueBudget);
                 break;
         }
 
         return values;
     }
 
-    private static void AddPatternValue(JsonObject values, object patternInstance, string propertyName)
+    private static void AddPatternValue(
+        JsonObject values,
+        object patternInstance,
+        string propertyName,
+        PropertyValueBudget valueBudget)
     {
         var property = patternInstance.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
         if (property is null || !property.CanRead || property.GetIndexParameters().Length != 0)
@@ -10803,7 +11014,10 @@ public sealed partial class AutomationController : IDisposable
         }
 
         var unwrapped = value is null ? null : TryGetWrapperValue(value) ?? value;
-        values[propertyName] = ToJsonNode(unwrapped);
+        if (BoundedPropertyValueSerializer.TrySerialize(unwrapped, valueBudget, out var serialized))
+        {
+            values[propertyName] = serialized;
+        }
     }
 
     private static object? TryGetWrapperValue(object wrapper)
@@ -10944,141 +11158,6 @@ public sealed partial class AutomationController : IDisposable
         rect.Width <= 0 && rect.Height <= 0
             ? "empty"
             : $"x={rect.X},y={rect.Y},w={rect.Width},h={rect.Height}";
-
-    private static JsonNode? ToJsonNode(object? value)
-    {
-        if (value is null)
-        {
-            return null;
-        }
-
-        if (value is string s)
-        {
-            return JsonValue.Create(s);
-        }
-
-        if (value is bool b)
-        {
-            return JsonValue.Create(b);
-        }
-
-        if (value is int i)
-        {
-            return JsonValue.Create(i);
-        }
-
-        if (value is long l)
-        {
-            return JsonValue.Create(l);
-        }
-
-        if (value is double d)
-        {
-            if (double.IsNaN(d))
-            {
-                return JsonValue.Create("{NaN}");
-            }
-
-            if (double.IsPositiveInfinity(d))
-            {
-                return JsonValue.Create("{Infinity}");
-            }
-
-            if (double.IsNegativeInfinity(d))
-            {
-                return JsonValue.Create("{-Infinity}");
-            }
-
-            return JsonValue.Create(d);
-        }
-
-        if (value is float f)
-        {
-            if (float.IsNaN(f))
-            {
-                return JsonValue.Create("{NaN}");
-            }
-
-            if (float.IsPositiveInfinity(f))
-            {
-                return JsonValue.Create("{Infinity}");
-            }
-
-            if (float.IsNegativeInfinity(f))
-            {
-                return JsonValue.Create("{-Infinity}");
-            }
-
-            return JsonValue.Create(f);
-        }
-
-        if (value is decimal dec)
-        {
-            return JsonValue.Create(dec);
-        }
-
-        if (value is Enum e)
-        {
-            return JsonValue.Create(e.ToString());
-        }
-
-        if (value is IntPtr ptr)
-        {
-            return JsonValue.Create(ptr.ToInt64());
-        }
-
-        if (value is Guid guid)
-        {
-            return JsonValue.Create(guid.ToString());
-        }
-
-        if (value is Rectangle rect)
-        {
-            return JsonSerializer.SerializeToNode(ToRect(rect));
-        }
-
-        if (value is AutomationElement element)
-        {
-            return new JsonObject
-            {
-                ["elementType"] = element.ControlType.ToString(),
-                ["automationId"] = GetAutomationId(element),
-                ["name"] = GetName(element),
-                ["className"] = GetClassName(element)
-            };
-        }
-
-        if (value is IEnumerable<AutomationElement> elements)
-        {
-            var array = new JsonArray();
-            foreach (var item in elements)
-            {
-                array.Add(ToJsonNode(item));
-            }
-
-            return array;
-        }
-
-        if (value is System.Collections.IEnumerable enumerable and not string)
-        {
-            var array = new JsonArray();
-            foreach (var item in enumerable)
-            {
-                array.Add(ToJsonNode(item));
-            }
-
-            return array;
-        }
-
-        try
-        {
-            return JsonSerializer.SerializeToNode(value);
-        }
-        catch
-        {
-            return JsonValue.Create(value.ToString());
-        }
-    }
 
     private void Cleanup()
     {

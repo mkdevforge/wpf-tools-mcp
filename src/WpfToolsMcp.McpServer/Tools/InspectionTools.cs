@@ -44,20 +44,28 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_element_properties"), Description("Return all UIA properties and supported patterns for a single element.")]
+    [McpServerTool(Name = "get_element_properties"), Description("Return bounded UIA properties and supported patterns. Values cap strings at 2,000 characters, collections at 50 items, depth at 2, and share a 20,000-character budget; oversized XPaths are omitted.")]
     public static Task<GetElementPropertiesResponse> GetElementProperties(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
         [Description("Element locator")] ElementLocator? locator = null,
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Property response preset")] ElementPropertiesPreset preset = ElementPropertiesPreset.Summary,
+        [Description("Maximum number of UIA properties returned (1-200)")] int maxProperties = 25,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
             var hasElementId = !string.IsNullOrWhiteSpace(elementId);
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
             return automation.RunExclusiveAsync(
-                () => automation.GetElementPropertiesAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, cancellationToken),
+                () => automation.GetElementPropertiesAsync(
+                    locator,
+                    elementId,
+                    hasElementId ? windowHandle : effectiveWindowHandle,
+                    preset,
+                    maxProperties,
+                    cancellationToken),
                 cancellationToken);
         });
 

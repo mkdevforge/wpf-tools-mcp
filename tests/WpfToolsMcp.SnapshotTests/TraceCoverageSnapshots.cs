@@ -1,5 +1,7 @@
+using System.Text.Json;
 using NUnit.Framework;
 using VerifyNUnit;
+using WpfToolsMcp.Automation;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.SnapshotTests;
@@ -150,4 +152,94 @@ public sealed class TraceCoverageSnapshots
 
         await Verifier.Verify(stable);
     }
+}
+
+[TestFixture]
+public sealed class TraceResponseTests
+{
+    [Test]
+    public async Task Trace_stop_omits_inline_events_by_default_and_preserves_full_artifact()
+    {
+        var controller = new AutomationController();
+        var traceStart = await controller.TraceStartAsync(resetIfRunning: false);
+        var outputPath = CreateOutputPath();
+
+        try
+        {
+            using (controller.BeginToolTrace("first_tool"))
+            {
+            }
+
+            using (controller.BeginToolTrace("second_tool"))
+            {
+            }
+
+            var response = await controller.TraceStopAsync(traceStart.TraceId, outputPath);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(response.EventCount, Is.EqualTo(2));
+                Assert.That(response.ReturnedEventCount, Is.Zero);
+                Assert.That(response.Truncated, Is.False);
+                Assert.That(response.TruncatedReason, Is.Null);
+                Assert.That(response.Events, Is.Null);
+            });
+
+            using var artifact = JsonDocument.Parse(await File.ReadAllTextAsync(outputPath));
+            var artifactEvents = artifact.RootElement.GetProperty("Events");
+            Assert.That(artifactEvents.GetArrayLength(), Is.EqualTo(2));
+            Assert.That(artifactEvents[0].GetProperty("Tool").GetString(), Is.EqualTo("first_tool"));
+            Assert.That(artifactEvents[1].GetProperty("Tool").GetString(), Is.EqualTo("second_tool"));
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
+
+    [Test]
+    public async Task Trace_stop_bounds_inline_events_and_reports_truncation_without_truncating_artifact()
+    {
+        var controller = new AutomationController();
+        var traceStart = await controller.TraceStartAsync(resetIfRunning: false);
+        var outputPath = CreateOutputPath();
+
+        try
+        {
+            foreach (var tool in new[] { "first_tool", "second_tool", "third_tool" })
+            {
+                using (controller.BeginToolTrace(tool))
+                {
+                }
+            }
+
+            var response = await controller.TraceStopAsync(
+                traceStart.TraceId,
+                outputPath,
+                includeEvents: true,
+                maxEvents: 2);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(response.EventCount, Is.EqualTo(3));
+                Assert.That(response.ReturnedEventCount, Is.EqualTo(2));
+                Assert.That(response.Truncated, Is.True);
+                Assert.That(response.TruncatedReason, Is.EqualTo("maxEvents"));
+                Assert.That(response.Events!.Select(traceEvent => traceEvent.Tool),
+                    Is.EqualTo(new[] { "first_tool", "second_tool" }));
+            });
+
+            using var artifact = JsonDocument.Parse(await File.ReadAllTextAsync(outputPath));
+            var artifactEvents = artifact.RootElement.GetProperty("Events");
+            Assert.That(artifactEvents.GetArrayLength(), Is.EqualTo(3));
+            Assert.That(artifactEvents[2].GetProperty("Tool").GetString(), Is.EqualTo("third_tool"));
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
+
+    private static string CreateOutputPath() =>
+        Path.Combine(Path.GetTempPath(), $"wpf-tools-mcp-trace-test-{Guid.NewGuid():N}.json");
 }

@@ -81,7 +81,8 @@ public sealed class DeeplyNestedSnapshots
                 }
             });
 
-            var xpath = target.Element.XPath;
+            Assert.That(target.Element.XPathOmitted, Is.Not.True);
+            var xpath = target.Element.XPath!;
 
             var resolved = await _mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
             {

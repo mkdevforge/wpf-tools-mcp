@@ -740,22 +740,27 @@ public sealed partial class AutomationController
             }
 
             var selected = ordered[0];
+            var mappingCandidates = ties
+                .Take(MaximumUiaMappingCandidates)
+                .Select(candidate => new UiaMappingCandidate(
+                    ElementType: candidate.Element.ControlType.ToString(),
+                    AutomationId: GetAutomationId(candidate.Element),
+                    Name: GetName(candidate.Element),
+                    ClassName: GetClassName(candidate.Element),
+                    Bounds: ToRect(candidate.Element.BoundingRectangle),
+                    XPath: candidate.XPath,
+                    Score: candidate.Score))
+                .ToArray();
             return new WpfUiaResolution(
                 selected.Element,
                 selected.XPath,
                 new UiaMappingDiagnostics(
                     Ambiguous: true,
                     SelectedXPath: selected.XPath,
-                    Candidates: ties
-                        .Select(candidate => new UiaMappingCandidate(
-                            ElementType: candidate.Element.ControlType.ToString(),
-                            AutomationId: GetAutomationId(candidate.Element),
-                            Name: GetName(candidate.Element),
-                            ClassName: GetClassName(candidate.Element),
-                            Bounds: ToRect(candidate.Element.BoundingRectangle),
-                            XPath: candidate.XPath,
-                            Score: candidate.Score))
-                        .ToArray()));
+                    Candidates: mappingCandidates,
+                    ReturnedCandidates: mappingCandidates.Length,
+                    TotalCandidates: ties.Length,
+                    Truncated: mappingCandidates.Length < ties.Length));
         }
 
         return new WpfUiaResolution(ordered[0].Element, ordered[0].XPath, UiaMapping: null);
