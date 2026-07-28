@@ -44,4 +44,6 @@ jobs:
         run: dotnet build src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj -c Release --no-restore
 
       - name: Test
+        env:
+          WPF_TOOLS_MCP_RUN_UNHANDLED_CRASH_FIXTURE: "1"
         run: dotnet test tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj -c Release --no-restore

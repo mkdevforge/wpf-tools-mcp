@@ -1,12 +1,54 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+
+if (args.Length > 0 && string.Equals(args[0], "crash", StringComparison.Ordinal))
+{
+    if (!FixtureProgram.IsCrashAuthorized())
+    {
+        return FixtureProgram.RefuseCrash();
+    }
+
+    FixtureProgram.Crash();
+}
 
 return await FixtureProgram.RunAsync(args);
 
 internal static class FixtureProgram
 {
+    private const string CrashOptInVariable = "WPF_TOOLS_MCP_RUN_UNHANDLED_CRASH_FIXTURE";
+
+    public static bool IsCrashAuthorized() =>
+        string.Equals(
+            Environment.GetEnvironmentVariable("GITHUB_ACTIONS"),
+            "true",
+            StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(
+            Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT"),
+            "github-hosted",
+            StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(Environment.GetEnvironmentVariable(CrashOptInVariable), "1", StringComparison.Ordinal);
+
+    public static int RefuseCrash()
+    {
+        Console.Error.WriteLine(
+            $"Crash mode refused. It requires a GitHub-hosted Actions runner and {CrashOptInVariable}=1.");
+        return 64;
+    }
+
+    [DoesNotReturn]
+    public static void Crash()
+    {
+        var errorMode = OperatingSystem.IsWindows() ? GetErrorMode() : 0;
+        Console.Error.WriteLine(
+            $"fixture-unhandled-crash-marker pid={Environment.ProcessId.ToString(CultureInfo.InvariantCulture)} " +
+            $"error-mode=0x{errorMode.ToString("X8", CultureInfo.InvariantCulture)}");
+        Console.Error.Flush();
+        throw new InvalidOperationException("Fixture unhandled crash.");
+    }
+
     public static async Task<int> RunAsync(IReadOnlyList<string> args)
     {
         if (args.Count == 0)

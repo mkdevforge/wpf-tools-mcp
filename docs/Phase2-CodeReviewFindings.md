@@ -126,6 +126,15 @@ regression coverage also polls a recorded fixture child independently.
 Controller disposal now cancels the active injection before waiting for the
 per-session tool lock.
 
+Natural launcher failures include the executable path, PID, elapsed duration,
+and signed decimal/hex exit code even when both redirected streams are empty.
+`0xE0434352` is labeled as an unhandled CLR exception. GitHub Actions alone runs
+a gated unhandled-crash fixture that asserts inherited fault-dialog suppression,
+captured stderr, nonzero completion, and process exit; local test runs skip it
+before any crashing process is started. The fixture independently refuses its
+crash mode unless both GitHub Actions and a dedicated test-only opt-in token are
+present.
+
 This remains a thin wrapper rather than a derivative Snoop launcher. Upstream
 logging is not made universally best effort; instead, its known filesystem
 dependency is isolated and writable, while any residual launcher crash is

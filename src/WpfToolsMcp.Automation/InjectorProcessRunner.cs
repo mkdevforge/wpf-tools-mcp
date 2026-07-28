@@ -101,7 +101,10 @@ internal static class InjectorProcessRunner
                         outputTasks,
                         outputCancellation,
                         stdout,
-                        stderr).ConfigureAwait(false);
+                        stderr,
+                        startInfo.FileName,
+                        processId,
+                        stopwatch.Elapsed).ConfigureAwait(false);
                 }
 
                 var termination = await TerminateProcessTreeAsync(process, exitTask).ConfigureAwait(false);
@@ -112,7 +115,13 @@ internal static class InjectorProcessRunner
 
                 if (termination.ExitedBeforeKill)
                 {
-                    return CreateResult(process, stdout, stderr);
+                    return CreateResult(
+                        process,
+                        stdout,
+                        stderr,
+                        startInfo.FileName,
+                        processId,
+                        stopwatch.Elapsed);
                 }
 
                 throw new OperationCanceledException(
@@ -136,7 +145,10 @@ internal static class InjectorProcessRunner
                         outputTasks,
                         outputCancellation,
                         stdout,
-                        stderr).ConfigureAwait(false);
+                        stderr,
+                        startInfo.FileName,
+                        processId,
+                        stopwatch.Elapsed).ConfigureAwait(false);
                 }
 
                 var termination = await TerminateProcessTreeAsync(process, exitTask).ConfigureAwait(false);
@@ -147,7 +159,13 @@ internal static class InjectorProcessRunner
 
                 if (termination.ExitedBeforeKill)
                 {
-                    return CreateResult(process, stdout, stderr);
+                    return CreateResult(
+                        process,
+                        stdout,
+                        stderr,
+                        startInfo.FileName,
+                        processId,
+                        stopwatch.Elapsed);
                 }
 
                 throw new TimeoutException(
@@ -166,7 +184,10 @@ internal static class InjectorProcessRunner
                 outputTasks,
                 outputCancellation,
                 stdout,
-                stderr).ConfigureAwait(false);
+                stderr,
+                startInfo.FileName,
+                processId,
+                stopwatch.Elapsed).ConfigureAwait(false);
         }
         finally
         {
@@ -241,21 +262,38 @@ internal static class InjectorProcessRunner
         Task outputTasks,
         CancellationTokenSource outputCancellation,
         BoundedTextCapture stdout,
-        BoundedTextCapture stderr)
+        BoundedTextCapture stderr,
+        string executablePath,
+        int processId,
+        TimeSpan duration)
     {
         await StopOutputCaptureAsync(
             process,
             outputTasks,
             outputCancellation,
             closeImmediately: false).ConfigureAwait(false);
-        return CreateResult(process, stdout, stderr);
+        return CreateResult(
+            process,
+            stdout,
+            stderr,
+            executablePath,
+            processId,
+            duration);
     }
 
     private static InjectionRunResult CreateResult(
         Process process,
         BoundedTextCapture stdout,
-        BoundedTextCapture stderr) =>
-        new(process.ExitCode, stdout.Snapshot(), stderr.Snapshot());
+        BoundedTextCapture stderr,
+        string executablePath,
+        int processId,
+        TimeSpan duration) =>
+        new(process.ExitCode, stdout.Snapshot(), stderr.Snapshot())
+        {
+            ExecutablePath = executablePath,
+            ProcessId = processId,
+            Duration = duration
+        };
 
     private static async Task<ProcessTerminationResult> TerminateProcessTreeAsync(
         Process process,

@@ -72,4 +72,11 @@ internal static class SnoopInjector
     }
 }
 
-internal sealed record InjectionRunResult(int ExitCode, string Stdout, string Stderr);
+internal sealed record InjectionRunResult(int ExitCode, string Stdout, string Stderr)
+{
+    public string ExecutablePath { get; init; } = "";
+
+    public int ProcessId { get; init; }
+
+    public TimeSpan Duration { get; init; }
+}

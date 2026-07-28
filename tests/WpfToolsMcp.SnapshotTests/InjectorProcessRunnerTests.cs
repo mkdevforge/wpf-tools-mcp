@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using WpfToolsMcp.Automation;
 
 namespace WpfToolsMcp.SnapshotTests;
@@ -120,6 +121,9 @@ public sealed class InjectorProcessRunnerTests
         Assert.Multiple(() =>
         {
             Assert.That(result.ExitCode, Is.EqualTo(23));
+            Assert.That(result.ExecutablePath, Is.EqualTo(startInfo.FileName));
+            Assert.That(result.ProcessId, Is.GreaterThan(0));
+            Assert.That(result.Duration, Is.GreaterThan(TimeSpan.Zero));
             Assert.That(result.Stdout, Does.StartWith("stdout-0000-"));
             Assert.That(result.Stderr, Does.StartWith("stderr-0000-"));
             Assert.That(result.Stdout, Does.Contain("output truncated; observed"));
@@ -129,6 +133,119 @@ public sealed class InjectorProcessRunnerTests
             Assert.That(result.Stdout.Length, Is.LessThan(17_000));
             Assert.That(result.Stderr.Length, Is.LessThan(17_000));
         });
+
+        var details = AutomationController.BuildInjectorFailureDetails(result);
+        Assert.Multiple(() =>
+        {
+            Assert.That(details, Does.Contain($"Launcher: '{startInfo.FileName}'"));
+            Assert.That(details, Does.Contain($"Process: PID {result.ProcessId.ToString(CultureInfo.InvariantCulture)}"));
+            Assert.That(details, Does.Contain("duration="));
+            Assert.That(details, Does.Contain("Exit: exit code 23 (0x00000017)"));
+            Assert.That(details, Does.Contain("stdout-final-diagnostic-marker"));
+            Assert.That(details, Does.Contain("stderr-final-diagnostic-marker"));
+        });
+    }
+
+    [Test]
+    public void Unhandled_clr_exit_details_include_signed_hex_interpretation_and_empty_streams()
+    {
+        var signedExitCode = unchecked((int)0xE0434352u);
+        var result = new InjectionRunResult(signedExitCode, Stdout: "", Stderr: "")
+        {
+            ExecutablePath = @"C:\fixture\launcher.exe",
+            ProcessId = 4242,
+            Duration = TimeSpan.FromMilliseconds(321)
+        };
+
+        var details = AutomationController.BuildInjectorFailureDetails(result);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(details, Does.Contain("Launcher: 'C:\\fixture\\launcher.exe'"));
+            Assert.That(details, Does.Contain("Process: PID 4242; duration=321 ms"));
+            Assert.That(
+                details,
+                Does.Contain($"exit code {signedExitCode.ToString(CultureInfo.InvariantCulture)} " +
+                             "(0xE0434352, unhandled CLR exception)"));
+            Assert.That(Regex.Matches(details, "<empty>").Count, Is.EqualTo(2));
+        });
+    }
+
+    [Test]
+    public async Task Crash_mode_refuses_without_explicit_ci_opt_in()
+    {
+        using var workspace = InjectorLaunchWorkspace.Create();
+        var startInfo = CreateFixtureStartInfo("crash");
+        workspace.ApplyTo(startInfo);
+        startInfo.Environment.Remove("GITHUB_ACTIONS");
+        startInfo.Environment.Remove("RUNNER_ENVIRONMENT");
+        startInfo.Environment.Remove("WPF_TOOLS_MCP_RUN_UNHANDLED_CRASH_FIXTURE");
+
+        var result = await InjectorProcessRunner.RunAsync(
+            startInfo,
+            TimeSpan.FromSeconds(5),
+            CancellationToken.None);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.ExitCode, Is.EqualTo(64));
+            Assert.That(result.Stderr, Does.Contain("Crash mode refused"));
+            Assert.That(result.Stderr, Does.Not.Contain("fixture-unhandled-crash-marker"));
+        });
+    }
+
+    [Test]
+    public async Task Unhandled_crash_is_contained_without_fault_ui_on_github_actions()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("GITHUB_ACTIONS"),
+                "true",
+                StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(
+                Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT"),
+                "github-hosted",
+                StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(
+                Environment.GetEnvironmentVariable("WPF_TOOLS_MCP_RUN_UNHANDLED_CRASH_FIXTURE"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            Assert.Ignore("Unhandled crash coverage requires the explicit GitHub-hosted CI opt-in.");
+        }
+
+        using var workspace = InjectorLaunchWorkspace.Create();
+        var startInfo = CreateFixtureStartInfo("crash");
+        workspace.ApplyTo(startInfo);
+        startInfo.Environment["GITHUB_ACTIONS"] = "true";
+        startInfo.Environment["RUNNER_ENVIRONMENT"] = "github-hosted";
+        startInfo.Environment["WPF_TOOLS_MCP_RUN_UNHANDLED_CRASH_FIXTURE"] = "1";
+
+        var result = await InjectorProcessRunner.RunAsync(
+            startInfo,
+            TimeSpan.FromSeconds(5),
+            CancellationToken.None);
+
+        var errorModeMatch = Regex.Match(
+            result.Stderr,
+            @"fixture-unhandled-crash-marker pid=\d+ error-mode=0x([0-9A-Fa-f]{8})");
+        Assert.That(errorModeMatch.Success, Is.True, result.Stderr);
+        var inheritedErrorMode = uint.Parse(
+            errorModeMatch.Groups[1].Value,
+            NumberStyles.HexNumber,
+            CultureInfo.InvariantCulture);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.ExitCode, Is.Not.Zero);
+            Assert.That(result.ExecutablePath, Is.EqualTo(startInfo.FileName));
+            Assert.That(result.ProcessId, Is.GreaterThan(0));
+            Assert.That(result.Duration, Is.GreaterThan(TimeSpan.Zero));
+            Assert.That(result.Stderr, Does.Contain("fixture-unhandled-crash-marker"));
+            Assert.That(
+                inheritedErrorMode & InjectorProcessRunner.SuppressedErrorModeFlags,
+                Is.EqualTo(InjectorProcessRunner.SuppressedErrorModeFlags));
+        });
+        await AssertNoFixtureProcessAsync(result.ProcessId);
     }
 
     [Test]
@@ -435,6 +552,31 @@ public sealed class InjectorProcessRunnerTests
         {
             return false;
         }
+    }
+
+    private static async Task AssertNoFixtureProcessAsync(int processId)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(3))
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (process.HasExited || !IsProcessFixture(process))
+                {
+                    return;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        Assert.Fail(
+            $"Fixture process {processId.ToString(CultureInfo.InvariantCulture)} remained alive after its crash.");
     }
 
     private sealed record FixtureReport(

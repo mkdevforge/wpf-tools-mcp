@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
@@ -303,7 +304,7 @@ public sealed partial class AutomationController
         if (injectResult.ExitCode != 0)
         {
             var details = BuildInjectorFailureDetails(injectResult);
-            throw new InvalidOperationException($"Snoop injection failed (exit code {injectResult.ExitCode}).{details}");
+            throw new InvalidOperationException($"Snoop injection failed.{details}");
         }
 
         var client = await ConnectToAgentWithRetryAsync(pipeName, operationToken);
@@ -1388,25 +1389,48 @@ public sealed partial class AutomationController
         return null;
     }
 
-    private static string BuildInjectorFailureDetails(InjectionRunResult result)
+    internal static string BuildInjectorFailureDetails(InjectionRunResult result)
     {
+        ArgumentNullException.ThrowIfNull(result);
+
         var sb = new StringBuilder();
+        var executablePath = string.IsNullOrWhiteSpace(result.ExecutablePath)
+            ? "<unknown>"
+            : result.ExecutablePath;
+        var processId = result.ProcessId > 0
+            ? result.ProcessId.ToString(CultureInfo.InvariantCulture)
+            : "<unknown>";
 
-        if (!string.IsNullOrWhiteSpace(result.Stdout))
-        {
-            sb.AppendLine();
-            sb.AppendLine("--- stdout ---");
-            sb.AppendLine(result.Stdout.TrimEnd());
-        }
+        sb.AppendLine();
+        sb.Append("Launcher: '").Append(executablePath).AppendLine("'");
+        sb.Append("Process: PID ")
+            .Append(processId)
+            .Append("; duration=")
+            .Append(Math.Max(0, result.Duration.TotalMilliseconds).ToString("0", CultureInfo.InvariantCulture))
+            .AppendLine(" ms");
+        sb.Append("Exit: ").AppendLine(FormatInjectorExitCode(result.ExitCode));
 
-        if (!string.IsNullOrWhiteSpace(result.Stderr))
-        {
-            sb.AppendLine();
-            sb.AppendLine("--- stderr ---");
-            sb.AppendLine(result.Stderr.TrimEnd());
-        }
+        AppendInjectorOutput(sb, "stdout", result.Stdout);
+        AppendInjectorOutput(sb, "stderr", result.Stderr);
 
         return sb.ToString().TrimEnd();
+    }
+
+    private static string FormatInjectorExitCode(int exitCode)
+    {
+        const uint unhandledClrException = 0xE0434352;
+        var unsignedExitCode = unchecked((uint)exitCode);
+        var description = unsignedExitCode == unhandledClrException
+            ? ", unhandled CLR exception"
+            : "";
+        return $"exit code {exitCode.ToString(CultureInfo.InvariantCulture)} " +
+               $"(0x{unsignedExitCode.ToString("X8", CultureInfo.InvariantCulture)}{description})";
+    }
+
+    private static void AppendInjectorOutput(StringBuilder builder, string name, string value)
+    {
+        builder.Append("--- ").Append(name).AppendLine(" ---");
+        builder.AppendLine(string.IsNullOrWhiteSpace(value) ? "<empty>" : value.TrimEnd());
     }
 
     private void CleanupAgent()
