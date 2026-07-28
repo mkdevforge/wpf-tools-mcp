@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
-using System.Linq;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -100,11 +100,8 @@ public sealed partial class AutomationController
         try
         {
             var id = elementId.Trim();
-            _elementHandles.TryGet(id, out var handle);
-            var released = _elementHandles.Release(id);
-            if (released &&
-                handle?.Backend == InspectionBackend.Wpf &&
-                !string.IsNullOrWhiteSpace(handle.WpfAgentElementId))
+            var release = _elementHandles.Release(id);
+            if (!string.IsNullOrWhiteSpace(release.WpfAgentElementIdToRelease))
             {
                 try
                 {
@@ -113,7 +110,7 @@ public sealed partial class AutomationController
                     {
                         _ = await client.CallAsync<ReleaseElementResponse>(
                             "wpf/release_element",
-                            new ReleaseWpfElementRequest(handle.WpfAgentElementId),
+                            new ReleaseWpfElementRequest(release.WpfAgentElementIdToRelease),
                             CancellationToken.None).ConfigureAwait(false);
                     }
                 }
@@ -123,8 +120,8 @@ public sealed partial class AutomationController
                 }
             }
 
-            trace?.SetSummary($"released={released}");
-            return new ReleaseElementResponse(released);
+            trace?.SetSummary($"released={release.Released}");
+            return new ReleaseElementResponse(release.Released);
         }
         catch (Exception ex)
         {
@@ -163,21 +160,29 @@ public sealed partial class AutomationController
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
 
-        var element = timeoutMs > 0
-            ? await ResolveUiaElementWithWaitAsync(
-                window,
-                locator,
-                controlWalker,
-                rawWalker,
-                timeoutMs,
-                pollIntervalMs,
-                ActionKind.Inspect,
-                visibleOnly,
-                includeOffViewport,
-                interactiveOnly,
-                interactiveMode,
-                cancellationToken).ConfigureAwait(false)
-            : ResolveElement(window, locator, controlWalker, rawWalker, ActionKind.Inspect, visibleOnly, includeOffViewport, interactiveOnly, interactiveMode);
+        AutomationElement element;
+        try
+        {
+            element = timeoutMs > 0
+                ? await ResolveUiaElementWithWaitAsync(
+                    window,
+                    locator,
+                    controlWalker,
+                    rawWalker,
+                    timeoutMs,
+                    pollIntervalMs,
+                    ActionKind.Inspect,
+                    visibleOnly,
+                    includeOffViewport,
+                    interactiveOnly,
+                    interactiveMode,
+                    cancellationToken).ConfigureAwait(false)
+                : ResolveElement(window, locator, controlWalker, rawWalker, ActionKind.Inspect, visibleOnly, includeOffViewport, interactiveOnly, interactiveMode);
+        }
+        catch (UiaLocatorAmbiguousException ex)
+        {
+            throw BuildUiaAmbiguityException(window, rawWalker, hwnd, ex);
+        }
 
         if (stableMs > 0 && timeoutMs > 0)
         {
@@ -210,23 +215,12 @@ public sealed partial class AutomationController
             GetName(element),
             GetClassName(element));
 
-        Rect? bounds = null;
-        try
-        {
-            bounds = ToRect(element.BoundingRectangle);
-        }
-        catch
-        {
-        }
-
-        var elementRef = new ElementRef(
-            Type: element.ControlType.ToString(),
-            AutomationId: GetAutomationId(element),
-            Name: GetName(element),
-            XPath: xpath,
-            ClassName: GetClassName(element),
-            Bounds: bounds,
-            ElementId: elementId);
+        var elementRef = BuildElementRefUia(
+            element,
+            xpath,
+            FindReturnFields.Standard,
+            elementId,
+            TryGetClientBoundsScreen(window, out var clientBounds) ? clientBounds : null);
 
         return new ResolveElementResponse(InspectionBackend.Uia, elementRef, hwnd);
     }
@@ -263,8 +257,9 @@ public sealed partial class AutomationController
                 includeOffViewport,
                 interactiveOnly,
                 interactiveMode,
-                cancellationToken).ConfigureAwait(false)
-            : await ResolveWpfElementRefAsync(
+                cancellationToken,
+                detailedAmbiguity: true).ConfigureAwait(false)
+            : await ResolveWpfElementRefDetailedAsync(
                 locator,
                 hwnd,
                 visibleOnly,
@@ -297,7 +292,8 @@ public sealed partial class AutomationController
         bool includeOffViewport,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool detailedAmbiguity = false)
     {
         var start = Stopwatch.GetTimestamp();
         Rect? lastBounds = null;
@@ -311,14 +307,23 @@ public sealed partial class AutomationController
             ElementRef element;
             try
             {
-                element = await ResolveWpfElementRefAsync(
-                    currentLocator,
-                    windowHandle,
-                    visibleOnly,
-                    includeOffViewport,
-                    interactiveOnly,
-                    interactiveMode,
-                    cancellationToken).ConfigureAwait(false);
+                element = detailedAmbiguity
+                    ? await ResolveWpfElementRefDetailedAsync(
+                        currentLocator,
+                        windowHandle,
+                        visibleOnly,
+                        includeOffViewport,
+                        interactiveOnly,
+                        interactiveMode,
+                        cancellationToken).ConfigureAwait(false)
+                    : await ResolveWpfElementRefAsync(
+                        currentLocator,
+                        windowHandle,
+                        visibleOnly,
+                        includeOffViewport,
+                        interactiveOnly,
+                        interactiveMode,
+                        cancellationToken).ConfigureAwait(false);
             }
             catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
             {
@@ -383,6 +388,50 @@ public sealed partial class AutomationController
 
         var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
         return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ElementRef> ResolveWpfElementRefDetailedAsync(
+        ElementLocator locator,
+        long windowHandle,
+        bool visibleOnly,
+        bool includeOffViewport,
+        bool interactiveOnly,
+        InteractiveMode interactiveMode,
+        CancellationToken cancellationToken)
+    {
+        var request = new ResolveWpfElementRequest(
+            WindowHandle: windowHandle,
+            Locator: locator,
+            RootXPath: null,
+            VisibleOnly: visibleOnly,
+            IncludeOffViewport: includeOffViewport,
+            InteractiveOnly: interactiveOnly,
+            InteractiveMode: interactiveMode,
+            MaxNodes: 8000,
+            ReturnFields: FindReturnFields.Standard);
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+        if (!AgentSupportsCapability(client, AgentProtocolCapabilities.ResolveElementDetailed))
+        {
+            return await client.CallAsync<ElementRef>(
+                "wpf/resolve_element",
+                request,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        var response = await client.CallAsync<ResolveWpfElementDetailedResponse>(
+            AgentProtocolCapabilities.ResolveElementDetailed,
+            request,
+            cancellationToken).ConfigureAwait(false);
+
+        if (response.Ambiguity is not null)
+        {
+            throw new ElementResolutionAmbiguityException(
+                AttachPublicWpfCandidateIds(response.Ambiguity, windowHandle));
+        }
+
+        return response.Element
+            ?? throw new InvalidOperationException("wpf_resolve:invalid_response: Detailed resolution returned no element or ambiguity.");
     }
 
     private async Task<ResolvedWpfLocatorTarget?> TryResolveWpfLocatorTargetForAutoAsync(
@@ -576,6 +625,109 @@ public sealed partial class AutomationController
         }
 
         return handle;
+    }
+
+    private ElementResolutionAmbiguityException BuildUiaAmbiguityException(
+        Window window,
+        ITreeWalker rawWalker,
+        long windowHandle,
+        UiaLocatorAmbiguousException exception)
+    {
+        const int maxCandidates = 5;
+        var candidates = new List<ResolveElementCandidate>(
+            Math.Min(maxCandidates, exception.Candidates.Count));
+        var candidateUnavailable = false;
+        var viewportBounds = TryGetClientBoundsScreen(window, out var clientBounds) ? clientBounds : null;
+
+        for (var index = 0; index < exception.Candidates.Count && index < maxCandidates; index++)
+        {
+            var element = exception.Candidates[index];
+            try
+            {
+                var xpath = ComputeXPath(window, element, rawWalker);
+                var elementId = _elementHandles.RegisterUia(
+                    windowHandle,
+                    xpath,
+                    TryGetRuntimeId(element),
+                    element.ControlType.ToString(),
+                    GetAutomationId(element),
+                    GetName(element),
+                    GetClassName(element));
+                candidates.Add(new ResolveElementCandidate(
+                    index,
+                    BuildElementRefUia(element, xpath, FindReturnFields.Standard, elementId, viewportBounds)));
+            }
+            catch
+            {
+                candidateUnavailable = true;
+            }
+        }
+
+        var truncatedByLimit = exception.Candidates.Count > maxCandidates;
+        var ambiguity = new ResolveElementAmbiguity(
+            Code: "ambiguous_element",
+            BackendUsed: InspectionBackend.Uia,
+            WindowHandleUsed: windowHandle,
+            ReturnedCandidates: candidates.Count,
+            DiscoveredCandidates: exception.Candidates.Count,
+            Truncated: truncatedByLimit || candidateUnavailable,
+            Candidates: candidates,
+            TruncatedReason: truncatedByLimit ? "maxCandidates" : candidateUnavailable ? "candidateUnavailable" : null);
+
+        return new ElementResolutionAmbiguityException(ambiguity);
+    }
+
+    private ResolveElementAmbiguity AttachPublicWpfCandidateIds(
+        ResolveElementAmbiguity ambiguity,
+        long windowHandle)
+    {
+        var candidates = ambiguity.Candidates
+            .Select(candidate =>
+            {
+                var element = candidate.Element;
+                var elementId = _elementHandles.RegisterWpf(
+                    windowHandle,
+                    element.XPath,
+                    element.ElementIdWpf,
+                    element.Type,
+                    element.AutomationId,
+                    element.Name,
+                    element.ClassName,
+                    element.Bounds);
+
+                return candidate with
+                {
+                    Element = element with { ElementId = elementId, ElementIdWpf = null }
+                };
+            })
+            .ToArray();
+
+        return ambiguity with
+        {
+            BackendUsed = InspectionBackend.Wpf,
+            WindowHandleUsed = windowHandle,
+            ReturnedCandidates = candidates.Length,
+            Candidates = candidates
+        };
+    }
+
+    private static FindElementsResponse StripElementIds(FindElementsResponse response)
+    {
+        if (response.Matches.Count == 0)
+        {
+            return response;
+        }
+
+        var matchesWithoutIds = response.Matches
+            .Select(match => match with
+            {
+                ElementId = null,
+                ElementIdUia = null,
+                ElementIdWpf = null
+            })
+            .ToArray();
+
+        return response with { Matches = matchesWithoutIds };
     }
 
     private FindElementsResponse AttachWpfElementIds(FindElementsResponse response, long windowHandle)
@@ -894,7 +1046,7 @@ public sealed partial class AutomationController
         string XPath,
         UiaMappingDiagnostics? UiaMapping);
 
-    private sealed record ElementHandle(
+    internal sealed record ElementHandle(
         InspectionBackend Backend,
         long WindowHandle,
         string XPath,
@@ -906,17 +1058,36 @@ public sealed partial class AutomationController
         string? ClassName,
         Rect? Bounds = null);
 
-    private sealed class ElementHandleStore
+    internal readonly record struct ElementHandleRelease(
+        bool Released,
+        string? WpfAgentElementIdToRelease);
+
+    internal readonly record struct ElementHandleUpdate(
+        bool Updated,
+        string? WpfAgentElementIdToRelease);
+
+    internal sealed class ElementHandleStore
     {
         private readonly object _sync = new();
         private readonly Dictionary<string, ElementHandle> _entries = new(StringComparer.Ordinal);
         private readonly LinkedList<string> _lru = new();
         private readonly Dictionary<string, LinkedListNode<string>> _lruNodes = new(StringComparer.Ordinal);
+        private readonly Dictionary<WpfAgentHandleKey, int> _wpfAgentHandleReferenceCounts = new();
         private readonly int _capacity;
 
         public ElementHandleStore()
+            : this(GetEnvInt("WPF_TOOLS_MCP_MAX_ELEMENT_HANDLES", defaultValue: 2000, minValue: 1, maxValue: 200_000))
         {
-            _capacity = GetEnvInt("WPF_TOOLS_MCP_MAX_ELEMENT_HANDLES", defaultValue: 2000, minValue: 1, maxValue: 200_000);
+        }
+
+        internal ElementHandleStore(int capacity)
+        {
+            if (capacity < 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(capacity), "capacity must be >= 1.");
+            }
+
+            _capacity = capacity;
         }
 
         public bool TryGet(string elementId, out ElementHandle handle)
@@ -934,21 +1105,18 @@ public sealed partial class AutomationController
             }
         }
 
-        public bool Release(string elementId)
+        public ElementHandleRelease Release(string elementId)
         {
             lock (_sync)
             {
-                if (!_entries.Remove(elementId))
+                if (!TryRemoveEntry(elementId, out var handle, out var releaseWpfAgentElementId))
                 {
-                    return false;
+                    return new ElementHandleRelease(Released: false, WpfAgentElementIdToRelease: null);
                 }
 
-                if (_lruNodes.Remove(elementId, out var node))
-                {
-                    _lru.Remove(node);
-                }
-
-                return true;
+                return new ElementHandleRelease(
+                    Released: true,
+                    WpfAgentElementIdToRelease: releaseWpfAgentElementId ? handle.WpfAgentElementId : null);
             }
         }
 
@@ -959,6 +1127,7 @@ public sealed partial class AutomationController
                 _entries.Clear();
                 _lru.Clear();
                 _lruNodes.Clear();
+                _wpfAgentHandleReferenceCounts.Clear();
             }
         }
 
@@ -1008,7 +1177,7 @@ public sealed partial class AutomationController
             }
         }
 
-        public bool TryUpdateWpfResolution(string elementId, ElementRef element)
+        public ElementHandleUpdate TryUpdateWpfResolution(string elementId, ElementRef element)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(elementId);
             ArgumentNullException.ThrowIfNull(element);
@@ -1017,15 +1186,15 @@ public sealed partial class AutomationController
             {
                 if (!_entries.TryGetValue(elementId, out var existing))
                 {
-                    return false;
+                    return new ElementHandleUpdate(Updated: false, WpfAgentElementIdToRelease: null);
                 }
 
                 if (existing.Backend != InspectionBackend.Wpf)
                 {
-                    return false;
+                    return new ElementHandleUpdate(Updated: false, WpfAgentElementIdToRelease: null);
                 }
 
-                _entries[elementId] = existing with
+                var updated = existing with
                 {
                     XPath = element.XPath,
                     WpfAgentElementId = string.IsNullOrWhiteSpace(element.ElementIdWpf)
@@ -1037,8 +1206,23 @@ public sealed partial class AutomationController
                     ClassName = string.IsNullOrWhiteSpace(element.ClassName) ? existing.ClassName : element.ClassName,
                     Bounds = element.Bounds ?? existing.Bounds
                 };
+
+                string? wpfAgentElementIdToRelease = null;
+                if (GetWpfAgentHandleKey(existing) != GetWpfAgentHandleKey(updated))
+                {
+                    if (RemoveWpfAgentHandleReference(existing))
+                    {
+                        wpfAgentElementIdToRelease = existing.WpfAgentElementId;
+                    }
+
+                    AddWpfAgentHandleReference(updated);
+                }
+
+                _entries[elementId] = updated;
                 Touch(elementId);
-                return true;
+                return new ElementHandleUpdate(
+                    Updated: true,
+                    WpfAgentElementIdToRelease: wpfAgentElementIdToRelease);
             }
         }
 
@@ -1107,6 +1291,7 @@ public sealed partial class AutomationController
                     }
 
                     _entries[elementId] = handle;
+                    AddWpfAgentHandleReference(handle);
                     var node = _lru.AddFirst(elementId);
                     _lruNodes[elementId] = node;
                     return elementId;
@@ -1130,10 +1315,65 @@ public sealed partial class AutomationController
             while (_entries.Count >= _capacity && _lru.Last is { } last)
             {
                 var id = last.Value;
-                _lru.RemoveLast();
-                _lruNodes.Remove(id);
-                _entries.Remove(id);
+                _ = TryRemoveEntry(id, out _, out _);
             }
+        }
+
+        private bool TryRemoveEntry(
+            string elementId,
+            out ElementHandle handle,
+            out bool releaseWpfAgentElementId)
+        {
+            if (!_entries.Remove(elementId, out handle!))
+            {
+                releaseWpfAgentElementId = false;
+                return false;
+            }
+
+            if (_lruNodes.Remove(elementId, out var node))
+            {
+                _lru.Remove(node);
+            }
+
+            releaseWpfAgentElementId = RemoveWpfAgentHandleReference(handle);
+            return true;
+        }
+
+        private void AddWpfAgentHandleReference(ElementHandle handle)
+        {
+            if (GetWpfAgentHandleKey(handle) is not { } key)
+            {
+                return;
+            }
+
+            _wpfAgentHandleReferenceCounts.TryGetValue(key, out var count);
+            _wpfAgentHandleReferenceCounts[key] = checked(count + 1);
+        }
+
+        private bool RemoveWpfAgentHandleReference(ElementHandle handle)
+        {
+            if (GetWpfAgentHandleKey(handle) is not { } key ||
+                !_wpfAgentHandleReferenceCounts.TryGetValue(key, out var count))
+            {
+                return false;
+            }
+
+            if (count > 1)
+            {
+                _wpfAgentHandleReferenceCounts[key] = count - 1;
+                return false;
+            }
+
+            _wpfAgentHandleReferenceCounts.Remove(key);
+            return true;
+        }
+
+        private static WpfAgentHandleKey? GetWpfAgentHandleKey(ElementHandle handle)
+        {
+            return handle.Backend == InspectionBackend.Wpf &&
+                   !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
+                ? new WpfAgentHandleKey(handle.WindowHandle, handle.WpfAgentElementId.Trim())
+                : null;
         }
 
         private static string CreateRandomId()
@@ -1145,5 +1385,7 @@ public sealed partial class AutomationController
                 .Replace('+', '-')
                 .Replace('/', '_');
         }
+
+        private readonly record struct WpfAgentHandleKey(long WindowHandle, string ElementId);
     }
 }

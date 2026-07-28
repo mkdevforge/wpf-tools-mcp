@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -11,6 +12,7 @@ public sealed partial class AutomationController
     private AgentClient? _agentClient;
     private string? _agentPipeName;
     private int? _agentPid;
+    private AgentCapabilitiesResponse? _agentCapabilities;
     private string? _agentAutoConnectFailure;
     private DateTimeOffset? _agentAutoConnectFailureAtUtc;
 
@@ -144,14 +146,45 @@ public sealed partial class AutomationController
             $"stale_element: not_found for '{target.PublicElementId}'.{context} Call resolve_element again. Last agent error: {lastAgentError}");
     }
 
-    private ElementRef StripAgentElementId(ElementRef element, string? publicElementId = null)
+    private async Task<ElementRef> StripAgentElementIdAsync(
+        AgentClient client,
+        ElementRef element,
+        string? publicElementId)
     {
         if (!string.IsNullOrWhiteSpace(publicElementId))
         {
-            _elementHandles.TryUpdateWpfResolution(publicElementId, element);
+            var update = _elementHandles.TryUpdateWpfResolution(publicElementId, element);
+            await TryReleaseWpfAgentElementAsync(
+                client,
+                update.WpfAgentElementIdToRelease).ConfigureAwait(false);
         }
 
-        return element with { ElementIdWpf = null };
+        return StripAgentElementId(element);
+    }
+
+    private static ElementRef StripAgentElementId(ElementRef element) =>
+        element with { ElementIdWpf = null };
+
+    private static async Task TryReleaseWpfAgentElementAsync(
+        AgentClient client,
+        string? agentElementId)
+    {
+        if (string.IsNullOrWhiteSpace(agentElementId))
+        {
+            return;
+        }
+
+        try
+        {
+            _ = await client.CallAsync<ReleaseElementResponse>(
+                "wpf/release_element",
+                new ReleaseWpfElementRequest(agentElementId),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Rebinding succeeded locally; stale in-proc handle cleanup is best-effort.
+        }
     }
 
     public async Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default)
@@ -184,7 +217,15 @@ public sealed partial class AutomationController
             // Ensure the agent is still responsive
             try
             {
-                _ = await existingClient.CallAsync<string>("ping", @params: null, cancellationToken);
+                var capabilities = await VerifyAgentAndGetCapabilitiesAsync(existingClient, cancellationToken);
+                lock (_agentSync)
+                {
+                    if (ReferenceEquals(_agentClient, existingClient))
+                    {
+                        _agentCapabilities = capabilities;
+                    }
+                }
+
                 var response = new InjectAgentResponse(Injected: false, PipeName: existingPipeName);
                 ClearAutoAgentFailure();
                 trace?.SetSummary($"injected={response.Injected} pipe={response.PipeName}");
@@ -210,13 +251,10 @@ public sealed partial class AutomationController
 
         if (connectFirstClient is not null)
         {
+            AgentCapabilitiesResponse capabilities;
             try
             {
-                var pong = await connectFirstClient.CallAsync<string>("ping", @params: null, cancellationToken);
-                if (!string.Equals(pong, "pong", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidOperationException($"Unexpected agent ping response '{pong}'.");
-                }
+                capabilities = await VerifyAgentAndGetCapabilitiesAsync(connectFirstClient, cancellationToken);
             }
             catch
             {
@@ -229,6 +267,7 @@ public sealed partial class AutomationController
                 _agentClient = connectFirstClient;
                 _agentPipeName = pipeName;
                 _agentPid = pid;
+                _agentCapabilities = capabilities;
             }
 
             var response = new InjectAgentResponse(Injected: false, PipeName: pipeName);
@@ -263,13 +302,10 @@ public sealed partial class AutomationController
         }
 
         var client = await ConnectToAgentWithRetryAsync(pipeName, cancellationToken);
+        AgentCapabilitiesResponse injectedCapabilities;
         try
         {
-            var pong = await client.CallAsync<string>("ping", @params: null, cancellationToken);
-            if (!string.Equals(pong, "pong", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException($"Unexpected agent ping response '{pong}'.");
-            }
+            injectedCapabilities = await VerifyAgentAndGetCapabilitiesAsync(client, cancellationToken);
         }
         catch
         {
@@ -282,6 +318,7 @@ public sealed partial class AutomationController
             _agentClient = client;
             _agentPipeName = pipeName;
             _agentPid = pid;
+            _agentCapabilities = injectedCapabilities;
         }
 
         var finalResponse = new InjectAgentResponse(Injected: true, PipeName: pipeName);
@@ -414,7 +451,10 @@ public sealed partial class AutomationController
                 cancellationToken).ConfigureAwait(false);
             response = response with
             {
-                Element = StripAgentElementId(response.Element, target.PublicElementId)
+                Element = await StripAgentElementIdAsync(
+                    client,
+                    response.Element,
+                    target.PublicElementId).ConfigureAwait(false)
             };
             var observation = new WpfStateObservation(client, processId, response);
             trace?.SetSummary(
@@ -590,7 +630,13 @@ public sealed partial class AutomationController
             fallbackRequest,
             target,
             cancellationToken);
-        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        response = response with
+        {
+            Element = await StripAgentElementIdAsync(
+                client,
+                response.Element,
+                target.PublicElementId).ConfigureAwait(false)
+        };
         trace?.SetSummary($"bindings={response.Bindings.Count} truncated={response.Truncated}");
         return response;
         }
@@ -779,7 +825,13 @@ public sealed partial class AutomationController
             fallbackRequest,
             target,
             cancellationToken);
-        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        response = response with
+        {
+            Element = await StripAgentElementIdAsync(
+                client,
+                response.Element,
+                target.PublicElementId).ConfigureAwait(false)
+        };
         trace?.SetSummary($"props={response.Properties.Count} truncated={response.Truncated}");
         return response;
         }
@@ -827,7 +879,13 @@ public sealed partial class AutomationController
             fallbackRequest,
             target,
             cancellationToken);
-        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        response = response with
+        {
+            Element = await StripAgentElementIdAsync(
+                client,
+                response.Element,
+                target.PublicElementId).ConfigureAwait(false)
+        };
         trace?.SetSummary($"entries={response.Styles.Count}");
         return response;
         }
@@ -877,7 +935,13 @@ public sealed partial class AutomationController
             fallbackRequest,
             target,
             cancellationToken);
-        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        response = response with
+        {
+            Element = await StripAgentElementIdAsync(
+                client,
+                response.Element,
+                target.PublicElementId).ConfigureAwait(false)
+        };
         var named = response.Template.NamedElements is null ? 0 : response.Template.NamedElements.Count;
         trace?.SetSummary($"named={named}");
         return response;
@@ -952,7 +1016,7 @@ public sealed partial class AutomationController
             throw new InvalidOperationException("WPF agent is not connected.");
         }
 
-        return await client.CallAsync<FindElementsResponse>("wpf/find_elements", request, cancellationToken);
+        return await CallFindElementsWpfAsync(client, request, cancellationToken);
     }
 
     internal async Task<FindElementsResponse?> TryFindElementsWpfAsync(
@@ -970,7 +1034,7 @@ public sealed partial class AutomationController
 
         try
         {
-            return await client.CallAsync<FindElementsResponse>("wpf/find_elements", request, cancellationToken);
+            return await CallFindElementsWpfAsync(client, request, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -981,6 +1045,58 @@ public sealed partial class AutomationController
 
             return null;
         }
+    }
+
+    private async Task<FindElementsResponse> CallFindElementsWpfAsync(
+        AgentClient client,
+        FindElementsWpfRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (AgentSupportsCapability(client, AgentProtocolCapabilities.FindElementsDiscoveryCounts))
+        {
+            return await client.CallAsync<FindElementsResponse>("wpf/find_elements", request, cancellationToken);
+        }
+
+        var requestedMaxResults = Math.Clamp(request.MaxResults, 1, 5000);
+        var legacyRequest = request with
+        {
+            MaxResults = Math.Min(requestedMaxResults + 1, 5000)
+        };
+        var legacy = await client.CallAsync<FindElementsResponse>(
+            "wpf/find_elements",
+            legacyRequest,
+            cancellationToken);
+
+        return NormalizeLegacyFindElementsResponse(legacy, requestedMaxResults);
+    }
+
+    internal static FindElementsResponse NormalizeLegacyFindElementsResponse(
+        FindElementsResponse legacy,
+        int requestedMaxResults)
+    {
+        ArgumentNullException.ThrowIfNull(legacy);
+
+        requestedMaxResults = Math.Clamp(requestedMaxResults, 1, 5000);
+        var discoveredMatches = legacy.Matches.Count;
+        var exceededRequestedLimit = discoveredMatches > requestedMaxResults;
+        var matches = exceededRequestedLimit
+            ? legacy.Matches.Take(requestedMaxResults).ToArray()
+            : legacy.Matches;
+        var truncated = exceededRequestedLimit || legacy.Truncated;
+        var truncatedReason = !string.IsNullOrWhiteSpace(legacy.TruncatedReason)
+            ? legacy.TruncatedReason
+            : exceededRequestedLimit
+                ? "maxResults"
+                : null;
+
+        return legacy with
+        {
+            Matches = matches,
+            ReturnedMatches = matches.Count,
+            DiscoveredMatches = discoveredMatches,
+            Truncated = truncated,
+            TruncatedReason = truncatedReason
+        };
     }
 
     internal async Task<GetPathToElementResponse> GetWpfPathAsync(
@@ -1000,6 +1116,51 @@ public sealed partial class AutomationController
         return await client.CallAsync<GetPathToElementResponse>("wpf/get_path", request, cancellationToken);
     }
 
+    private static async Task<AgentCapabilitiesResponse> VerifyAgentAndGetCapabilitiesAsync(
+        AgentClient client,
+        CancellationToken cancellationToken)
+    {
+        var pong = await client.CallAsync<string>("ping", @params: null, cancellationToken);
+        if (!string.Equals(pong, "pong", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Unexpected agent ping response '{pong}'.");
+        }
+
+        try
+        {
+            var capabilities = await client.CallAsync<AgentCapabilitiesResponse>(
+                AgentProtocolCapabilities.GetCapabilitiesMethod,
+                @params: null,
+                cancellationToken);
+            if (capabilities.ProtocolVersion <= 0 || capabilities.Capabilities is null)
+            {
+                throw new InvalidOperationException("Agent returned an invalid capabilities response.");
+            }
+
+            return capabilities;
+        }
+        catch (InvalidOperationException ex) when (IsUnknownCapabilitiesMethod(ex))
+        {
+            return new AgentCapabilitiesResponse(ProtocolVersion: 0, Capabilities: []);
+        }
+    }
+
+    private static bool IsUnknownCapabilitiesMethod(InvalidOperationException exception) =>
+        string.Equals(
+            exception.Message,
+            $"Unknown method '{AgentProtocolCapabilities.GetCapabilitiesMethod}'.",
+            StringComparison.Ordinal);
+
+    private bool AgentSupportsCapability(AgentClient client, string capability)
+    {
+        lock (_agentSync)
+        {
+            return ReferenceEquals(client, _agentClient) &&
+                   _agentCapabilities is { } capabilities &&
+                   capabilities.Capabilities.Contains(capability, StringComparer.Ordinal);
+        }
+    }
+
     private async Task<AgentClient?> EnsureAgentConnectedOrNullAsync(CancellationToken cancellationToken)
     {
         var application = EnsureAttached();
@@ -1015,6 +1176,8 @@ public sealed partial class AutomationController
             {
                 return client;
             }
+
+            _agentCapabilities = null;
         }
 
         using var process = Process.GetProcessById(pid);
@@ -1028,14 +1191,10 @@ public sealed partial class AutomationController
                 timeout: TimeSpan.FromMilliseconds(250),
                 cancellationToken);
 
+            AgentCapabilitiesResponse capabilities;
             try
             {
-                var pong = await connectClient.CallAsync<string>("ping", @params: null, cancellationToken);
-                if (!string.Equals(pong, "pong", StringComparison.OrdinalIgnoreCase))
-                {
-                    await connectClient.DisposeAsync();
-                    return null;
-                }
+                capabilities = await VerifyAgentAndGetCapabilitiesAsync(connectClient, cancellationToken);
             }
             catch
             {
@@ -1048,6 +1207,7 @@ public sealed partial class AutomationController
                 _agentClient = connectClient;
                 _agentPipeName = pipeName;
                 _agentPid = pid;
+                _agentCapabilities = capabilities;
             }
 
             return connectClient;
@@ -1253,6 +1413,7 @@ public sealed partial class AutomationController
             _agentClient = null;
             _agentPipeName = null;
             _agentPid = null;
+            _agentCapabilities = null;
             _agentAutoConnectFailure = null;
             _agentAutoConnectFailureAtUtc = null;
         }

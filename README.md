@@ -239,6 +239,31 @@ viewport is sampled immediately before and after capture; unstable captures
 are retried and fail with `screenshot_viewport_unstable` rather than returning
 mislabeled evidence.
 
+### Direct Search and Disambiguation
+
+`find_elements` searches the selected WPF or UIA tree directly; callers do not
+need to retrieve a broad visual-tree response first. The default `minimal`
+result keeps only identity and path fields. Set `returnFields=standard` to add
+class, bounds, and best-effort `IsVisible` / `IsOffscreen` context. Results are
+kept in deterministic tree order for an unchanged UI and include reusable
+public `elementId` handles unless `includeElementIds=false` is requested in the
+diagnostics profile.
+
+Search counts have distinct meanings: `ReturnedMatches` is the bounded result
+list, `DiscoveredMatches` is the number observed before search stopped, and
+`ScannedNodes` is the traversal work performed. `DiscoveredMatches` is exact
+when `Truncated=false`; otherwise it is a lower bound. A result is not marked
+as `maxResults`-truncated merely because it exactly fills the requested limit.
+
+When a strict non-XPath `resolve_element` locator matches more than one element,
+the tool returns an `ambiguous_element` tool error with structured,
+deterministically ordered candidate data for both WPF and UIA. Up to five
+candidates include their `index`, standard context, XPath, and reusable
+`elementId`; retry with an index or use a candidate handle directly. A bounded
+candidate summary remains in the text error for clients that do not consume
+structured error content. An ambiguous XPath segment instead returns a
+path-specific text error asking for a one-based `[n]` index on that segment.
+
 ### Response Budgets
 
 Responses are concise and bounded by default. Increase a tool's explicit limit
@@ -250,7 +275,7 @@ complete controls live in the `diagnostics` profile when exposing them in
 |---|---|---|---|
 | `get_visual_tree` | Depth 4, at most 500 nodes, minimal fields | Set `depth`, `maxNodes`, `preset`, or `fields` in `diagnostics` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_uia_tree` | Depth 4, at most 200 nodes | Increase `depth` or `maxNodes` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
-| `find_elements` | At most 25 matches while scanning at most 5,000 nodes; minimal fields | Set `maxResults`, `maxNodes`, or `returnFields` in `diagnostics` | `ReturnedMatches`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
+| `find_elements` | At most 25 matches while scanning at most 5,000 nodes; minimal fields | Set `maxResults` or `returnFields`; `diagnostics` also exposes backend, root, scan limit, and ID controls | `ReturnedMatches`, `DiscoveredMatches`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_element_properties` | Summary preset, at most 25 selected UIA properties; values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, with one shared 20,000-character serialized-value budget. XPaths over 2,000 characters are omitted rather than returned incomplete. | Select the `full` preset and an explicit `maxProperties` in `diagnostics` | `ReturnedProperties`, `SelectedProperties`, `ScannedProperties`, `Truncated`, `TruncatedReason`, `TruncatedReasons` |
 | `get_binding_errors` | Depth 6, at most 200 errors while scanning at most 2,000 nodes | Set the error, depth, and scan limits in `diagnostics` | `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_data_context` | Summary mode, depth 2, at most 50 properties per object and 2,000 characters per string | Use the additional mode and size controls in `diagnostics` | `Truncated` and bounded warnings |

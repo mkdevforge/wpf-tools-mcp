@@ -773,12 +773,37 @@ public sealed record ElementRef(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? Bounds = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonPropertyName("elementId")] string? ElementId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonPropertyName("elementIdUia")] string? ElementIdUia = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonPropertyName("elementIdWpf")] string? ElementIdWpf = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonPropertyName("elementIdWpf")] string? ElementIdWpf = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsVisible { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsOffscreen { get; init; }
+}
 
 public sealed record ResolveElementResponse(
     InspectionBackend BackendUsed,
     ElementRef Element,
     long WindowHandleUsed);
+
+public sealed record ResolveElementCandidate(
+    int Index,
+    ElementRef Element);
+
+public sealed record ResolveElementAmbiguity(
+    string Code,
+    InspectionBackend BackendUsed,
+    long WindowHandleUsed,
+    int ReturnedCandidates,
+    int DiscoveredCandidates,
+    bool Truncated,
+    IReadOnlyList<ResolveElementCandidate> Candidates,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
+
+public sealed record ResolveWpfElementDetailedResponse(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ElementRef? Element,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ResolveElementAmbiguity? Ambiguity);
 
 public sealed record ReleaseElementResponse(bool Released);
 
@@ -789,7 +814,10 @@ public sealed record FindElementsResponse(
     int ScannedNodes,
     bool Truncated,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null)
+{
+    public int DiscoveredMatches { get; init; } = ReturnedMatches;
+}
 
 public sealed record GetPathToElementResponse(
     InspectionBackend BackendUsed,
@@ -823,7 +851,8 @@ public sealed record FindElementsWpfRequest(
     InteractiveMode InteractiveMode = InteractiveMode.Heuristic,
     int MaxResults = 25,
     int MaxNodes = 1000,
-    FindReturnFields ReturnFields = FindReturnFields.Minimal);
+    FindReturnFields ReturnFields = FindReturnFields.Minimal,
+    bool IncludeElementIds = true);
 
 public sealed record GetWpfPathRequest(
     long? WindowHandle = null,

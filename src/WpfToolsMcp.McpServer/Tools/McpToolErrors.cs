@@ -1,5 +1,9 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using ModelContextProtocol;
+using ModelContextProtocol.Protocol;
+using WpfToolsMcp.Automation;
+using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.McpServer.Tools;
 
@@ -21,23 +25,77 @@ internal static class McpToolErrors
         }
         catch (Exception ex)
         {
-            var baseException = ex.GetBaseException();
-            var message = string.IsNullOrWhiteSpace(baseException.Message)
-                ? baseException.GetType().Name
-                : baseException.Message;
-            var innerMessage = ex.InnerException is not null && !ReferenceEquals(ex.InnerException, baseException)
-                ? ex.InnerException.Message
-                : null;
-            var code = GetKnownErrorCode(message);
-            var prefix = string.IsNullOrWhiteSpace(code) ||
-                         message.StartsWith(code + ":", StringComparison.OrdinalIgnoreCase)
-                ? ""
-                : $"{code}: ";
-            var detail = string.IsNullOrWhiteSpace(innerMessage) ? "" : $" Inner: {innerMessage}";
-            var tool = string.IsNullOrWhiteSpace(toolName) ? "unknown" : toolName;
-
-            throw new McpException($"tool={tool}: {prefix}{message}{detail}", baseException);
+            throw CreateMcpException(ex, toolName);
         }
+    }
+
+    public static async Task<CallToolResult> RunResolveElementAsync(
+        Func<Task<ResolveElementResponse>> action,
+        [CallerMemberName] string toolName = "")
+    {
+        try
+        {
+            var response = await action().ConfigureAwait(false);
+            var structuredContent = JsonSerializer.SerializeToNode(
+                response,
+                McpJsonUtilities.DefaultOptions);
+            return new CallToolResult
+            {
+                Content =
+                [
+                    new TextContentBlock
+                    {
+                        Text = structuredContent?.ToJsonString(McpJsonUtilities.DefaultOptions)
+                            ?? "null"
+                    }
+                ],
+                StructuredContent = structuredContent
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (McpException)
+        {
+            throw;
+        }
+        catch (ElementResolutionAmbiguityException ex)
+        {
+            var tool = string.IsNullOrWhiteSpace(toolName) ? "unknown" : toolName;
+            return new CallToolResult
+            {
+                IsError = true,
+                Content = [new TextContentBlock { Text = $"tool={tool}: {ex.Message}" }],
+                StructuredContent = JsonSerializer.SerializeToNode(
+                    ex.Ambiguity,
+                    McpJsonUtilities.DefaultOptions)
+            };
+        }
+        catch (Exception ex)
+        {
+            throw CreateMcpException(ex, toolName);
+        }
+    }
+
+    private static McpException CreateMcpException(Exception ex, string toolName)
+    {
+        var baseException = ex.GetBaseException();
+        var message = string.IsNullOrWhiteSpace(baseException.Message)
+            ? baseException.GetType().Name
+            : baseException.Message;
+        var innerMessage = ex.InnerException is not null && !ReferenceEquals(ex.InnerException, baseException)
+            ? ex.InnerException.Message
+            : null;
+        var code = GetKnownErrorCode(message);
+        var prefix = string.IsNullOrWhiteSpace(code) ||
+                     message.StartsWith(code + ":", StringComparison.OrdinalIgnoreCase)
+            ? ""
+            : $"{code}: ";
+        var detail = string.IsNullOrWhiteSpace(innerMessage) ? "" : $" Inner: {innerMessage}";
+        var tool = string.IsNullOrWhiteSpace(toolName) ? "unknown" : toolName;
+
+        return new McpException($"tool={tool}: {prefix}{message}{detail}", baseException);
     }
 
     private static string? GetKnownErrorCode(string message)
@@ -63,6 +121,7 @@ internal static class McpToolErrors
             "wpf_handle_stale" => first,
             "no_hit_at_point" => first,
             "invalid_request" => first,
+            "ambiguous_element" => first,
             "interaction_policy_blocked" => first,
             "screenshot_viewport_unstable" => first,
             "viewport_conditions_unstable" => first,

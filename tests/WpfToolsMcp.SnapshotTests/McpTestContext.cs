@@ -72,6 +72,27 @@ internal sealed class McpTestContext : IAsyncDisposable
         IReadOnlyDictionary<string, object?>? arguments = null,
         CancellationToken cancellationToken = default)
     {
+        var result = await CallToolResultAsync(toolName, arguments, cancellationToken);
+        if (result.IsError is true)
+        {
+            var details = ExtractText(result);
+            var stderrTail = GetStderrTail(maxLines: 30);
+            if (stderrTail.Count > 0)
+            {
+                details += $"{Environment.NewLine}--- server stderr (tail) ---{Environment.NewLine}{string.Join(Environment.NewLine, stderrTail)}";
+            }
+
+            throw new InvalidOperationException($"Tool '{toolName}' failed: {details}");
+        }
+
+        return Deserialize<T>(toolName, ExtractJson(result));
+    }
+
+    public async Task<CallToolResult> CallToolResultAsync(
+        string toolName,
+        IReadOnlyDictionary<string, object?>? arguments = null,
+        CancellationToken cancellationToken = default)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(toolName);
 
         var nonNullArguments = new Dictionary<string, object?>();
@@ -86,20 +107,12 @@ internal sealed class McpTestContext : IAsyncDisposable
             }
         }
 
-        var result = await _client.CallToolAsync(toolName, nonNullArguments, progress: null, options: null, cancellationToken);
-        if (result.IsError is true)
-        {
-            var details = ExtractText(result);
-            var stderrTail = GetStderrTail(maxLines: 30);
-            if (stderrTail.Count > 0)
-            {
-                details += $"{Environment.NewLine}--- server stderr (tail) ---{Environment.NewLine}{string.Join(Environment.NewLine, stderrTail)}";
-            }
-
-            throw new InvalidOperationException($"Tool '{toolName}' failed: {details}");
-        }
-
-        return Deserialize<T>(toolName, ExtractJson(result));
+        return await _client.CallToolAsync(
+            toolName,
+            nonNullArguments,
+            progress: null,
+            options: null,
+            cancellationToken);
     }
 
     private static T Deserialize<T>(string toolName, string json)

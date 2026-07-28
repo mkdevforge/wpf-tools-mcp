@@ -332,7 +332,9 @@ public sealed class CustomControlsSnapshots
         {
             ElementId = "<element>",
             ClassName = string.IsNullOrWhiteSpace(element.ClassName) ? null : "<class>",
-            Bounds = element.Bounds is null ? null : new Rect(0, 0, 0, 0)
+            Bounds = element.Bounds is null ? null : new Rect(0, 0, 0, 0),
+            IsVisible = null,
+            IsOffscreen = null
         };
 
     private static UiaMappingDiagnostics? ScrubUiaMapping(UiaMappingDiagnostics? mapping) =>

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using WpfToolsMcp.Automation;
 using WpfToolsMcp.Contracts;
@@ -105,7 +106,7 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "find_elements"), Description("Find elements without dumping the full tree.")]
+    [McpServerTool(Name = "find_elements"), Description("Find deterministic, bounded matches without dumping the full tree.")]
     public static Task<FindElementsResponse> FindElements(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -161,8 +162,8 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "resolve_element"), Description("Resolve an element and return an elementId handle for re-use.")]
-    public static Task<ResolveElementResponse> ResolveElement(
+    [McpServerTool(Name = "resolve_element"), Description("Resolve an element for re-use; ambiguity returns structured candidates.")]
+    public static Task<CallToolResult> ResolveElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
         [Description("Element locator")] ElementLocator locator,
@@ -176,7 +177,7 @@ public static class InspectionTools
         [Description("Filter to interactive elements only")] bool interactiveOnly = false,
         [Description("Interactive filtering mode")] InteractiveMode interactiveMode = InteractiveMode.Heuristic,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() =>
+        McpToolErrors.RunResolveElementAsync(() =>
         {
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
             return automation.RunExclusiveAsync(

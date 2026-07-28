@@ -120,8 +120,8 @@ see `README.md` for the current profile split and configuration.
 | `list_displays` | List connected displays and virtual screen bounds (multi-monitor diagnostics) | Virtual screen bounds + per-display bounds |
 | `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`) and viewport evidence (`includeViewport=true`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload and `ViewportConditions` |
 | `get_visual_tree` | Return an inspection tree (UIA or WPF) for the main window or a subtree | Structured JSON. Configurable depth. `visibleOnly=true` means **in-viewport**; use `includeOffViewport=true` to include offscreen elements. |
-| `find_elements` | Find elements without dumping the full tree | Matches with element summaries and optional `elementId`s |
-| `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef (includes `elementId`, XPath, bounds, etc.) |
+| `find_elements` | Find elements without dumping the full tree; minimal or standard result context | Deterministically ordered matches, returned/discovered/scanned counts, truncation metadata, and optional `elementId`s |
+| `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef on success; non-XPath ambiguity returns an `ambiguous_element` tool error with up to five structured, index-addressable candidate ElementRefs; ambiguous XPath segments return a path-specific indexing error |
 | `get_path_to_element` | Get the XPath for a resolved element | XPath string |
 | `pick_element_at_point` | Pick an element at a coordinate (`coordSpace`: screen/client) | ElementRef + optional ancestor chain |
 | `highlight_element` | Highlight an element on-screen. Can optionally return an annotated screenshot (`returnScreenshot=true`). | Highlight result + bounds + method used |
@@ -280,10 +280,11 @@ such as `select_item.itemLocator`, have tool-specific schemas and semantics.
 }
 ```
 
-If multiple elements match a strict locator, the server returns an ambiguity
-error and asks the caller to narrow the query or provide an index. `xpath` and
-`index` cannot be used together. AutomationId is the preferred stable identity
-when an application exposes one.
+If multiple elements match a strict non-XPath locator, the server returns a
+structured ambiguity error and asks the caller to narrow the query or provide
+an index. An ambiguous XPath segment instead asks the caller to add a one-based
+`[n]` index to that segment; `xpath` and locator `index` cannot be used together.
+AutomationId is the preferred stable identity when an application exposes one.
 
 ---
 
@@ -419,7 +420,7 @@ Phase 1 delivers a fully functional MCP server that can see and interact with WP
 - Playwright-like robustness: `wait_for` (attached|visible|enabled|actionable|stable|value_equals|name_contains)
 - Pointer interactions: `drag` (for sliders, splitters, reorder, etc.)
 - `scroll_to_element`, `set_active_window`
-- Element handles: `resolve_element` returns an `elementId` handle for re-use across subsequent tool calls (and `find_elements` can include `elementId` values). `uia_...` handles are validated best-effort (XPath + RuntimeId) while `wpf_...` handles are soft (XPath-based) and may go stale if the visual tree changes.
+- Element handles: `resolve_element` returns an `elementId` handle for re-use across subsequent tool calls (and `find_elements` can include `elementId` values). Strict non-XPath ambiguity is a structured tool error whose bounded WPF/UIA candidates use the same deterministic ordering as locator `index`; ambiguous XPath segments retain their path-specific one-based indexing error. `uia_...` handles are validated best-effort (XPath + RuntimeId) while `wpf_...` handles are soft (XPath-based) and may go stale if the visual tree changes.
 - Test app expanded with all pages (DataGrid, Navigation, DeeplyNested, DynamicContent, Dialogs, CustomControls)
 - Integration flow tests: launch → inspect → interact → re-inspect → verify state changed
 - Error handling: element not found, ambiguous locator, process not running, stale references

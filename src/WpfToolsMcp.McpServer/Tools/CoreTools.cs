@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using WpfToolsMcp.Automation;
 using WpfToolsMcp.Contracts;
@@ -261,7 +262,7 @@ public static class CoreInspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "find_elements"), Description("Find matching elements without dumping the full tree.")]
+    [McpServerTool(Name = "find_elements"), Description("Find deterministic, bounded matches without dumping the full tree.")]
     public static Task<FindElementsResponse> FindElements(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -269,6 +270,7 @@ public static class CoreInspectionTools
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Only include visible elements")] bool visibleOnly = true,
         [Description("Maximum returned matches")] int maxResults = 25,
+        [Description("Match verbosity preset")] FindReturnFields returnFields = FindReturnFields.Minimal,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -285,21 +287,21 @@ public static class CoreInspectionTools
                     InteractiveMode.Heuristic,
                     maxResults,
                     maxNodes: 5000,
-                    FindReturnFields.Minimal,
+                    returnFields,
                     includeElementIds: true,
                     cancellationToken,
                     autoInject: true),
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "resolve_element"), Description("Resolve an element and return an elementId handle for reuse.")]
-    public static Task<ResolveElementResponse> ResolveElement(
+    [McpServerTool(Name = "resolve_element"), Description("Resolve an element for reuse; ambiguity returns structured candidates.")]
+    public static Task<CallToolResult> ResolveElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
         [Description("Element locator")] CoreElementLocator locator,
         [Description("Optional native window handle")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() =>
+        McpToolErrors.RunResolveElementAsync(() =>
         {
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
             return automation.RunExclusiveAsync(

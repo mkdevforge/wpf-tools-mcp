@@ -140,7 +140,7 @@ public sealed class ToolProfileTests
         Assert.That(GetInputPropertyNames(tools["get_visual_tree"]), Is.EqualTo(
             new[] { "depth", "maxNodes", "root", "sessionId", "visibleOnly", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["find_elements"]), Is.EqualTo(
-            new[] { "maxResults", "query", "sessionId", "visibleOnly", "windowHandle" }));
+            new[] { "maxResults", "query", "returnFields", "sessionId", "visibleOnly", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_uia_tree"]), Is.EqualTo(
             new[] { "depth", "maxNodes", "root", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_element_properties"]), Is.EqualTo(
@@ -155,6 +155,10 @@ public sealed class ToolProfileTests
             new[] { "clickType", "elementId", "interactionPolicy", "locator", "sessionId" }));
         Assert.That(GetInputPropertyNames(tools["drag"]), Is.EqualTo(
             new[] { "elementId", "interactionPolicy", "locator", "sessionId", "targetElementId", "targetLocator", "toX", "toY" }));
+        Assert.That(
+            tools["resolve_element"].ProtocolTool.OutputSchema,
+            Is.Null,
+            "resolve_element should not advertise the protocol CallToolResult as its output schema.");
 
         foreach (var toolName in new[]
                  {
@@ -444,14 +448,39 @@ public sealed class ToolProfileTests
         var launch = await LaunchPrimaryTestAppAsync(mcp);
         try
         {
-            var matches = await mcp.CallToolAsync<FindElementsResponse>("find_elements", new Dictionary<string, object?>
+            var minimalMatches = await mcp.CallToolAsync<FindElementsResponse>("find_elements", new Dictionary<string, object?>
             {
                 ["sessionId"] = launch.SessionId,
                 ["query"] = new Dictionary<string, object?> { ["automationId"] = "Basic_Button" },
                 ["maxResults"] = 3
             });
 
-            Assert.That(matches.ReturnedMatches, Is.EqualTo(1));
+            Assert.That(minimalMatches.ReturnedMatches, Is.EqualTo(1));
+            Assert.Multiple(() =>
+            {
+                Assert.That(minimalMatches.Matches[0].ClassName, Is.Null);
+                Assert.That(minimalMatches.Matches[0].Bounds, Is.Null);
+                Assert.That(minimalMatches.Matches[0].IsVisible, Is.Null);
+                Assert.That(minimalMatches.Matches[0].IsOffscreen, Is.Null);
+            });
+
+            var matches = await mcp.CallToolAsync<FindElementsResponse>("find_elements", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["query"] = new Dictionary<string, object?> { ["automationId"] = "Basic_Button" },
+                ["maxResults"] = 3,
+                ["returnFields"] = "standard"
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(matches.ReturnedMatches, Is.EqualTo(1));
+                Assert.That(matches.DiscoveredMatches, Is.EqualTo(1));
+                Assert.That(matches.Matches[0].Type, Is.EqualTo("Button"));
+                Assert.That(matches.Matches[0].ClassName, Is.Not.Null.And.Not.Empty);
+                Assert.That(matches.Matches[0].Bounds, Is.Not.Null);
+                Assert.That(matches.Matches[0].IsVisible, Is.True);
+            });
 
             var sessions = await mcp.CallToolAsync<ListSessionsResponse>("list_sessions");
             Assert.That(sessions.Sessions.Select(s => s.SessionId), Does.Contain(launch.SessionId));

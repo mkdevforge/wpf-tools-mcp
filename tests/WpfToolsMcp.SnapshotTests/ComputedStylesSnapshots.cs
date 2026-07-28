@@ -208,7 +208,9 @@ public sealed class ComputedStylesSnapshots
     private static ElementRef ScrubElementRef(ElementRef element) =>
         element with
         {
-            Bounds = element.Bounds is { } bounds ? bounds with { X = 0, Y = 0 } : null
+            Bounds = element.Bounds is { } bounds ? bounds with { X = 0, Y = 0 } : null,
+            IsVisible = null,
+            IsOffscreen = null
         };
 
     private static bool ShouldSkipForMissingAssets(InvalidOperationException ex)
