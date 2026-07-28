@@ -484,7 +484,7 @@ public static class CoreWpfDiagnosticsTools
                     includeUnset: false,
                     maxProperties: Math.Min(propertyNames.Length, 200),
                     valueFormat: "string",
-                    cancellationToken),
+                    cancellationToken: cancellationToken),
                 cancellationToken);
         });
 

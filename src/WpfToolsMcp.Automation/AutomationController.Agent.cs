@@ -802,7 +802,9 @@ public sealed partial class AutomationController
         bool includeUnset = false,
         int maxProperties = 500,
         string valueFormat = "string",
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool includeProvenance = false,
+        int maxProvenanceCandidates = 20)
     {
         var trace = BeginTraceSpan("get_computed_properties");
         try
@@ -810,6 +812,7 @@ public sealed partial class AutomationController
         var target = PrepareWpfAgentTarget("get_computed_properties", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var capabilities = includeProvenance ? GetAgentCapabilities(client) : null;
         var request = new GetComputedPropertiesRequest(
             WindowHandle: target.WindowHandle,
             Locator: target.Locator,
@@ -819,18 +822,23 @@ public sealed partial class AutomationController
             IncludeDefault: includeDefault,
             IncludeUnset: includeUnset,
             MaxProperties: maxProperties,
-            ValueFormat: valueFormat);
+            ValueFormat: valueFormat,
+            IncludeProvenance: includeProvenance,
+            MaxProvenanceCandidates: maxProvenanceCandidates);
 
         var fallbackRequest = target.RecoveryLocator is null
             ? null
             : request with { Locator = target.RecoveryLocator, ElementId = null };
-        var response = await CallWpfAgentTargetAsync<GetComputedPropertiesResponse>(
-            client,
-            "wpf/get_computed_properties",
-            request,
-            fallbackRequest,
-            target,
-            cancellationToken);
+        var response = await CallGetComputedPropertiesWhenSupportedAsync(
+            includeProvenance,
+            capabilities,
+            () => CallWpfAgentTargetAsync<GetComputedPropertiesResponse>(
+                client,
+                "wpf/get_computed_properties",
+                request,
+                fallbackRequest,
+                target,
+                cancellationToken));
         response = response with
         {
             Element = await StripAgentElementIdAsync(
@@ -1235,6 +1243,26 @@ public sealed partial class AutomationController
                capabilities.Capabilities.Contains(AgentProtocolCapabilities.GetLayoutContext, StringComparer.Ordinal)
             ? call()
             : Task.FromException<T>(CreateGetLayoutContextCapabilityException());
+    }
+
+    internal static InvalidOperationException CreateComputedPropertyProvenanceCapabilityException() =>
+        new(
+            "agent_capability_unavailable: get_computed_properties with includeProvenance=true requires the current WPF agent. " +
+            "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
+
+    internal static Task<T> CallGetComputedPropertiesWhenSupportedAsync<T>(
+        bool includeProvenance,
+        AgentCapabilitiesResponse? capabilities,
+        Func<Task<T>> call)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+        return !includeProvenance ||
+               capabilities is not null &&
+               capabilities.Capabilities.Contains(
+                   AgentProtocolCapabilities.GetComputedPropertyProvenance,
+                   StringComparer.Ordinal)
+            ? call()
+            : Task.FromException<T>(CreateComputedPropertyProvenanceCapabilityException());
     }
 
     private AgentCapabilitiesResponse? GetAgentCapabilities(AgentClient client)

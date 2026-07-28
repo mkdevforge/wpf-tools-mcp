@@ -1,0 +1,130 @@
+<Window x:Class="WpfToolsMcp.TestApp.ProvenanceProbe.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:WpfToolsMcp.TestApp.ProvenanceProbe"
+        xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+        Title="WPF Tools MCP Provenance Probe"
+        Width="720"
+        Height="640"
+        WindowStartupLocation="Manual"
+        Left="100"
+        Top="100"
+        Topmost="True">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Provenance.StaticBrush" Color="#FF2C6E49" />
+        <SolidColorBrush x:Key="Provenance.DynamicBrush" Color="#FF3567B7" />
+        <sys:Double x:Key="Provenance.AmbiguousWidthA">42</sys:Double>
+        <sys:Double x:Key="Provenance.AmbiguousWidthB">42</sys:Double>
+        <local:ProvenanceConverter x:Key="Provenance.Converter" />
+
+        <Style x:Key="Provenance.BaseTextStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="17" />
+        </Style>
+
+        <Style x:Key="Provenance.ExplicitTextStyle"
+               TargetType="{x:Type TextBlock}"
+               BasedOn="{StaticResource Provenance.BaseTextStyle}">
+            <Setter Property="Foreground" Value="{StaticResource Provenance.StaticBrush}" />
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Hot">
+                    <Setter Property="FontWeight" Value="Bold" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="{x:Type Button}">
+            <Setter Property="Padding" Value="12,4" />
+        </Style>
+
+        <ControlTemplate x:Key="Provenance.ButtonTemplate" TargetType="{x:Type Button}">
+            <Border x:Name="TemplateBorder"
+                    AutomationProperties.AutomationId="Provenance_TemplateChild"
+                    Background="{TemplateBinding Background}"
+                    Padding="{TemplateBinding Padding}">
+                <ContentPresenter />
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="Tag" Value="Templated">
+                    <Setter Property="Padding" Value="7" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+    </Window.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="20">
+            <Border AutomationProperties.AutomationId="Provenance_Local"
+                    Width="123"
+                    Height="24" />
+
+            <Border AutomationProperties.AutomationId="Provenance_Default"
+                    Height="24" />
+
+            <StackPanel TextElement.Foreground="#FF8A2F5B">
+                <TextBlock AutomationProperties.AutomationId="Provenance_Inherited"
+                           Text="Inherited foreground" />
+            </StackPanel>
+
+            <TextBlock AutomationProperties.AutomationId="Provenance_Bound"
+                       Text="{Binding BoundText, Converter={StaticResource Provenance.Converter}}" />
+
+            <TextBlock AutomationProperties.AutomationId="Provenance_PriorityBound">
+                <TextBlock.Text>
+                    <PriorityBinding>
+                        <Binding Path="MissingText" />
+                        <Binding Path="BoundText" />
+                    </PriorityBinding>
+                </TextBlock.Text>
+            </TextBlock>
+
+            <TextBlock AutomationProperties.AutomationId="Provenance_Styled"
+                       Style="{StaticResource Provenance.ExplicitTextStyle}"
+                       Tag="Hot"
+                       Text="Styled value" />
+
+            <Border AutomationProperties.AutomationId="Provenance_StaticResource"
+                    Background="{StaticResource Provenance.StaticBrush}"
+                    Height="24" />
+
+            <Border AutomationProperties.AutomationId="Provenance_DynamicResource"
+                    Background="{DynamicResource Provenance.DynamicBrush}"
+                    Height="24" />
+
+            <Border AutomationProperties.AutomationId="Provenance_AmbiguousResource"
+                    Width="{StaticResource Provenance.AmbiguousWidthA}"
+                    Height="24" />
+
+            <Border x:Name="UnsafeDynamicResourceProbe"
+                    AutomationProperties.AutomationId="Provenance_UnsafeDynamicResource"
+                    Height="24" />
+
+            <Border x:Name="AnimatedProbe"
+                    AutomationProperties.AutomationId="Provenance_Animated"
+                    Opacity="0.75"
+                    Height="24" />
+
+            <local:CoercedProbe AutomationProperties.AutomationId="Provenance_Coerced"
+                                Level="250"
+                                Height="24" />
+
+            <local:ThrowingValueProbe x:Name="ThrowingValueProbe"
+                                      AutomationProperties.AutomationId="Provenance_ThrowingValue"
+                                      Height="24" />
+
+            <Border x:Name="LargeResourceProbe"
+                    AutomationProperties.AutomationId="Provenance_LargeResourceDictionary"
+                    Width="321"
+                    Height="24" />
+
+            <Button AutomationProperties.AutomationId="Provenance_ImplicitStyle"
+                    Content="Implicit style" />
+
+            <local:ThemeProbe AutomationProperties.AutomationId="Provenance_ThemeStyle" />
+
+            <Button AutomationProperties.AutomationId="Provenance_Template"
+                    Template="{StaticResource Provenance.ButtonTemplate}"
+                    Tag="Templated"
+                    Content="Template trigger" />
+        </StackPanel>
+    </ScrollViewer>
+</Window>

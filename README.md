@@ -131,6 +131,65 @@ target still hosts an older injected agent, restart the target application,
 start a new MCP session, and attach again; the server rejects the unsupported
 call before sending it to that agent.
 
+### Structured Dependency-Property Provenance
+
+The `diagnostics` profile can add structured provenance to
+`get_computed_properties`. It is opt-in, so existing calls and the compact
+`core` schema keep their legacy response shape:
+
+```json
+{
+  "sessionId": "session-id",
+  "locator": { "automationId": "SaveButton" },
+  "propertyNames": ["Background", "IsEnabled"],
+  "includeProvenance": true,
+  "maxProvenanceCandidates": 20
+}
+```
+
+Each property reports the structured WPF base value source and its expression,
+animation, coercion, and current-value flags. Participating sections can add
+binding configuration and runtime status, style or template candidates,
+resource candidates, inheritance, animation base value, coercion callback,
+and default metadata. `includeSources=false` only omits the legacy flattened
+`ValueSource`; requested structured provenance remains present.
+
+Every conclusion carries field-specific evidence. `Exact` is reserved for
+public WPF state, `BestEffort` marks a bounded candidate or implementation
+detail, and `Unavailable` includes a stable machine-readable reason code.
+Candidate lists are not presented as winners. In particular, WPF does not
+retain exact static-resource origin, expose the winning style/template setter
+or trigger, identify the inheritance provider or animation clock, or expose a
+pre-coercion value. Dynamic-resource keys use an implementation detail and are
+best effort. Unsafe custom resource keys are omitted rather than invoking
+application-defined formatting.
+
+Resource candidates cover bounded element/ancestor, relevant style, template,
+theme-style, merged-dictionary, and application scopes. The agent reads raw
+dictionary storage through guarded implementation access so it does not copy a
+whole dictionary or realize deferred resources. `ScanComplete` only describes
+that candidate scan; it does not upgrade a candidate into exact WPF lookup
+origin or claim complete precedence/shadowing analysis. A deferred value or an
+incompatible runtime marks the scan incomplete with a stable reason instead of
+inflating target resources. Even a complete scan therefore has `BestEffort`
+scan evidence.
+
+Provenance caps the outer property response at 100 entries with
+`TruncatedReason=maxProvenanceProperties`. `maxProvenanceCandidates` defaults
+to 20 and is clamped from 0 through 50. It bounds discovery work as well as
+returned binding children and contributor/resource candidates. Style and
+template sections expose declaration counts; resource sections expose the
+single decrementing `ScanAttempts` budget plus dictionary and entry counts.
+`ScanComplete=false` means discovered counts are lower bounds. Budget exhaustion
+sets `TruncatedReason=maxProvenanceCandidates`; an unavailable section that
+failed safely is incomplete but is not mislabeled as budget-truncated.
+
+Provenance requires an agent advertising
+`wpf/get_computed_properties:provenance-v1`. When a target still hosts an older
+agent, the server rejects the opt-in request before writing the property call
+to that agent. Restart the target application, start a new MCP session, and
+attach again so the current agent is injected.
+
 ### Live WPF State Observation
 
 `subscribe_property_changes` observes one resolved WPF element for a bounded
@@ -312,6 +371,7 @@ complete controls live in the `diagnostics` profile when exposing them in
 | `get_element_properties` | Summary preset, at most 25 selected UIA properties; values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, with one shared 20,000-character serialized-value budget. XPaths over 2,000 characters are omitted rather than returned incomplete. | Select the `full` preset and an explicit `maxProperties` in `diagnostics` | `ReturnedProperties`, `SelectedProperties`, `ScannedProperties`, `Truncated`, `TruncatedReason`, `TruncatedReasons` |
 | `get_binding_errors` | Depth 6, at most 200 errors while scanning at most 2,000 nodes | Set the error, depth, and scan limits in `diagnostics` | `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_data_context` | Summary mode, depth 2, at most 50 properties per object and 2,000 characters per string | Use the additional mode and size controls in `diagnostics` | `Truncated` and bounded warnings |
+| `get_computed_properties` | Legacy compact fields; structured provenance is off | In `diagnostics`, set `includeProvenance=true`; at most 100 properties and 20 provenance scan units/candidates by default, with a hard nested limit of 50 | Outer `TruncatedReason`; nested returned/discovered counts, scan counts, `ScanComplete`, `Truncated`, and stable evidence reasons |
 | `get_layout_context` | 6 nearest ancestors, 8 relevant siblings, 32 Grid definitions, and up to 128 unavailable-evidence records | Set `maxAncestors`, `maxSiblings`, or `maxGridDefinitions` in `diagnostics`; unavailable evidence keeps its fixed 128-record cap | Discovered/returned counts for ancestors, siblings, Grid contexts, definitions, and unavailable evidence; ordered `TruncatedReasons` including `maxUnavailableEvidence` |
 | `trace_stop` | Writes the complete trace artifact but returns no inline events | Set `includeEvents=true`; at most 100 events are returned by default and `maxEvents` is capped at 1,000 | `EventCount`, `ReturnedEventCount`, `Truncated`, `TruncatedReason` |
 

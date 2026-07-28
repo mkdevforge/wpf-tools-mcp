@@ -146,13 +146,27 @@ public static class AgentTools
         [Description("Include UnsetValue properties when propertyNames is omitted")] bool includeUnset = false,
         [Description("Maximum number of properties returned")] int maxProperties = 500,
         [Description("Value format (string|type)")] string valueFormat = "string",
+        [Description("Include bounded structured dependency-property provenance (requires the current agent)")] bool includeProvenance = false,
+        [Description("Maximum scan work and returned candidates per provenance section (hard limit 50)")] int maxProvenanceCandidates = 20,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
             var hasElementId = !string.IsNullOrWhiteSpace(elementId);
             return automation.RunExclusiveAsync(
-                () => automation.GetComputedPropertiesAsync(locator, elementId, hasElementId ? windowHandle : effectiveWindowHandle, propertyNames, includeSources, includeDefault, includeUnset, maxProperties, valueFormat, cancellationToken),
+                () => automation.GetComputedPropertiesAsync(
+                    locator,
+                    elementId,
+                    hasElementId ? windowHandle : effectiveWindowHandle,
+                    propertyNames,
+                    includeSources,
+                    includeDefault,
+                    includeUnset,
+                    maxProperties,
+                    valueFormat,
+                    cancellationToken,
+                    includeProvenance: includeProvenance,
+                    maxProvenanceCandidates: maxProvenanceCandidates),
                 cancellationToken);
         });
 
