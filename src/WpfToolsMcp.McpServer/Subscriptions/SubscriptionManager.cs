@@ -117,6 +117,10 @@ public sealed class SubscriptionManager : IDisposable
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(kind);
             ArgumentNullException.ThrowIfNull(payload);
+            if (IsStopping)
+            {
+                return;
+            }
 
             var subscriptionEvent = new SubscriptionEvent(0, kind, payload);
             var payloadChars = kind.Length + payload.ToJsonString().Length + 64;
@@ -297,7 +301,6 @@ public sealed class SubscriptionManager : IDisposable
 
                 await (_releaseResource?.Invoke() ?? Task.CompletedTask).ConfigureAwait(false);
                 Volatile.Write(ref _resourceReleased, 1);
-                ReleaseCapacity();
             }
             finally
             {
@@ -480,6 +483,10 @@ public sealed class SubscriptionManager : IDisposable
             }
             catch
             {
+            }
+            finally
+            {
+                sub.ReleaseCapacity();
             }
         }
 
@@ -959,6 +966,7 @@ public sealed class SubscriptionManager : IDisposable
         }
 
         _subscriptions.TryRemove(subscriptionId, out _);
+        state.ReleaseCapacity();
         return new UnsubscribeResponse(true);
     }
 
@@ -1058,6 +1066,7 @@ public sealed class SubscriptionManager : IDisposable
             {
                 await state.StopAsync().ConfigureAwait(false);
                 _subscriptions.TryRemove(state.SubscriptionId, out _);
+                state.ReleaseCapacity();
                 return;
             }
             catch

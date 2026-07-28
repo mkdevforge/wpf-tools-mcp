@@ -39,9 +39,9 @@ public static class SubscriptionTools
 
             if (watchCount > 32)
             {
-                throw new ArgumentOutOfRangeException(
-                    nameof(dependencyProperties),
-                    "subscribe_property_changes supports at most 32 total watches.");
+                throw new ArgumentException(
+                    "subscribe_property_changes supports at most 32 combined " +
+                    "dependency-property and DataContext watches.");
             }
 
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);

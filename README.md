@@ -122,9 +122,10 @@ shortened evidence explicit. `maxValueLength` bounds scalar values and
 `maxPayloadChars` bounds serialized event payloads per poll. Completion remains
 pollable for a 60-second idle grace period, renewed by each poll, or until
 `unsubscribe`; detaching or ending the session releases the target-side handlers
-as part of session cleanup. Active property subscriptions are capped at eight
-per session and 64 per server process so total handler and worker growth is also
-bounded.
+as part of session cleanup. Live and completed-retained property subscription
+handles are capped at eight per session and 64 per server process, bounding
+handler, worker, retention-task, and cancellation-source growth. A completed
+handle releases its slot on `unsubscribe` or after its idle grace expires.
 
 DataContext observation follows normal WPF binding notification behavior. It
 tracks dependency properties and `INotifyPropertyChanged` paths, but a plain CLR
