@@ -20,8 +20,15 @@ internal sealed class UiThreadLatencyRecorder
         private int _pendingProbe;
         private int _droppedProbeCount;
 
-        public RunState(string runId, DateTime startedAtUtc, Dispatcher dispatcher, int probeIntervalMs, int autoStopAfterMs)
+        public RunState(
+            string ownerId,
+            string runId,
+            DateTime startedAtUtc,
+            Dispatcher dispatcher,
+            int probeIntervalMs,
+            int autoStopAfterMs)
         {
+            OwnerId = ownerId;
             RunId = runId;
             StartedAtUtc = startedAtUtc;
             _dispatcher = dispatcher;
@@ -29,6 +36,7 @@ internal sealed class UiThreadLatencyRecorder
             AutoStopAfterMs = autoStopAfterMs;
         }
 
+        public string OwnerId { get; }
         public string RunId { get; }
         public DateTime StartedAtUtc { get; }
         public int ProbeIntervalMs { get; }
@@ -218,8 +226,12 @@ internal sealed class UiThreadLatencyRecorder
     private readonly object _sync = new();
     private RunState? _active;
 
-    public PerformanceStartResponse Start(Dispatcher dispatcher, PerformanceStartRequest request)
+    public PerformanceStartResponse Start(
+        string ownerId,
+        Dispatcher dispatcher,
+        PerformanceStartRequest request)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(request);
 
@@ -230,6 +242,11 @@ internal sealed class UiThreadLatencyRecorder
         {
             if (_active is { Summary: null } running)
             {
+                if (!string.Equals(running.OwnerId, ownerId, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"performance_already_running: runId={running.RunId}");
+                }
+
                 if (!request.ResetIfRunning)
                 {
                     throw new InvalidOperationException($"performance_already_running: runId={running.RunId}");
@@ -241,7 +258,7 @@ internal sealed class UiThreadLatencyRecorder
 
             var runId = Guid.NewGuid().ToString("N");
             var startedAtUtc = DateTime.UtcNow;
-            var run = new RunState(runId, startedAtUtc, dispatcher, probeIntervalMs, autoStopAfterMs);
+            var run = new RunState(ownerId, runId, startedAtUtc, dispatcher, probeIntervalMs, autoStopAfterMs);
             run.Start();
             _active = run;
 
@@ -253,8 +270,9 @@ internal sealed class UiThreadLatencyRecorder
         }
     }
 
-    public PerformanceStopResponse Stop(string runId)
+    public PerformanceStopResponse Stop(string ownerId, string runId)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
 
         lock (_sync)
@@ -262,6 +280,11 @@ internal sealed class UiThreadLatencyRecorder
             if (_active is null)
             {
                 throw new InvalidOperationException("performance_not_running");
+            }
+
+            if (!string.Equals(_active.OwnerId, ownerId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("performance_run_not_owned");
             }
 
             if (!string.Equals(_active.RunId, runId, StringComparison.Ordinal))
@@ -277,6 +300,23 @@ internal sealed class UiThreadLatencyRecorder
             }
 
             return new PerformanceStopResponse(summary);
+        }
+    }
+
+    public void ReleaseOwner(string ownerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+
+        lock (_sync)
+        {
+            if (_active is null ||
+                !string.Equals(_active.OwnerId, ownerId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _ = _active.TryStop(out _);
+            _active = null;
         }
     }
 }

@@ -1,0 +1,40 @@
+<Window x:Class="WpfToolsMcp.TestApp.LifecycleProbe.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AutomationProperties.AutomationId="LifecycleProbe_Window"
+        Title="WPF Tools MCP LifecycleProbe TestApp"
+        Width="520"
+        Height="280"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        Left="180"
+        Top="160"
+        Background="White">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="Lifecycle probe"
+                   FontSize="22"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <TextBlock x:Name="LifecycleStatus"
+                   Grid.Row="1"
+                   AutomationProperties.AutomationId="LifecycleProbe_Status"
+                   Text="Starting"
+                   Margin="0,0,0,16" />
+
+        <Button Grid.Row="2"
+                AutomationProperties.AutomationId="LifecycleProbe_UseButton"
+                AutomationProperties.Name="Use lifecycle probe"
+                Content="Use lifecycle probe"
+                Width="180"
+                HorizontalAlignment="Left"
+                Click="UseButton_Click" />
+    </Grid>
+</Window>

@@ -11,7 +11,15 @@ internal static class HighlightOverlay
     private static readonly object Sync = new();
     private static OverlayHost? _host;
 
-    public static void Hide()
+    public static void Hide() => HideCore(ownerId: null);
+
+    public static void Hide(string ownerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        HideCore(ownerId);
+    }
+
+    private static void HideCore(string? ownerId)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -24,16 +32,19 @@ internal static class HighlightOverlay
             host = _host;
         }
 
-        host?.TryHide();
+        host?.TryHide(ownerId);
     }
 
     public static async Task<HighlightOverlayResult> ShowAsync(
+        string ownerId,
         ContractRect bounds,
         string color,
         int thickness,
         int durationMs,
         CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+
         if (!OperatingSystem.IsWindows())
         {
             return new HighlightOverlayResult(false, "not_windows");
@@ -56,7 +67,7 @@ internal static class HighlightOverlay
 
         try
         {
-            return await host.ShowAsync(bounds, color, thickness, durationMs, cancellationToken).ConfigureAwait(false);
+            return await host.ShowAsync(ownerId, bounds, color, thickness, durationMs, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -92,7 +103,7 @@ internal static class HighlightOverlay
             thread.Start();
         }
 
-        public bool TryHide()
+        public bool TryHide(string? ownerId)
         {
             try
             {
@@ -107,8 +118,22 @@ internal static class HighlightOverlay
                     return false;
                 }
 
-                _ = SendMessage(hwnd, WM_APP_HIDE, IntPtr.Zero, IntPtr.Zero);
-                return true;
+                if (ownerId is null)
+                {
+                    _ = SendMessage(hwnd, WM_APP_HIDE, IntPtr.Zero, IntPtr.Zero);
+                    return true;
+                }
+
+                var ownerHandle = GCHandle.Alloc(ownerId, GCHandleType.Normal);
+                try
+                {
+                    _ = SendMessage(hwnd, WM_APP_HIDE, IntPtr.Zero, GCHandle.ToIntPtr(ownerHandle));
+                    return true;
+                }
+                finally
+                {
+                    ownerHandle.Free();
+                }
             }
             catch
             {
@@ -117,6 +142,7 @@ internal static class HighlightOverlay
         }
 
         public async Task<HighlightOverlayResult> ShowAsync(
+            string ownerId,
             ContractRect bounds,
             string color,
             int thickness,
@@ -145,7 +171,7 @@ internal static class HighlightOverlay
                 return new HighlightOverlayResult(false, "overlay_request_collision");
             }
 
-            var payload = new ShowPayload(id, bounds, color, thickness, durationMs);
+            var payload = new ShowPayload(id, ownerId, bounds, color, thickness, durationMs);
             var handle = GCHandle.Alloc(payload, GCHandleType.Normal);
             try
             {
@@ -245,7 +271,13 @@ internal static class HighlightOverlay
         }
     }
 
-    private sealed record ShowPayload(int RequestId, ContractRect Bounds, string Color, int Thickness, int DurationMs);
+    private sealed record ShowPayload(
+        int RequestId,
+        string OwnerId,
+        ContractRect Bounds,
+        string Color,
+        int Thickness,
+        int DurationMs);
 
     internal sealed record HighlightOverlayResult(bool Shown, string? Error = null);
 
@@ -263,6 +295,7 @@ internal static class HighlightOverlay
         private IntPtr _bits = IntPtr.Zero;
         private int _width;
         private int _height;
+        private string? _activeOwnerId;
 
         public WindowState(
             IntPtr hwnd,
@@ -275,6 +308,11 @@ internal static class HighlightOverlay
         public void HandleShow(ShowPayload payload)
         {
             var result = ShowInternal(payload);
+            if (result.Shown)
+            {
+                _activeOwnerId = payload.OwnerId;
+            }
+
             if (_pending.TryRemove(payload.RequestId, out var tcs))
             {
                 tcs.TrySetResult(result);
@@ -285,6 +323,15 @@ internal static class HighlightOverlay
         {
             _ = KillTimer(_hwnd, TimerId);
             _ = ShowWindow(_hwnd, SW_HIDE);
+            _activeOwnerId = null;
+        }
+
+        public void HandleHide(string ownerId)
+        {
+            if (string.Equals(_activeOwnerId, ownerId, StringComparison.Ordinal))
+            {
+                HandleTimer();
+            }
         }
 
         private unsafe HighlightOverlayResult ShowInternal(ShowPayload payload)
@@ -531,7 +578,23 @@ internal static class HighlightOverlay
                     return IntPtr.Zero;
 
                 case WM_APP_HIDE:
-                    state?.HandleTimer();
+                    if (state is null)
+                    {
+                        break;
+                    }
+
+                    if (lParam == IntPtr.Zero)
+                    {
+                        state.HandleTimer();
+                        return IntPtr.Zero;
+                    }
+
+                    var ownerHandle = GCHandle.FromIntPtr(lParam);
+                    if (ownerHandle.Target is string ownerId)
+                    {
+                        state.HandleHide(ownerId);
+                    }
+
                     return IntPtr.Zero;
 
                 case WM_TIMER:

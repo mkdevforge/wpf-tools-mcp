@@ -52,8 +52,8 @@ agent workflows:
 
 | Profile | Tools | Purpose |
 |---|---:|---|
-| `core` (default) | 25 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 47 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `core` (default) | 28 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
+| `diagnostics` | 50 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Enable the full profile with a command argument:
 
@@ -76,8 +76,9 @@ and `diagnostics`; `diagnostic` and `full` are aliases for `diagnostics`.
 
 The `core` profile exposes:
 
-- **Sessions and windows:** `launch_app`, `attach_to_app`, `close_session`,
-  `list_sessions`, `list_windows`, `set_active_window`.
+- **Sessions and windows:** `launch_app`, `attach_to_app`, `detach_session`,
+  `close_app`, `terminate_app`, `list_sessions`, `list_windows`,
+  `set_active_window`. `close_session` remains as a compatibility path.
 - **Inspection:** `take_screenshot`, `get_visual_tree`, `find_elements`,
   `resolve_element`, `get_element_properties`, `get_uia_locators`,
   `get_uia_tree`.
@@ -141,6 +142,27 @@ Where available, `MethodUsed` provides the more specific mechanism. These
 fields describe MCP automation, not arbitrary side effects of the invoked
 application code. For example, a semantic command handler may independently
 open or activate one of its own windows.
+
+### Session Lifecycle
+
+Use `detach_session` for normal inspection cleanup. It removes the session,
+subscriptions, traces, element handles, and client-side agent connection while
+leaving the target process running. Use `close_app` only when a graceful
+application close is intended, and `terminate_app` only when forceful process
+termination is intended. `close_session` retains its historical close-with-
+optional-force behavior for compatibility.
+
+Shutdown responses report `SessionRemoved`, caller intent (`CloseRequested` and
+`ForceTerminationRequested`), actual dispatch/attempt
+(`CloseRequestDispatched` and `ForceTerminationAttempted`), and observed process
+state (`ProcessAlreadyExited` and `ProcessExited`) separately. A removed session
+therefore does not imply that the process exited or that a close request was
+dispatched. For `close_app` and `terminate_app`, `Closed` mirrors
+`ProcessExited`. The compatibility-only `close_session` preserves its historical
+`Closed = true` result once the session is removed; new callers should use
+`SessionRemoved` and `ProcessExited` instead. Detach reports process-probe confidence through
+`ProcessWasRunningObserved` and `ProcessStillRunningObserved`; a false running
+value is not authoritative when its matching observation field is false.
 
 ### Deterministic Viewports
 
@@ -220,7 +242,8 @@ common-workflow rationale plus inventory and compact-schema contract coverage.
    `elementId` from `resolve_element` for follow-up calls.
 5. Interact, wait for the expected state, and inspect again to verify the
    result.
-6. Call `close_session` when finished.
+6. Call `detach_session` when inspection is finished. Use `close_app` or
+   `terminate_app` only when stopping the target application is intended.
 
 In the core profile, inspection tools that support both backends prefer the WPF
 agent and fall back when a UIA equivalent exists. Tree and search responses

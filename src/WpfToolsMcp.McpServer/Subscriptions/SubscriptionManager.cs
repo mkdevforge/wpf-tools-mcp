@@ -14,8 +14,11 @@ public sealed class SubscriptionManager : IDisposable
         private readonly Queue<SubscriptionEvent> _queue = new();
 
         private TaskCompletionSource<bool> _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private Task? _stopTask;
         private int _dropped;
         private int _sequence;
+        private int _ctsDisposed;
+        private int _stopRequested;
 
         public SubscriptionState(
             string subscriptionId,
@@ -29,6 +32,7 @@ public sealed class SubscriptionManager : IDisposable
             Kind = kind;
             MaxQueue = maxQueue;
             Cts = cts;
+            Token = cts.Token;
         }
 
         public string SubscriptionId { get; }
@@ -36,8 +40,10 @@ public sealed class SubscriptionManager : IDisposable
         public SubscriptionKind Kind { get; }
         public int MaxQueue { get; }
         public CancellationTokenSource Cts { get; }
+        public CancellationToken Token { get; }
 
         public Task? Worker { get; set; }
+        public bool IsStopping => Volatile.Read(ref _stopRequested) != 0;
 
         public void Enqueue(string kind, JsonNode payload)
         {
@@ -90,8 +96,10 @@ public sealed class SubscriptionManager : IDisposable
             }
         }
 
-        public void Dispose()
+        public void RequestStop()
         {
+            Interlocked.Exchange(ref _stopRequested, 1);
+
             try
             {
                 Cts.Cancel();
@@ -100,21 +108,80 @@ public sealed class SubscriptionManager : IDisposable
             {
             }
 
+        }
+
+        public bool TryRequestStop()
+        {
+            if (Interlocked.CompareExchange(ref _stopRequested, 1, 0) != 0)
+            {
+                return false;
+            }
+
             try
             {
-                Worker?.Wait(TimeSpan.FromSeconds(2));
+                Cts.Cancel();
             }
             catch
             {
             }
+
+            return true;
         }
+
+        public Task StopAsync()
+        {
+            lock (_sync)
+            {
+                return _stopTask ??= StopCoreAsync();
+            }
+        }
+
+        private async Task StopCoreAsync()
+        {
+            RequestStop();
+            var worker = Worker;
+            try
+            {
+                if (worker is not null)
+                {
+                    await worker.ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch
+            {
+                // The worker has already ended; teardown must still release its resources.
+            }
+            finally
+            {
+                DisposeCancellationSource();
+            }
+        }
+
+        public void DisposeCancellationSource()
+        {
+            if (Interlocked.Exchange(ref _ctsDisposed, 1) == 0)
+            {
+                Cts.Dispose();
+            }
+        }
+
+        public void Dispose() => StopAsync().GetAwaiter().GetResult();
     }
 
     private readonly ConcurrentDictionary<string, SubscriptionState> _subscriptions = new(StringComparer.OrdinalIgnoreCase);
 
     public void Dispose()
     {
-        foreach (var sub in _subscriptions.Values)
+        var subscriptions = _subscriptions.Values.ToArray();
+        foreach (var sub in subscriptions)
+        {
+            sub.RequestStop();
+        }
+
+        foreach (var sub in subscriptions)
         {
             try
             {
@@ -193,6 +260,7 @@ public sealed class SubscriptionManager : IDisposable
             finally
             {
                 _ = _subscriptions.TryRemove(subscriptionId, out _);
+                state.DisposeCancellationSource();
             }
         });
 
@@ -216,6 +284,10 @@ public sealed class SubscriptionManager : IDisposable
             response = await automation.RunExclusiveAsync(
                 () => automation.GetBindingErrorsAsync(windowHandleUsed, rootXPath, depth, maxErrors, maxNodes, cancellationToken),
                 cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -296,7 +368,7 @@ public sealed class SubscriptionManager : IDisposable
         }
 
         var timeout = TimeSpan.FromMilliseconds(Math.Clamp(timeoutMs, 1, 60_000));
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, state.Cts.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, state.Token);
         linked.CancelAfter(timeout);
 
         try
@@ -311,30 +383,39 @@ public sealed class SubscriptionManager : IDisposable
         return new PollSubscriptionResponse(events, dropped, hasMore);
     }
 
-    public UnsubscribeResponse Unsubscribe(string sessionId, string subscriptionId)
+    public async Task<UnsubscribeResponse> UnsubscribeAsync(string sessionId, string subscriptionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
 
-        if (!_subscriptions.TryRemove(subscriptionId, out var state))
+        if (!_subscriptions.TryGetValue(subscriptionId, out var state))
         {
             return new UnsubscribeResponse(false);
         }
 
         if (!string.Equals(state.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
         {
-            _subscriptions.TryAdd(subscriptionId, state);
             throw new InvalidOperationException("subscriptionId does not belong to sessionId.");
         }
 
-        state.Dispose();
+        if (!state.TryRequestStop())
+        {
+            return new UnsubscribeResponse(false);
+        }
+
+        await state.StopAsync().ConfigureAwait(false);
+        _subscriptions.TryRemove(subscriptionId, out _);
         return new UnsubscribeResponse(true);
     }
 
-    public void UnsubscribeAllForSession(string sessionId)
+    public UnsubscribeResponse Unsubscribe(string sessionId, string subscriptionId) =>
+        UnsubscribeAsync(sessionId, subscriptionId).GetAwaiter().GetResult();
+
+    public async Task UnsubscribeAllForSessionAsync(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
 
+        var states = new List<SubscriptionState>();
         foreach (var kvp in _subscriptions)
         {
             if (!string.Equals(kvp.Value.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
@@ -342,16 +423,23 @@ public sealed class SubscriptionManager : IDisposable
                 continue;
             }
 
-            if (_subscriptions.TryRemove(kvp.Key, out var state))
-            {
-                state.Dispose();
-            }
+            kvp.Value.RequestStop();
+            states.Add(kvp.Value);
+        }
+
+        await Task.WhenAll(states.Select(state => state.StopAsync())).ConfigureAwait(false);
+        foreach (var state in states)
+        {
+            _subscriptions.TryRemove(state.SubscriptionId, out _);
         }
     }
 
+    public void UnsubscribeAllForSession(string sessionId) =>
+        UnsubscribeAllForSessionAsync(sessionId).GetAwaiter().GetResult();
+
     private SubscriptionState Get(string subscriptionId)
     {
-        if (_subscriptions.TryGetValue(subscriptionId, out var state))
+        if (_subscriptions.TryGetValue(subscriptionId, out var state) && !state.IsStopping)
         {
             return state;
         }
@@ -359,4 +447,3 @@ public sealed class SubscriptionManager : IDisposable
         throw new InvalidOperationException($"Unknown subscriptionId '{subscriptionId}'.");
     }
 }
-

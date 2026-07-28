@@ -178,6 +178,7 @@ public sealed partial class AutomationController
             if (!shown)
             {
                 var overlayResult = await HighlightOverlay.ShowAsync(
+                    _resourceOwnerId,
                     bounds,
                     request.Color,
                     request.Thickness,

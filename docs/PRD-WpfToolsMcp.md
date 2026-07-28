@@ -109,7 +109,7 @@ The MCP server manages both channels in Phase 2. Backend-neutral inspection tool
 ## MCP Tools
 
 The tables below describe the full `diagnostics` profile. The default `core`
-profile intentionally exposes a smaller 25-tool surface with compact schemas;
+profile intentionally exposes a smaller 28-tool surface with compact schemas;
 see `README.md` for the current profile split and configuration.
 
 ### Phase 1 — Inspection (FlaUI / UIA)
@@ -154,8 +154,22 @@ see `README.md` for the current profile split and configuration.
 |---|---|---|
 | `launch_app` | Start a WPF application and create a session | Executable path, optional arguments, working directory, interaction policy |
 | `attach_to_app` | Attach to an already-running process without activating it | Process name or PID, interaction policy |
-| `close_session` | Close a session (and close the attached application) | `sessionId` + graceful close with optional force kill timeout |
+| `detach_session` | Remove inspection state and release client resources without stopping the application | `sessionId` |
+| `close_app` | Request a graceful application close, remove the session, and report request/process outcomes separately | `sessionId` + timeout |
+| `terminate_app` | Forcefully terminate the application, remove the session, and report the observed process outcome | `sessionId` + timeout |
+| `close_session` | Compatibility path for the historical close-with-optional-force behavior | `sessionId` + optional force and timeout |
 | `list_sessions` | List active sessions, effective interaction policies, and confirmed backend capability state | None |
+
+Session removal, a graceful close request, force termination, and observed
+process exit are distinct lifecycle facts. Normal inspection cleanup uses
+`detach_session`; it must not send close, shutdown, or kill requests to the
+target. `close_app` and `terminate_app` make those side effects explicit, while
+their responses distinguish caller intent, actual close dispatch or force
+attempt, and observed process exit. The deprecated `Closed` field mirrors
+`ProcessExited` for those explicit tools; `close_session` alone preserves the
+historical `Closed = true` response after session removal. Detach also reports
+whether its before/after process-state probes succeeded so an unobservable state
+is not reported as a confirmed exit.
 
 ### Desktop Interaction Policy
 
@@ -379,7 +393,8 @@ Phase 1 delivers a fully functional MCP server that can see and interact with WP
 
 #### P1-M0 — Walking skeleton
 - MCP server starts, registers tools, communicates via stdio
-- `launch_app`, `attach_to_app`, `close_session` working
+- `launch_app`, `attach_to_app`, `detach_session`, `close_app`, and
+  `terminate_app` working; `close_session` retained for compatibility
 - `list_windows` returns window info
 - `take_screenshot` for the target window
 - Test app with BasicControls page

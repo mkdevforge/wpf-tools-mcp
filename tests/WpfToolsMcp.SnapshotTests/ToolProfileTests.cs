@@ -15,7 +15,9 @@ public sealed class ToolProfileTests
     [
         "attach_to_app",
         "click_element",
+        "close_app",
         "close_session",
+        "detach_session",
         "drag",
         "find_elements",
         "get_binding_errors",
@@ -36,6 +38,7 @@ public sealed class ToolProfileTests
         "set_active_window",
         "set_value",
         "take_screenshot",
+        "terminate_app",
         "type_text",
         "wait_for"
     ];
@@ -171,6 +174,38 @@ public sealed class ToolProfileTests
                 Is.LessThanOrEqualTo(4096),
                 $"{toolName} input schema exceeded the compact-profile character budget.");
         }
+    }
+
+    [Test]
+    public async Task Core_profile_exposes_explicit_session_lifecycle_schemas()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: "core");
+        var tools = (await mcp.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(GetInputPropertyNames(tools["detach_session"]), Is.EqualTo(new[] { "sessionId" }));
+            Assert.That(GetInputPropertyNames(tools["close_app"]), Is.EqualTo(new[] { "sessionId", "timeoutMs" }));
+            Assert.That(GetInputPropertyNames(tools["terminate_app"]), Is.EqualTo(new[] { "sessionId", "timeoutMs" }));
+            Assert.That(GetInputPropertyNames(tools["close_session"]), Is.EqualTo(new[] { "force", "sessionId" }));
+        });
+    }
+
+    [Test]
+    public async Task Diagnostics_profile_exposes_explicit_session_lifecycle_schemas()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+        var tools = (await mcp.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(GetInputPropertyNames(tools["detach_session"]), Is.EqualTo(new[] { "sessionId" }));
+            Assert.That(GetInputPropertyNames(tools["close_app"]), Is.EqualTo(new[] { "sessionId", "timeoutMs" }));
+            Assert.That(GetInputPropertyNames(tools["terminate_app"]), Is.EqualTo(new[] { "sessionId", "timeoutMs" }));
+            Assert.That(GetInputPropertyNames(tools["close_session"]), Is.EqualTo(new[] { "force", "sessionId", "timeoutMs" }));
+        });
     }
 
     [Test]

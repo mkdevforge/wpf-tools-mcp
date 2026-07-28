@@ -41,16 +41,18 @@ public static class SubscriptionTools
                         throw new InvalidOperationException($"Agent is not connected. Call inject_agent first. ({ex.Message})");
                     }
 
-                    var response = subscriptions.SubscribeBindingErrors(
-                        sessionId: sessionId,
-                        automation: automation,
-                        windowHandleUsed: effectiveWindowHandle,
-                        rootXPath: rootXPath,
-                        depth: depth,
-                        maxErrors: maxErrors,
-                        maxNodes: maxNodes,
-                        pollIntervalMs: pollIntervalMs,
-                        maxQueue: maxQueue);
+                    var response = sessions.RegisterSessionResource(
+                        sessionId,
+                        () => subscriptions.SubscribeBindingErrors(
+                            sessionId: sessionId,
+                            automation: automation,
+                            windowHandleUsed: effectiveWindowHandle,
+                            rootXPath: rootXPath,
+                            depth: depth,
+                            maxErrors: maxErrors,
+                            maxNodes: maxNodes,
+                            pollIntervalMs: pollIntervalMs,
+                            maxQueue: maxQueue));
 
                     trace?.SetSummary($"id={response.SubscriptionId} pollMs={pollIntervalMs} maxQueue={maxQueue}");
                     return response;
@@ -78,6 +80,8 @@ public static class SubscriptionTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            sessions.EnsureSessionActive(sessionId);
+
             AutomationController? automation = null;
             try
             {
@@ -117,8 +121,10 @@ public static class SubscriptionTools
         [Description("Session ID")] string sessionId,
         [Description("Subscription ID")] string subscriptionId,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() =>
+        McpToolErrors.RunAsync(async () =>
         {
+            sessions.EnsureSessionActive(sessionId);
+
             AutomationController? automation = null;
             try
             {
@@ -131,9 +137,9 @@ public static class SubscriptionTools
             var trace = automation?.BeginToolTrace("unsubscribe");
             try
             {
-                var response = subscriptions.Unsubscribe(sessionId, subscriptionId);
+                var response = await subscriptions.UnsubscribeAsync(sessionId, subscriptionId).ConfigureAwait(false);
                 trace?.SetSummary($"unsubscribed={response.Unsubscribed}");
-                return Task.FromResult(response);
+                return response;
             }
             catch (Exception ex)
             {
