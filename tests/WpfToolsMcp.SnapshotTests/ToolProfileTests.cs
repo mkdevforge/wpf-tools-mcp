@@ -25,6 +25,7 @@ public sealed class ToolProfileTests
         "get_computed_properties",
         "get_data_context",
         "get_element_properties",
+        "get_layout_context",
         "get_uia_locators",
         "get_uia_tree",
         "get_visual_tree",
@@ -151,6 +152,8 @@ public sealed class ToolProfileTests
             new[] { "elementId", "locator", "maxDepth", "properties", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_computed_properties"]), Is.EqualTo(
             new[] { "elementId", "locator", "propertyNames", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Is.EqualTo(
+            new[] { "elementId", "locator", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["click_element"]), Is.EqualTo(
             new[] { "clickType", "elementId", "interactionPolicy", "locator", "sessionId" }));
         Assert.That(GetInputPropertyNames(tools["drag"]), Is.EqualTo(
@@ -170,6 +173,7 @@ public sealed class ToolProfileTests
                      "get_binding_errors",
                      "get_data_context",
                      "get_computed_properties",
+                     "get_layout_context",
                      "click_element",
                      "drag"
                  })
@@ -356,6 +360,9 @@ public sealed class ToolProfileTests
 
         Assert.That(GetInputPropertyNames(tools["get_element_properties"]), Does.Contain("preset"));
         Assert.That(GetInputPropertyNames(tools["get_element_properties"]), Does.Contain("maxProperties"));
+        Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Does.Contain("maxAncestors"));
+        Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Does.Contain("maxSiblings"));
+        Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Does.Contain("maxGridDefinitions"));
         Assert.That(GetInputPropertyNames(tools["trace_stop"]), Does.Contain("includeEvents"));
         Assert.That(GetInputPropertyNames(tools["trace_stop"]), Does.Contain("maxEvents"));
     }

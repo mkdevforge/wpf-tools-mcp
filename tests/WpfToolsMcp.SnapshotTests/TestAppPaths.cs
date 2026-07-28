@@ -42,6 +42,9 @@ internal static class TestAppPaths
     public static string FindLifecycleProbeTestAppExecutable() =>
         FindExecutable("WpfToolsMcp.TestApp.LifecycleProbe", "WpfToolsMcp.TestApp.LifecycleProbe");
 
+    public static string FindLayoutProbeTestAppExecutable() =>
+        FindExecutable("WpfToolsMcp.TestApp.LayoutProbe", "WpfToolsMcp.TestApp.LayoutProbe");
+
     public static string FindObservationProbeTestAppExecutable() =>
         FindExecutable("WpfToolsMcp.TestApp.ObservationProbe", "WpfToolsMcp.TestApp.ObservationProbe");
 

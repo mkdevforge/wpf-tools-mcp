@@ -6,4 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="WpfToolsMcp.Agent" />
+    <InternalsVisibleTo Include="WpfToolsMcp.SnapshotTests" />
+  </ItemGroup>
+
 </Project>

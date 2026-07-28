@@ -852,6 +852,70 @@ public sealed partial class AutomationController
         }
     }
 
+    public async Task<GetLayoutContextResponse> GetLayoutContextAsync(
+        ElementLocator? locator = null,
+        string? elementId = null,
+        long? windowHandle = null,
+        int maxAncestors = 6,
+        int maxSiblings = 8,
+        int maxGridDefinitions = 32,
+        CancellationToken cancellationToken = default)
+    {
+        var trace = BeginTraceSpan("get_layout_context");
+        try
+        {
+        var target = PrepareWpfAgentTarget("get_layout_context", locator, elementId, windowHandle);
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var capabilities = GetAgentCapabilities(client);
+
+        var request = new GetLayoutContextRequest(
+            WindowHandle: target.WindowHandle,
+            Locator: target.Locator,
+            ElementId: target.AgentElementId,
+            MaxAncestors: maxAncestors,
+            MaxSiblings: maxSiblings,
+            MaxGridDefinitions: maxGridDefinitions);
+        var fallbackRequest = target.RecoveryLocator is null
+            ? null
+            : request with { Locator = target.RecoveryLocator, ElementId = null };
+        var response = await CallGetLayoutContextWhenSupportedAsync(
+            capabilities,
+            () => CallWpfAgentTargetAsync<GetLayoutContextResponse>(
+                client,
+                AgentProtocolCapabilities.GetLayoutContext,
+                request,
+                fallbackRequest,
+                target,
+                cancellationToken));
+        var normalizedElement = await StripAgentElementIdAsync(
+            client,
+            response.Element,
+            target.PublicElementId).ConfigureAwait(false);
+        if (target.PublicElementId is not null)
+        {
+            normalizedElement = normalizedElement with { ElementId = target.PublicElementId };
+        }
+
+        response = response with { Element = normalizedElement };
+        trace?.SetSummary(
+            $"ancestors={response.Counts.ReturnedAncestors}/{response.Counts.DiscoveredAncestors} " +
+            $"siblings={response.Counts.ReturnedSiblings}/{response.Counts.DiscoveredSiblings} " +
+            $"grids={response.Counts.ReturnedGridContexts}/{response.Counts.DiscoveredGridContexts} " +
+            $"truncated={response.Truncated}");
+        return response;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
+    }
+
     public async Task<GetStyleChainResponse> GetStyleChainAsync(
         ElementLocator? locator = null,
         string? elementId = null,
@@ -1157,14 +1221,35 @@ public sealed partial class AutomationController
             $"Unknown method '{AgentProtocolCapabilities.GetCapabilitiesMethod}'.",
             StringComparison.Ordinal);
 
-    private bool AgentSupportsCapability(AgentClient client, string capability)
+    internal static InvalidOperationException CreateGetLayoutContextCapabilityException() =>
+        new(
+            "agent_capability_unavailable: get_layout_context requires the current WPF agent. " +
+            "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
+
+    internal static Task<T> CallGetLayoutContextWhenSupportedAsync<T>(
+        AgentCapabilitiesResponse? capabilities,
+        Func<Task<T>> call)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+        return capabilities is not null &&
+               capabilities.Capabilities.Contains(AgentProtocolCapabilities.GetLayoutContext, StringComparer.Ordinal)
+            ? call()
+            : Task.FromException<T>(CreateGetLayoutContextCapabilityException());
+    }
+
+    private AgentCapabilitiesResponse? GetAgentCapabilities(AgentClient client)
     {
         lock (_agentSync)
         {
-            return ReferenceEquals(client, _agentClient) &&
-                   _agentCapabilities is { } capabilities &&
-                   capabilities.Capabilities.Contains(capability, StringComparer.Ordinal);
+            return ReferenceEquals(client, _agentClient) ? _agentCapabilities : null;
         }
+    }
+
+    private bool AgentSupportsCapability(AgentClient client, string capability)
+    {
+        var capabilities = GetAgentCapabilities(client);
+        return capabilities is not null &&
+               capabilities.Capabilities.Contains(capability, StringComparer.Ordinal);
     }
 
     private async Task<AgentClient?> EnsureAgentConnectedOrNullAsync(CancellationToken cancellationToken)
