@@ -1,36 +1,41 @@
 # WPF Tools MCP
 
-WPF Tools MCP is an **MCP server** that gives AI assistants the ability to **inspect and control running WPF applications**.
+WPF Tools MCP is a Windows-only MCP server for inspecting, controlling, and
+diagnosing running WPF applications.
 
-- **Interaction (out-of-process):** FlaUI (UIA3)
-- **Deep WPF inspection (in-process):** an injected agent powered by Snoop
+- **Out-of-process automation:** FlaUI/UIA3 provides window management, UI
+  Automation inspection, screenshots, and most interaction.
+- **In-process WPF inspection:** an injected agent, built on Snoop, exposes the
+  WPF visual tree, bindings, DataContext values, dependency properties, styles,
+  templates, highlighting, and UI-thread latency.
+- **Transport:** MCP uses stdio; the server and injected agent communicate over
+  a current-user-only named pipe.
 
-## Install (dotnet tool)
+## Requirements
+
+- Windows 10 or 11.
+- .NET 8 SDK to install or build the tool. Running an already-installed package
+  requires the .NET 8 Desktop Runtime.
+- Deep WPF inspection requires an x86 or x64 .NET 8+ WPF target running as the
+  same user and at no higher elevation than the MCP server.
+
+## Install
 
 ```powershell
 dotnet tool install -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.24
 dotnet tool update -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.24
 ```
 
-## Run
+Run the server directly with:
 
 ```powershell
 wpf-tools-mcp
 ```
 
-The server speaks MCP over **stdio**.
+## MCP Client Configuration
 
-## Debugging tools
-
-- `list_displays`: list connected displays and virtual screen bounds (helps with multi-monitor coordinate debugging).
-- `trace_start` / `trace_stop`: record MCP tool timings and write a JSON trace file (defaults to `%TEMP%`).
-- `performance_start` / `performance_stop`: lightweight UI-thread latency sampling.
-- `set_window_bounds` / `set_window_state`: resize/restore windows (useful for deterministic screenshots).
-- `take_screenshot`: supports optional annotation (rect/label) for debugging.
-
-## MCP client config
-
-Example (generic MCP config):
+The default `core` profile exposes the compact tool surface intended for normal
+agent workflows:
 
 ```json
 {
@@ -42,29 +47,145 @@ Example (generic MCP config):
 }
 ```
 
-## Notes / limitations
+### Tool Profiles
 
-- **Windows only.**
-- `inject_agent` requires the target process to be running as the **same user** and **not elevated** above the server.
-- **ARM64 target processes are not supported** for injection (x86/x64 only).
-- Custom controls that do not expose meaningful UIA peers/patterns may not be interactable via UI Automation.
-- Multi-monitor setups are supported; tool coordinates are in **virtual screen** coordinates (which may be negative).
+| Profile | Tools | Purpose |
+|---|---:|---|
+| `core` (default) | 25 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
+| `diagnostics` | 46 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
-## Licensing
+Enable the full profile with a command argument:
 
-- WPF Tools MCP source code is licensed under MIT (`LICENSE`).
-- The packaged Phase 2 payload redistributes Snoop components under Ms-PL.
-- See `THIRD_PARTY_NOTICES.md` and `references/snoopwpf/License.txt`.
+```json
+{
+  "mcpServers": {
+    "wpf-tools-mcp": {
+      "command": "wpf-tools-mcp",
+      "args": ["--tool-profile", "diagnostics"]
+    }
+  }
+}
+```
+
+The equivalent environment setting is
+`WPF_TOOLS_MCP_TOOL_PROFILE=diagnostics`. Accepted command values are `core`
+and `diagnostics`; `diagnostic` and `full` are aliases for `diagnostics`.
+
+## Tool Surface
+
+The `core` profile exposes:
+
+- **Sessions and windows:** `launch_app`, `attach_to_app`, `close_session`,
+  `list_sessions`, `list_windows`, `set_active_window`.
+- **Inspection:** `take_screenshot`, `get_visual_tree`, `find_elements`,
+  `resolve_element`, `get_element_properties`, `get_uia_locators`,
+  `get_uia_tree`.
+- **Interaction and synchronization:** `click_element`, `invoke`, `type_text`,
+  `set_value`, `select_item`, `scroll_to_element`, `drag`, `wait_for`.
+- **WPF diagnostics:** `get_binding_info`, `get_binding_errors`,
+  `get_data_context`, `get_computed_properties`.
+
+The `diagnostics` profile additionally exposes:
+
+- `inject_agent`, `agent_ping`, `get_active_window`, `get_path_to_element`, and
+  `release_element`.
+- `pick_element_at_point`, `highlight_element`, `mouse_click`, `list_displays`,
+  `set_window_bounds`, and `set_window_state`.
+- `get_style_chain`, `get_template_info`, and `uia_coverage_report`.
+- `subscribe_binding_errors`, `poll_subscription`, and `unsubscribe`.
+- `trace_start`, `trace_stop`, `performance_start`, and `performance_stop`.
+
+## Typical Workflow
+
+1. Call `launch_app` or `attach_to_app` and retain the returned `sessionId`.
+2. Use `list_windows` and `set_active_window` when the process owns more than
+   one top-level window.
+3. Inspect with `get_visual_tree` or `find_elements`, then retain an
+   `elementId` from `resolve_element` for follow-up calls.
+4. Interact, wait for the expected state, and inspect again to verify the
+   result.
+5. Call `close_session` when finished.
+
+In the core profile, inspection tools that support both backends prefer the WPF
+agent and fall back when a UIA equivalent exists. Tree and search responses
+include fallback warnings. WPF-only tools, such as binding and DataContext
+inspection, require successful injection.
+
+## Limitations
+
+- The server and packaged tool are Windows-only.
+- ARM64 target processes are not supported for injection; UIA-only automation
+  may still be available.
+- Injection can be blocked by process elevation, user boundaries, or endpoint
+  security software.
+- UIA-based actions depend on useful automation peers and patterns. A custom
+  control with no actionable UIA peer may be inspectable through WPF but not
+  invokable through UI Automation.
+- Multi-monitor coordinates use the Windows virtual screen and may be negative.
 
 ## Development
 
-This repo uses a git submodule for Snoop:
+Source builds require:
 
-- `references/snoopwpf`
+- .NET 8 SDK and PowerShell 7.
+- Visual Studio 2022 or Build Tools with MSBuild, **Desktop development with
+  C++**, and a Windows 10 or 11 SDK. These are required for Snoop's x86/x64
+  generic injector.
 
-Build the injector payloads (required for Phase 2 injection tools):
+Initialize the Snoop submodule and build the injection payload before building
+or testing deep WPF inspection:
 
 ```powershell
+git submodule update --init --recursive
 pwsh scripts/build-snoop.ps1 -Configuration Debug
-pwsh scripts/build-snoop.ps1 -Configuration Release
+dotnet build src/WpfToolsMcp.McpServer/WpfToolsMcp.McpServer.csproj -c Debug
 ```
+
+Prefer focused snapshot tests while developing:
+
+```powershell
+dotnet test tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj -c Debug --filter "FullyQualifiedName~ToolProfileTests"
+```
+
+Run the complete integration/snapshot project only when the scope justifies it;
+the tests launch real WPF processes and exercise UI Automation and injection:
+
+```powershell
+dotnet test tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj -c Debug
+```
+
+For a black-box smoke run against another WPF executable, build the server and
+pass the target explicitly:
+
+```powershell
+dotnet run --project tools/WpfToolsMcp.McpSmokeRunner -- --exe C:\path\to\App.exe
+```
+
+Smoke artifacts are written under `artifacts/smoke/<timestamp>` unless `--out`
+is supplied.
+
+## Repository Layout
+
+- `src/WpfToolsMcp.McpServer`: stdio MCP host, tool profiles, tool definitions,
+  and subscriptions.
+- `src/WpfToolsMcp.Automation`: per-session controllers, FlaUI/UIA automation,
+  screenshots, handles, tracing, and injected-agent orchestration.
+- `src/WpfToolsMcp.Agent` and `src/WpfToolsMcp.AgentProtocol`: injected WPF
+  inspector and its bounded length-prefixed JSON pipe protocol.
+- `src/WpfToolsMcp.Contracts`: shared request, response, and enum contracts.
+- `src/WpfToolsMcp.Tool`: global-tool launcher and NuGet packaging project.
+- `src/WpfToolsMcp.TestApp*`: focused WPF integration fixtures.
+- `tests/WpfToolsMcp.SnapshotTests`: NUnit and Verify integration snapshots.
+- `tools/WpfToolsMcp.McpSmokeRunner`: optional black-box smoke runner.
+- `references/snoopwpf`: pinned Snoop git submodule.
+
+The PRD and phase review files under `docs/` are historical design and review
+records. The README and MCP-advertised tool schemas are the current usage
+reference.
+
+## Licensing
+
+- Original WPF Tools MCP source code is licensed under MIT (`LICENSE`).
+- The packaged inspection/injection payload redistributes Snoop components
+  under Ms-PL.
+- See `THIRD_PARTY_NOTICES.md` and `references/snoopwpf/License.txt`.

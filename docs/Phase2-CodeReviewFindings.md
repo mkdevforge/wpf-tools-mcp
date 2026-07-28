@@ -1,6 +1,12 @@
-# Phase 2 Code Review Findings (Injection + Pipe + WPF Inspection)
+# Phase 2 Code Review Findings (Historical Snapshot)
 
-This document captures a thorough code review of the current Phase 2 implementation (Snoop injection + named pipe agent + first WPF-native inspection surface), with a focus on correctness, robustness, compatibility with “real apps”, and what to harden before expanding to deeper DTO wrappers (P2-M1/P2-M2).
+> **Document status:** This review is a point-in-time record from 2026-02-16,
+> not the current issue list. Statements labeled "Current" below refer to that
+> snapshot unless a later resolution note says otherwise. Revalidate unresolved
+> recommendations against current `main` before scheduling work.
+
+This document captured a review of the early Phase 2 implementation (Snoop
+injection, named-pipe agent, and the first WPF-native inspection surface).
 
 Last reviewed: 2026-02-16
 
@@ -10,7 +16,7 @@ At the time of writing:
 
 ## Status (after P2-M0 hardening pass)
 
-Implemented in the current codebase:
+Implemented at the time of the review:
 - ✅ Deterministic pipe name + connect-first reconnect (MCP server restart friendly)
 - ✅ Pipe restricted to current user (`PipeOptions.CurrentUserOnly`)
 - ✅ Pipe protocol max message size guard (25 MB)
@@ -31,17 +37,17 @@ External dependency / setup friction:
 
 ## High-priority issues / blockers
 
-### 1) Concurrency + session isolation (singleton controller + mutable state)
+### 1) Concurrency + session isolation (resolved architecture)
 
 **Why it matters:** In real usage, we will routinely restart the MCP server while leaving the target app running. Phase 2 should work in that scenario without requiring users to restart their app.
 
-**Current posture:** `AutomationController` is registered as a DI singleton and carries mutable attachment state *and* mutable agent session state.
+**Historical posture:** `AutomationController` was a singleton carrying both
+attachment and agent state, mitigated by one global async lock.
 
-**Risk:** If MCP clients (or orchestrators) issue concurrent tool calls (`close_session` + `take_screenshot` + `inject_agent`, etc.), state can interleave in undefined ways.
-
-**Mitigation implemented:** All MCP tool calls are serialized via a global async lock (`AutomationController.RunExclusiveAsync`) so state cannot interleave across concurrent tool calls.
-
-**Still recommended:** Move to an explicit “session” concept (each `attach/launch` returns a session id and all other tools require it) if we want multiple independent app sessions in a single server process.
+**Resolution:** `SessionManager` now creates an independent
+`AutomationController` for every `launch_app` or `attach_to_app` session. Tool
+calls are serialized within a session, while different sessions have separate
+attachment, window, handle, and agent state.
 
 ### 2) Dependency / assembly-load collision risk (Default ALC injection)
 
@@ -67,8 +73,7 @@ External dependency / setup friction:
 
 `ProcessArchitectureDetector` is good, but the fallback to `RuntimeInformation.ProcessArchitecture` can be wrong if the API calls fail (it gives *host* architecture, not *target*).
 
-**Code reference:**
-- `src/WpfToolsMcp.Automation/ProcessArchitectureDetector.cs:29`
+**Code area:** `src/WpfToolsMcp.Automation/ProcessArchitectureDetector.cs`
 
 ### Publishing / dotnet tool packaging
 
@@ -92,43 +97,38 @@ External dependency / setup friction:
 
 InjectorLauncher expects `int` hwnd, so we cast `long → int`. This is likely fine on Windows, but if an HWND ever exceeds 32 bits, the value will wrap.
 
-**Code reference:**
-- `src/WpfToolsMcp.Automation/SnoopInjector.cs:37`
+**Code area:** `src/WpfToolsMcp.Automation/SnoopInjector.cs`
 
 ### Connection retry window may be tight
 
 The agent connect retry is ~3s total with short per-attempt timeouts. On slow machines or cold-start JIT, this could be flaky.
 
-**Code reference:**
-- `src/WpfToolsMcp.Automation/AutomationController.Agent.cs:146`
+**Code area:** `src/WpfToolsMcp.Automation/AutomationController.Agent.cs`
 
 ### CleanupAgent blocks synchronously
 
-`CleanupAgent()` calls async dispose synchronously. With concurrent tool calls (known Phase 1 risk), this can deadlock or stall shutdown paths.
+`CleanupAgent()` calls async dispose synchronously, which can stall shutdown paths.
 
-**Code reference:**
-- `src/WpfToolsMcp.Automation/AutomationController.Agent.cs:204`
+**Code area:** `src/WpfToolsMcp.Automation/AutomationController.Agent.cs`
 
-### Concurrency remains a fundamental risk (singleton controller + mutable state)
+### Concurrency status after the review
 
-`AutomationController` is a DI singleton with mutable attachment state *and now* mutable agent session state. If MCP clients issue concurrent tool calls (common with some LLM orchestrators), calls like `close_session` / `inject_agent` / `take_screenshot` can interleave in unsafe ways.
-
-This is called out in `docs/Phase1-CodeReviewFindings.md`, but it becomes more important as Phase 2 adds more long-running in-proc operations.
+The singleton-controller issue was superseded by per-session controllers in
+`SessionManager`. `AutomationController.RunExclusiveAsync` still protects
+operations within each session.
 
 ## Tooling / ergonomics
 
 - The Phase 2 “debug” tools (`inject_agent`, `agent_ping`) are fine for bring-up, but the PRD direction is to **upgrade** existing inspection tools (`get_visual_tree`, `get_element_properties`) with a `backend` switch and auto-fallback (and use `get_visual_tree backend=wpf` rather than a separate WPF-only tree tool).
 - `inject_agent` likely should accept an optional `windowHandle` so multi-window apps can inject targeting the desired dispatcher window.
 
-## Testing gaps (recommended next)
+## Testing gaps recorded at the time
 
-1. Add a test that simulates the “server restart” path:
-   - launch app
-   - inject agent
-   - dispose MCP client/server
-   - reattach (new MCP server process)
-   - ensure it can connect without re-injecting (requires deterministic pipe name or restartable server)
-2. Expand WPF tree snapshot to assert:
+1. **Completed:**
+   `InjectionSnapshots.Agent_reconnect_after_mcp_restart_snapshot` launches an
+   app, injects the agent, restarts the MCP server, reattaches, and verifies
+   reconnect without reinjection.
+2. Historical suggestion: expand WPF tree snapshots to assert:
    - CLR type names in nodes
    - visibility and DataContext type fields are populated as expected
 

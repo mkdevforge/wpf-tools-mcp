@@ -1,23 +1,28 @@
-# Phase 1 Code Review Findings (defer until post–Phase 2)
+# Phase 1 Code Review Findings (Historical Snapshot)
 
-This document captures Phase 1 review notes so we can intentionally defer them while implementing Phase 2 (Snoop injection + deep inspection), then return and harden Phase 1 behavior with better ergonomics, stability, and performance.
+> **Document status:** This is a point-in-time review record. Statements labeled
+> "Current" in the findings describe the implementation at the time of review,
+> not necessarily current `main`. Revalidate any remaining recommendation before
+> turning it into work.
+
+This document captured Phase 1 review notes before Phase 2 and later hardening.
 
 Snapshot tests were green at the time this was written (`dotnet test -c Debug`).
 
-Updates since this review:
-- Tool calls are now serialized via `AutomationController.RunExclusiveAsync` to mitigate concurrency races.
-- `click_element` now differentiates `clickMode=auto` vs `clickMode=invokePreferred` (auto only prefers invoke for common invokables like buttons).
-- `take_screenshot` defaults to `captureMode=screen` (CopyFromScreen of the client area; `auto` remains available for PrintWindow-first capture).
+Important changes since this review:
+- `SessionManager` now creates one `AutomationController` per session, and calls are serialized within each session.
+- Primary element-locator fields are composed as filters rather than tried as unrelated fallback strategies.
+- `click_element` differentiates `clickMode=auto` from `clickMode=invokePreferred`.
+- `take_screenshot` defaults to `captureMode=auto` (PrintWindow-first with screen fallback).
 
 ## Summary
 
 Phase 1 is in good shape for the intended baseline: it can launch/attach, enumerate windows (including owned modal dialogs), inspect the UIA tree/properties, take screenshots, and interact (click/type/select/scroll) across a growing set of realistic WPF surfaces.
 
-The main “return later” items are about:
+At the time, the main "return later" items were about:
 
 - performance/scalability of locator resolution for large trees
 - semantics/ergonomics of locator and click/type behavior in real apps
-- concurrency/thread-safety for multiple tool calls
 - better diagnostics without destabilizing snapshots
 
 ## Findings / follow-ups
@@ -30,13 +35,12 @@ The main “return later” items are about:
   - Consider exposing an opt-in `includeUntitledWindows` / `includeAllWindows` mode for cases where a legitimate window has an empty title (current filter skips empty titles).
   - Consider additional noise filtering (tool windows, hidden WPF helper windows) if it becomes an issue in real apps.
 
-### Locator resolution semantics (strategy order vs combined matching)
+### Primary locator resolution semantics
 
-- **Current:** Locator resolution tries strategies in priority order (AutomationId → Name → ClassName → XPath → Index-only) and returns the first strategy that resolves.
-- **Risk:** If multiple fields are provided (e.g., both `name` and `className`), users may expect AND-filtering (“match all”) rather than “try best/first”. Today it does *not* combine.
-- **Follow-ups:**
-  - Document the behavior clearly in tool docs / PRD addendum.
-  - Optionally add a mode for combined matching (AND-filter) when multiple fields are provided.
+- **Resolved:** Current primary element locators combine supplied identity
+  fields as filters. Strict locators report ambiguity, while `index` or
+  `strict=false` provide explicit non-unique selection behavior. Specialized
+  nested locators can define narrower tool-specific semantics.
 
 ### Locator resolution performance (large trees)
 
@@ -49,13 +53,9 @@ The main “return later” items are about:
 
 ### `clickMode` behavior
 
-- **Current:** `click_element` uses InvokePattern for single-click when not `mouseAlways`; otherwise it uses mouse clicks. `InvokePreferred` currently behaves the same as `Auto`.
-- **Risk:** Users may assume `InvokePreferred` is meaningfully different from `Auto`.
-- **Follow-ups:**
-  - Either simplify (remove/alias modes) or implement distinct behavior:
-    - `Auto`: mouse-first (or invoke-first) with clear rules
-    - `InvokePreferred`: try invoke first, then mouse fallback
-    - `MouseAlways`: always use mouse
+- **Resolved:** `InvokePreferred` tries InvokePattern whenever it is available;
+  `Auto` only prefers invoke for common invokable controls; `MouseAlways`
+  bypasses pattern invocation.
 
 ### `type_text` fallback is destructive (Ctrl+A/Delete)
 
@@ -67,11 +67,10 @@ The main “return later” items are about:
 
 ### Concurrency/thread-safety
 
-- **Current:** `AutomationController` is a DI singleton holding mutable attachment state (`_application`, `_automation`).
-- **Risk:** Concurrent tool calls can interleave (e.g., `close_session` during `click_element`) and corrupt state or fail unpredictably.
-- **Follow-ups:**
-  - Gate tool execution with a `SemaphoreSlim` (serialize calls) **or**
-  - Move to per-session/per-connection controller lifetime if/when MCP transport supports it cleanly.
+- **Resolved architecture:** `SessionManager` owns an independent
+  `AutomationController` per session, and `RunExclusiveAsync` serializes calls
+  that target the same session. Separate sessions no longer share attachment or
+  agent state.
 
 ### Diagnostics and swallowed exceptions
 
@@ -82,10 +81,12 @@ The main “return later” items are about:
 
 ### Screenshot capture modes (Screen vs PrintWindow vs Auto)
 
-- **Current:** Screenshot capture supports `screen`, `printWindow`, and `auto` (PrintWindow-first then screen fallback). There’s a manual dump test that writes both captures for comparison when `WPF_TOOLS_MCP_DUMP_SCREENSHOTS=1`.
-- **Follow-ups:**
-  - Decide on default capture mode for “real world” usage (likely `auto`) and ensure documentation/tool schema reflect that expectation.
+- **Resolved default:** Screenshot capture supports `screen`, `printWindow`, and
+  `auto`; the default is `auto` (PrintWindow-first, then screen fallback). The
+  manual dump test still writes comparison captures when
+  `WPF_TOOLS_MCP_DUMP_SCREENSHOTS=1`.
 
 ## When to revisit
 
-After Phase 2 is functional (injection + pipe + deep inspection), revisit this list and decide what to address next based on real usage feedback on non-demo, custom-control-heavy WPF apps.
+Review any still-relevant items against current code and real application
+feedback before adding them to an active backlog.

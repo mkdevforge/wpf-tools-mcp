@@ -1,17 +1,22 @@
 # WPF Tools MCP — WPF UI Agent MCP Server
 
+> **Document status:** This is the original product and phased-delivery design
+> record. It is retained for architectural context, not as the live tool or
+> roadmap contract. The current usage reference is `README.md`, and the MCP
+> server's advertised schemas are authoritative for individual tool inputs.
+
 ## Problem
 
 When using AI coding assistants to build WPF applications, the developer is the visual bottleneck. The model writes XAML and code but has zero visibility into what the running application actually looks like or how it behaves. Every visual verification requires the developer to build, launch, navigate, screenshot, paste, and describe. This kills the iterative feedback loop that makes AI-assisted development productive.
 
 ## Solution
 
-An MCP server that gives AI models the ability to see and interact with running WPF applications using a hybrid approach: **Snoop sees, FlaUI acts.**
+An MCP server that gives AI models the ability to see and interact with running WPF applications using a hybrid WPF-agent and FlaUI/UIA approach.
 
-- **Snoop** (Ms-PL-licensed) is injected into the target process to provide deep WPF-native inspection — the real visual and logical trees, live binding status with source/path/error details, DataContext objects, dependency property values, styles, and templates. Snoop.Core already handles the hard edge cases (frozen Freezables, virtualized panels, template parts, adorner layers) that would take months to reimplement.
-- **FlaUI** (UIA3) operates out-of-process to handle all interaction — clicks, typing, selection, invocation, scrolling — through Microsoft UI Automation patterns. This is what FlaUI was designed for and it does it well.
+- **Snoop** (Ms-PL-licensed) is injected into the target process to provide deep WPF-native inspection of the real visual tree, live binding status, DataContext objects, dependency property values, styles, and templates. Snoop.Core already handles hard WPF edge cases that would be costly to reimplement.
+- **FlaUI** (UIA3) operates out-of-process for window management, UIA inspection, and most interaction. The WPF agent also assists with WPF handle resolution, scrolling, and supported native value-setting paths when UIA alone is insufficient.
 
-This hybrid gives the AI model the inspection depth of a developer running Snoop alongside the interaction capability of an automation framework, without requiring any modification to the target application.
+This hybrid gives the AI model WPF-native inspection depth alongside the interaction capability of an automation framework, without requiring source changes to the target application.
 
 ### Snoop integration approach: Thin Wrapper (confirmed by feasibility spike)
 
@@ -19,26 +24,27 @@ A code-level analysis of the Snoop repository (commit `c1cc286`, 2025-12-21) con
 
 - `Snoop.Core` has **no project dependency** on the `Snoop` host/UI project and builds independently.
 - However, `Snoop.Core.dll` is not a clean inspection-only library — it contains Snoop's WPF UI (windows, views, controls) compiled into the same assembly. We reference `Snoop.Core` but only call the inspection-oriented types, ignoring the UI surface.
-- Tree walking (`VisualTreeService`, `LogicalTreeService`) is **clean** — pure WPF types, no Snoop UI coupling.
-- Dependency property enumeration and binding inspection (`PropertyInformation`, `BindingDiagnosticHelper`) need **thin wrappers** — they are shaped for Snoop's property-grid UI (e.g., `PropertyInformation` is itself a `DependencyObject`), so the agent wraps them in serializable DTOs and marshals calls to the correct `Dispatcher`.
+- Visual-tree walking through `VisualTreeService` is **clean**: pure WPF types with no Snoop UI coupling.
+- The feasibility spike identified Snoop property-grid types such as `PropertyInformation` as unsuitable pipe contracts. The current agent instead returns its own serializable DTOs and uses WPF binding APIs directly.
 - Style/template inspection (`FrameworkElementHelper`, trigger model types) needs **thin wrappers** — relies on reflection into non-public WPF members (`ThemeStyle`, `TemplateInternal`), which works but is a WPF version compatibility risk.
 - The injection mechanism (`Snoop.InjectorLauncher` + `Snoop.GenericInjector`) is **already generic** — it accepts arbitrary assembly/type/method arguments, so we point it at our own `WpfToolsMcp.Agent` entry point.
 
 The injected agent (`WpfToolsMcp.Agent`) is a thin assembly that:
 
 1. Is loaded into the target process via Snoop's injection mechanism
-2. Starts a named pipe server on the target's `Dispatcher`
-3. Receives inspection requests from the MCP server
-4. Calls Snoop.Core's inspection classes, wraps results in DTOs
+2. Starts an asynchronous named pipe server in the target process
+3. Receives inspection requests and marshals WPF operations to the target's `Dispatcher`
+4. Calls Snoop.Core and WPF inspection APIs, wrapping results in DTOs
 5. Serializes and returns results over the pipe
 
 ## Repository: `wpf-tools-mcp`
 
 **Organization:** mkdevforge  
-**License:** MIT  
+**Source license:** MIT<br>
+**Packaged Snoop payload:** Ms-PL<br>
 **Target framework:** .NET 8+  
 **MCP SDK:** `ModelContextProtocol` (official C# SDK)  
-**Interaction:** FlaUI (UIA3) — out-of-process automation  
+**Automation:** FlaUI (UIA3) out-of-process, with agent-assisted WPF paths
 **Inspection:** Snoop.Core + Snoop.InjectorLauncher (Ms-PL) — in-process WPF introspection  
 **Communication:** Named pipe between MCP server and injected Snoop agent
 
@@ -87,7 +93,7 @@ The injected agent (`WpfToolsMcp.Agent`) is a thin assembly that:
                           │     ┌──────────┴────────────┐ │
                           │     │  Injected Snoop Agent  │ │
                           │     │  - Visual tree         │ │
-                          │     │  - Logical tree        │ │
+                          │     │  - UIA coverage        │ │
                           │     │  - Binding status      │ │
                           │     │  - DataContext          │ │
                           │     │  - Dependency props     │ │
@@ -96,11 +102,15 @@ The injected agent (`WpfToolsMcp.Agent`) is a thin assembly that:
                           └───────────────────────────────┘
 ```
 
-The MCP server manages both channels in Phase 2. Inspection tools route through the named pipe to the injected Snoop agent for deep WPF data, falling back to FlaUI/UIA if the agent is not available. Interaction tools always route through FlaUI. The AI model doesn't need to know which backend serves which tool — the MCP tool surface is unified.
+The MCP server manages both channels in Phase 2. Backend-neutral inspection tools route through the named pipe for deep WPF data and fall back to FlaUI/UIA when they have a UIA equivalent. WPF-only diagnostics require the agent. Interaction is primarily handled by FlaUI, with agent-assisted WPF handle resolution and supported WPF-native actions. The MCP tool surface remains unified.
 
 ---
 
 ## MCP Tools
+
+The tables below describe the full `diagnostics` profile. The default `core`
+profile intentionally exposes a smaller 25-tool surface with compact schemas;
+see `README.md` for the current profile split and configuration.
 
 ### Phase 1 — Inspection (FlaUI / UIA)
 
@@ -116,6 +126,8 @@ The MCP server manages both channels in Phase 2. Inspection tools route through 
 | `pick_element_at_point` | Pick an element at a coordinate (`coordSpace`: screen/client) | ElementRef + optional ancestor chain |
 | `highlight_element` | Highlight an element on-screen. Can optionally return an annotated screenshot (`returnScreenshot=true`). | Highlight result + bounds + method used |
 | `get_element_properties` | Inspect a single element via UIA | All UIA automation properties, supported patterns, current values |
+| `get_uia_locators` | Export stable UIA locator recommendations for a WPF or UIA element | WPF/UIA identity, ranked locators, and FlaUI snippets |
+| `get_uia_tree` | Return a bounded UIA automation tree for a window or subtree | UIA identity, paths, and children |
 
 ### Phase 1 — Interaction (FlaUI)
 
@@ -142,17 +154,18 @@ The MCP server manages both channels in Phase 2. Inspection tools route through 
 | `launch_app` | Start a WPF application | Executable path, optional arguments, working directory |
 | `attach_to_app` | Attach to an already-running process | Process name or PID |
 | `close_session` | Close a session (and close the attached application) | `sessionId` + graceful close with optional force kill timeout |
+| `list_sessions` | List active sessions and confirmed backend capability state | None |
 
 ### Phase 2 — Upgraded inspection (Snoop, in-process)
 
-Phase 2 enriches existing tools and adds new ones. When the Snoop agent is injected, inspection tools return deeper WPF-native data. When the agent is not available, they fall back to Phase 1 (FlaUI/UIA) behavior transparently.
+Phase 2 enriches existing tools and adds new ones. When the Snoop agent is available, inspection tools can return deeper WPF-native data. Backend-neutral tools fall back to UIA where an equivalent exists; WPF-only diagnostics return a clear injection or connection error.
 
 **Upgraded tools:**
 
 | Tool | Phase 2 enhancement |
 |---|---|
-| `get_visual_tree` | Returns the real WPF visual tree (not UIA): actual CLR types, Visibility, DataContext type, full dependency property count. Configurable depth. Falls back to UIA tree if agent unavailable. |
-| `get_element_properties` | All dependency properties with values, local vs inherited/default/style source, binding expressions, and current effective value. Falls back to UIA properties if agent unavailable. |
+| `get_visual_tree` | Returns the real WPF visual tree (not UIA): actual CLR types, visibility, and DataContext type. Configurable depth. Falls back to UIA tree if agent unavailable. |
+| `get_element_properties` | Resolves UIA or WPF targets and returns UIA properties and supported patterns. Use `get_computed_properties` for WPF dependency-property values and value sources. |
 
 **New tools (Phase 2 only):**
 
@@ -160,8 +173,9 @@ Phase 2 enriches existing tools and adds new ones. When the Snoop agent is injec
 |---|---|---|
 | `inject_agent` | Inject the in-process (Snoop-based) agent | Injection status |
 | `agent_ping` | Ping the injected agent | Ping result |
+| `release_element` | Explicitly release a reusable element handle | Release result |
 | `get_binding_info` | Inspect bindings on an element | For each binding: path, source, mode, converter, current value, status (Active/Error/Detached), and error message if broken |
-| `get_binding_errors` | List all broken bindings in the current visual tree | Binding path, target element, target property, error description. On .NET 6+, uses `System.Windows.Diagnostics.BindingDiagnostics` (non-invasive). On .NET Framework, reports binding status only (Active/Error/Detached) without full error messages to avoid invasive re-binding. |
+| `get_binding_errors` | List broken or non-active bindings in the current visual tree | Binding path, target element/property, binding status, and available validation error details |
 | `subscribe_binding_errors` | Subscribe to binding errors (poll-based) | Subscription ID |
 | `poll_subscription` | Poll queued subscription events | Batch of events |
 | `unsubscribe` | Unsubscribe a subscription | Unsubscribe result |
@@ -177,123 +191,80 @@ Phase 2 enriches existing tools and adds new ones. When the Snoop agent is injec
 
 ### Element Locator Strategies
 
-Tools that target elements accept a `locator` object supporting multiple strategies, tried in order of specificity:
+Primary element locators combine supplied identity fields as filters rather than
+treating them as independent fallback strategies. Specialized nested locators,
+such as `select_item.itemLocator`, have tool-specific schemas and semantics.
 
 ```json
 {
   "automationId": "SaveButton",
   "name": "Save",
-  "className": "Button",
-  "xpath": "/Window/Grid/StackPanel[2]/Button[1]",
-  "index": 0
+  "className": "Button"
 }
 ```
 
-The server resolves the most specific match. If multiple elements match, it returns an error with the count and suggests narrowing the query. AutomationId is preferred when available.
+If multiple elements match a strict locator, the server returns an ambiguity
+error and asks the caller to narrow the query or provide an index. `xpath` and
+`index` cannot be used together. AutomationId is the preferred stable identity
+when an application exposes one.
 
 ---
 
-## Test Application
+## Test Applications
 
-The repository includes a purpose-built WPF test application (`WpfToolsMcp.TestApp`) designed to exercise every tool. It is not a demo — it is the project's primary testing surface.
+The repository uses separate, deterministic WPF executables rather than one
+large app with scenario pages:
 
-### Test App Structure
+- `WpfToolsMcp.TestApp`: the primary basic-controls fixture.
+- `WpfToolsMcp.TestApp.Minimal`: fallback locators and ambiguity without stable
+  AutomationIds.
+- `WpfToolsMcp.TestApp.BindingErrors`: binding and DataContext diagnostics.
+- `WpfToolsMcp.TestApp.BrokenAutomation`: controls with missing UIA peers.
+- `WpfToolsMcp.TestApp.CustomControls`: user controls and templated controls.
+- `WpfToolsMcp.TestApp.DataGrid`: editing, selection, and complex traversal.
+- `WpfToolsMcp.TestApp.DeeplyNested`: deep paths and traversal limits.
+- `WpfToolsMcp.TestApp.Dialogs`: modal windows and window targeting.
+- `WpfToolsMcp.TestApp.DynamicContent`: changing trees and stale handles.
+- `WpfToolsMcp.TestApp.Scroll`: off-viewport discovery and scrolling.
+- `WpfToolsMcp.TestApp.Tabs`: tab selection with nested selectable content.
+- `WpfToolsMcp.TestApp.TreeView`: hierarchical selection.
 
-The test app contains pages/views covering these scenarios:
+The fixtures start in known states. Stable AutomationIds are used where they
+are part of the scenario; other fixtures intentionally omit or break UIA
+metadata to exercise fallback and error behavior.
 
-- **BasicControls** — Buttons, text boxes, check boxes, radio buttons, combo boxes, sliders. Every control has a stable `AutomationId`. Used to verify `click_element`, `type_text`, `set_value`, `select_item`, `invoke`, and `get_element_properties`.
-- **DataGrid** — Editable data grid with sorting and selection. Tests complex element traversal and interaction patterns.
-- **Navigation** — Tab control or frame-based navigation with multiple pages. Verifies `get_visual_tree` depth handling and `scroll_to_element`.
-- **DeeplyNested** — 10+ levels of nested containers with elements at various depths. Stress-tests tree traversal and locator resolution.
-- **BindingErrors** — Page with intentional binding errors (misspelled property names, wrong types, missing DataContext). Verifies `get_binding_errors` and `get_binding_info` detect broken bindings via Snoop inspection.
-- **DynamicContent** — Timer-driven content that adds/removes elements. Tests that the MCP server handles stale references gracefully.
-- **Dialogs** — Modal and non-modal dialogs, message boxes. Tests window enumeration and multi-window interaction.
-- **CustomControls** — User controls and templated controls to verify automation peer behavior with non-standard controls.
-
-In addition, the repo contains focused, deterministic test apps to validate tricky UIA interactions without relying on the target app's control templates:
-
-- **Tabs** (`WpfToolsMcp.TestApp.Tabs`) — TabControl selection, including nested selectable controls to ensure `select_item` targets the intended container.
-- **TreeView** (`WpfToolsMcp.TestApp.TreeView`) — TreeView selection across hierarchical items.
-- **Minimal** (`WpfToolsMcp.TestApp.Minimal`) — No `AutomationId`s. Validates ambiguity handling and fallback locator strategies (`name`, `className`, `index`).
-- **BrokenAutomation** (`WpfToolsMcp.TestApp.BrokenAutomation`) — Includes a control that is intentionally not exposed via UIA to validate expected limitations and clean failure modes.
-
-**UIA limits:** If a control is not exposed via UI Automation (no AutomationPeer / no useful patterns), locator-based tools cannot interact with it without breaking abstraction (e.g., image/coordinate hacks), which this project intentionally avoids.
-
-### Test App Requirements
-
-- The app should start in a known, deterministic state every launch
-- The primary test app (`WpfToolsMcp.TestApp`) should use unique, stable `AutomationId`s for interactive elements
-- Focused apps may intentionally omit `AutomationId`s to validate fallback locators and failure modes
-- Navigation between pages (if present) must be automatable (tab control or programmatic)
-- No special instrumentation required — Snoop injection handles all introspection
+**UIA limits:** A control without a useful AutomationPeer or actionable pattern
+may remain visible to WPF-native inspection while being unavailable to UIA
+interaction.
 
 ---
 
-## Testing Strategy: Snapshot tests with Verify
+## Testing Strategy
 
-Approval testing with [Verify](https://github.com/VerifyTests/Verify) is the primary testing strategy. This is a natural fit because:
+`tests/WpfToolsMcp.SnapshotTests` is the single NUnit and Verify integration
+test project. It builds and launches the focused WPF fixtures and starts the
+real stdio MCP server. Coverage includes:
 
-- MCP tool outputs (visual trees, element properties, binding errors) are structured data that's easy to snapshot but tedious to assert field-by-field.
-- Screenshots can be snapshot-tested as image files — visual regressions become PR-visible diffs.
-- The "approve once, detect drift" model matches how we want to validate automation output: we care that it's *correct and stable*, not that it matches some hand-written expected structure.
+- tool-profile composition and compact-schema contracts;
+- session lifecycle, restart/reconnect, active-window recovery, and element
+  handle recovery;
+- UIA and WPF tree inspection, locator export, properties, bindings,
+  DataContext, styles, templates, and coverage diagnostics;
+- clicks, invocation, typing, value setting, selection, drag, scrolling, and
+  waits;
+- screenshots, annotations, highlighting, display coordinates, traces,
+  subscriptions, and performance sampling;
+- expected failures for missing peers, ambiguous locators, stale elements,
+  unavailable injection assets, and protocol errors.
 
-### Test Categories
+Approved text and image snapshots live under
+`tests/WpfToolsMcp.SnapshotTests/Snapshots`. UI tests that share desktop state
+are non-parallel and use STA where WPF requires it. The optional
+`tools/WpfToolsMcp.McpSmokeRunner` performs a black-box run against an explicit
+target executable and writes evidence under `artifacts/smoke`.
 
-**Tool output verification (snapshot tests):**
-Each MCP tool gets snapshot tests that launch the test app, call the tool, and verify the output against an approved snapshot.
-
-```
-Tests/
-├── Snapshots/                  # Approved snapshots (committed)
-├── ListWindowsTests.cs
-├── GetVisualTreeTests.cs       # Snapshot the real WPF visual tree
-├── GetLogicalTreeTests.cs      # Snapshot the logical tree
-├── GetElementPropertiesTests.cs# Dependency properties, local vs inherited
-├── GetBindingInfoTests.cs      # Binding paths, sources, status
-├── GetBindingErrorsTests.cs    # Broken bindings across the tree
-├── GetDataContextTests.cs      # Serialized DataContext snapshots
-├── GetStylesTests.cs           # Style setters, triggers, templates
-├── TakeScreenshotTests.cs      # Snapshot as .verified.png
-├── ClickElementTests.cs        # Snapshot state-after
-├── TypeTextTests.cs
-├── SelectItemTests.cs
-├── LocatorResolutionTests.cs   # Verify locator strategies resolve correctly
-└── InjectionTests.cs           # Verify Snoop agent injection and pipe comms
-```
-
-**Integration flow tests:**
-Multi-step scenarios that exercise realistic workflows:
-
-- Launch app → inject Snoop → inspect visual tree → find element → interact via FlaUI → re-inspect via Snoop → verify state changed
-- Launch app → `get_binding_errors` → fix binding in code → rebuild → re-launch → verify binding resolved
-- Launch app → take screenshot → compare to approved baseline
-- Attach to running process → inject → inspect → close
-
-**Error handling tests:**
-
-- Element not found → clean error message
-- Ambiguous locator → returns count and suggestions
-- Process not running → appropriate error
-- Stale element reference after dynamic content change → graceful recovery
-- Snoop injection failure → falls back to FlaUI-only mode with degraded inspection
-- Named pipe disconnection → reconnection or clear error
-
-### Test Infrastructure
-
-- Tests use `[OneTimeSetUp]` / `ClassInitialize` to launch the test app once per test class and share the MCP server connection.
-- A test helper wraps MCP tool invocations so tests read like:
-
-```csharp
-var tree = await Mcp.CallTool<VisualTreeResult>("get_visual_tree", new
-{
-    depth = 3,
-    root = new { automationId = "BasicControlsPage" }
-});
-
-await Verify(tree);
-```
-
-- Screenshot tests use Verify's image comparison with a configurable pixel tolerance to handle anti-aliasing differences across machines.
+Current build, focused-test, full-test, and smoke commands are documented in
+`README.md`.
 
 ---
 
@@ -302,7 +273,7 @@ await Verify(tree);
 - **Not a general Windows automation tool.** WPF only. Win32/WinForms/UWP support is not a goal.
 - **Not a testing framework.** The MCP server enables AI-driven interaction, not a replacement for Appium, FlaUI test suites, or Coded UI. The test infrastructure is for testing *the MCP server itself*.
 - **No pre-emptive caching.** The server queries on every tool call. Latency is irrelevant compared to the developer round-trip it replaces.
-- **Phase 1 is not a throwaway.** FlaUI-only mode is the permanent baseline. Phase 2 enhances inspection depth but Phase 1 remains the interaction layer and the fallback when injection isn't available.
+- **Phase 1 is not a throwaway.** FlaUI/UIA remains the permanent automation baseline and the fallback for backend-neutral inspection when injection is unavailable. The WPF agent now also assists selected interaction paths.
 - **Not a fork of Snoop (Phase 2).** We reference `Snoop.Core` and `Snoop.InjectorLauncher` as dependencies and wrap their inspection classes in a thin DTO layer. The Snoop UI types compiled into `Snoop.Core.dll` are unused. If a future `Snoop.Core.Inspection` package is published, we can switch to that.
 
 ## Key Dependencies and Risks
@@ -316,20 +287,22 @@ await Verify(tree);
 
 - **Snoop.Core contains UI code.** `Snoop.Core.dll` is not a clean inspection library — it includes Snoop's WPF windows, views, and controls. We reference the assembly but only call inspection-oriented types. This means a larger-than-necessary dependency; a future optimization could extract only the needed classes, but this is not worth doing upfront.
 - **`PropertyInformation` is a DependencyObject.** Snoop's primary inspection class sets up WPF bindings to keep property values live-updated for its UI grid. The agent must wrap these in plain DTOs and avoid leaking `PropertyInformation` instances across the named pipe boundary.
-- **Binding error detection is invasive on .NET Framework.** `BindingDiagnosticHelper.TrySetBindingError()` clears and re-applies bindings to force trace output. This is unacceptable for passive inspection. On .NET 6+, we use the non-invasive `BindingDiagnostics` API instead. On .NET Framework targets, we report binding status (Active/Error/Detached) but not full error messages.
+- **Binding detail is best effort.** The .NET 8 agent inspects `BindingExpression` status and available validation errors without rewriting bindings. Some failures expose a non-active status without a detailed error message.
 - **Reflection into non-public WPF internals.** Style/template inspection uses non-public members (`ThemeStyle`, `TemplateInternal`, `Style.IsBasedOnModified`) via reflection. This works on current WPF versions but is a compatibility risk on future versions. These tools should degrade gracefully if reflection fails.
 - **Dispatcher marshalling.** All Snoop.Core inspection operations must run on the owning element's `Dispatcher`. The agent must enforce this for every request. Snoop provides `RunInDispatcher()` extension methods we can reuse.
 - **Multi-dispatcher applications.** WPF apps can have multiple `Dispatcher` instances. The agent must detect and handle this (Snoop has `SnoopModes.MultipleDispatcherMode` guards).
 - **Snoop.Core bundles PowerShell integration.** The `Snoop.Core.csproj` includes `System.Management.Automation` references. These types won't be called by our agent but the assemblies may need to be present at load time. Needs verification during P2-M0.
 - **Injection and security software.** DLL injection via `CreateRemoteThread` + `VirtualAllocEx` can trigger endpoint protection. This is a development-time tool and should be documented accordingly.
 - **Injector .NET version gaps.** Snoop's `ProcessWrapper` framework detection maps to `"net462"` or `"net6.0-windows"` only; .NET 5 targets throw. Acceptable since we target .NET 8+, but worth noting for future Framework support.
-- **.NET 6+ `BindingDiagnostics` requires `VisualDiagnostics` enabled.** This is on by default in debug builds but may be off in release. The agent should detect and report when this API is unavailable.
+- **Release-build diagnostics vary.** The agent reports the binding state and validation details exposed by the target process; applications can expose less diagnostic detail in some configurations.
 
 ---
 
-## Milestones
+## Original Milestone Plan
 
-The project is split into two distinct phases. Phase 1 (FlaUI) delivers a complete, useful MCP server using only out-of-process UI Automation. Phase 2 (Snoop) layers in deep WPF-native inspection via injection. Each phase is independently shippable and testable.
+This section preserves the delivery plan used to build the project. It is not the
+current roadmap: some planned public tool names were consolidated or split, and
+trace/performance support has since shipped.
 
 ---
 
@@ -369,7 +342,7 @@ At this point, an AI model can launch a WPF app, see its automation tree and scr
 
 ### Phase 2 — Snoop (in-process WPF inspection)
 
-Phase 2 injects a lightweight agent into the target process using Snoop's injection mechanism. This upgrades inspection from UIA's simplified automation tree to the real WPF visual/logical trees, live binding diagnostics, DataContext, dependency properties with value sources, and style/template inspection. Interaction still goes through FlaUI.
+Phase 2 injects a lightweight agent into the target process using Snoop's injection mechanism. This upgrades inspection from UIA's simplified automation tree to the real WPF visual tree, live binding diagnostics, DataContext, dependency properties with value sources, and style/template inspection. FlaUI remains the primary automation path, with agent-assisted WPF actions where appropriate.
 
 The MCP tool surface is extended — new tools are added and existing inspection tools are enriched with deeper data. The AI model doesn't need to know which backend serves which tool.
 
@@ -385,23 +358,23 @@ The MCP tool surface is extended — new tools are added and existing inspection
 - DTO layer wrapping `PropertyInformation` and related Snoop types into serializable models
 - Dispatcher marshalling enforced on all inspection requests
 - `get_visual_tree` upgraded: returns real WPF visual tree with actual CLR types, Visibility, DataContext type (falls back to UIA tree if agent not injected)
-- New tool: `get_logical_tree`
-- `get_element_properties` upgraded: dependency property values with local vs inherited/default/style source
+- Planned tool: `get_logical_tree` (not shipped as a separate public tool)
+- Planned `get_element_properties` dependency-property upgrade (shipped instead as `get_computed_properties`)
 - New tool: `get_binding_info` — per-element binding details (path, source, mode, converter, status, error)
-- New tool: `get_binding_errors` — all broken bindings across the tree (using `BindingDiagnostics` on .NET 6+)
+- New tool: `get_binding_errors` — broken and non-active bindings across the tree
 - Snapshot tests for all upgraded/new inspection tools
 
 #### P2-M2 — Deep diagnostics
 - New tool: `get_data_context` with configurable serialization depth and cycle detection
-- New tool: `get_styles` — style setters, triggers, template structure (graceful degradation if non-public WPF member reflection fails)
-- Test app BindingErrors and CustomControls pages exercising Snoop-specific capabilities
-- Graceful fallback: if injection fails, all tools degrade to Phase 1 (FlaUI-only) behavior with a clear indication to the model
+- Planned `get_styles` tool (shipped as `get_style_chain` and `get_template_info`)
+- Separate BindingErrors and CustomControls test applications exercising Snoop-specific capabilities
+- Graceful fallback for backend-neutral inspection; WPF-only diagnostics report injection failures directly
 
 #### Post-Phase 2 (future considerations)
 - SSE transport for remote scenarios
 - Visual diff tool (screenshot comparison as MCP tool)
 - Accessibility audit tool (check for missing automation properties)
-- Trace + performance capture (DevTools-like): lightweight tool traces and UI-thread responsiveness sampling
+- Trace + performance capture (delivered as `trace_start` / `trace_stop` and `performance_start` / `performance_stop`)
 - .NET Framework 4.x target support
 - Live property editing (change values through Snoop agent for rapid iteration)
 - Extract minimal inspection classes from Snoop.Core into standalone library (reduce dependency footprint)
@@ -410,4 +383,6 @@ The MCP tool surface is extended — new tools are added and existing inspection
 
 ## Appendix
 
-- **Snoop feasibility report** — `snoop-feasibility-report.md` — full code-level analysis of Snoop repository dependency graph, capability matrix with coupling ratings, injection mechanism details, and recommended approach. Based on commit `c1cc286` (2025-12-21).
+- The Snoop feasibility findings are summarized in the integration section of
+  this document. The original analysis was based on Snoop commit `c1cc286`
+  (2025-12-21); no separate feasibility-report file is tracked in this repository.

@@ -6,7 +6,17 @@ Goal: make sure `highlight_element` works reliably (incl. multi-monitor), and th
 
 - Windows 10/11
 - A WPF app to test against (recommended: any of the `src/WpfToolsMcp.TestApp.*` projects, or your own app)
-- An MCP client wired up to the `wpf-tools-mcp` MCP server (e.g., Codex/Claude Desktop/etc.)
+- An MCP client wired up to the `wpf-tools-mcp` MCP server
+- The server started with the full diagnostics profile:
+
+  ```powershell
+  wpf-tools-mcp --tool-profile diagnostics
+  ```
+
+  For an MCP client configuration, add
+  `"args": ["--tool-profile", "diagnostics"]` to the server entry. The default
+  core profile does not expose `inject_agent`, `pick_element_at_point`,
+  `highlight_element`, or `set_window_bounds`.
 
 ## 1) Baseline: UIA overlay highlight (no agent)
 
@@ -33,9 +43,13 @@ Expected:
    - `highlight_element` with `elementId=<uia elementId>`
    - set `preferInProcHighlight=true` (default)
 
-Expected:
+Preferred result:
 - `Highlighted=true`
 - `MethodUsed="wpf_agent_mapped"` (meaning: UIA bounds were mapped to a WPF visual via `wpf/pick_element_at_point`)
+
+`MethodUsed="win32_overlay"` means the visible fallback worked but the WPF
+mapping path did not pass this check. Agent connectivity alone does not
+guarantee that a particular UIA element can be mapped to a WPF visual.
 
 ## 3) Screenshot guarantee (annotated)
 
@@ -57,4 +71,5 @@ Expected:
 
 Expected:
 - No failures due to negative coordinates
-- `MethodUsed` remains consistent (`wpf_agent_mapped` when agent is connected; `win32_overlay` otherwise)
+- `MethodUsed="wpf_agent_mapped"` when mapping succeeds; `win32_overlay` is the
+  supported fallback when mapping is unavailable
