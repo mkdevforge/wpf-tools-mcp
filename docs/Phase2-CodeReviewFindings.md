@@ -105,6 +105,42 @@ The agent connect retry is ~3s total with short per-attempt timeouts. On slow ma
 
 **Code area:** `src/WpfToolsMcp.Automation/AutomationController.Agent.cs`
 
+### Injector launcher lifecycle and fault containment (resolved 2026-07-28)
+
+**Previously observed behavior:** The upstream launcher writes to
+`Environment.SpecialFolder.ApplicationData\Snoop\SnoopLog.txt` before its
+top-level injection error handler. An inaccessible user profile could therefore
+raise an unhandled CLR exception and a Windows application-error dialog.
+Cancellation also stopped waiting without guaranteeing that a blocked launcher
+and its redirected child process were terminated.
+
+**Fix implemented:** Every launch receives a unique writable profile/temp
+workspace, including a precreated Snoop log directory. The launcher subtree
+inherits `SEM_NOGPFAULTERRORBOX`, `SEM_FAILCRITICALERRORS`, and
+`SEM_NOOPENFILEERRORBOX` while the server error mode is restored immediately
+after `Process.Start`. A bounded launcher runner drains and caps both output
+streams concurrently, returns normal nonzero exits for existing diagnostics,
+and requests entire-tree termination on caller cancellation or the configurable
+`WPF_TOOLS_MCP_INJECTOR_TIMEOUT_MS` timeout. It boundedly waits for the launcher;
+regression coverage also polls a recorded fixture child independently.
+Controller disposal now cancels the active injection before waiting for the
+per-session tool lock.
+
+Natural launcher failures include the executable path, PID, elapsed duration,
+and signed decimal/hex exit code even when both redirected streams are empty.
+`0xE0434352` is labeled as an unhandled CLR exception. GitHub Actions alone runs
+a gated unhandled-crash fixture that asserts inherited fault-dialog suppression,
+captured stderr, nonzero completion, and process exit; local test runs skip it
+before any crashing process is started. The fixture independently refuses its
+crash mode unless both GitHub Actions and a dedicated test-only opt-in token are
+present.
+
+This remains a thin wrapper rather than a derivative Snoop launcher. Upstream
+logging is not made universally best effort; instead, its known filesystem
+dependency is isolated and writable, while any residual launcher crash is
+contained, prevented from opening system fault UI, and surfaced as bounded
+diagnostic output or an actionable start/timeout error.
+
 ### CleanupAgent blocks synchronously
 
 `CleanupAgent()` calls async dispose synchronously, which can stall shutdown paths.

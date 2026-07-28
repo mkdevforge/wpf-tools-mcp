@@ -325,6 +325,36 @@ inspection, require successful injection.
   a physical fallback, if the session policy permits one.
 - Multi-monitor coordinates use the Windows virtual screen and may be negative.
 
+## Troubleshooting
+
+### Injector launcher failures
+
+Each Snoop injector launch runs with a disposable profile and temp workspace.
+`USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TEMP`, and `TMP` are overridden for
+the launcher subtree, including a precreated writable `APPDATA\Snoop`
+directory. This contains Snoop's upstream file logging without modifying the
+pinned upstream launcher submodule. The logging calls are not universally best
+effort, so an unexpected failure inside the launcher can still produce a
+nonzero exit.
+
+The launcher inherits Windows error-mode flags that suppress system fault
+dialogs; the MCP server's original error mode is restored immediately after
+the child starts. A normal nonzero exit is reported with captured stdout and
+stderr plus the launcher path, PID, duration, and signed decimal/hex exit code.
+Exit `0xE0434352` is identified as an unhandled CLR exception. Cancellation or
+timeout requests termination of the entire launcher process tree, boundedly
+waits for the launcher, and reports the same context with the termination
+outcome and bounded output. Regression coverage independently verifies that
+both a fixture launcher and its recorded child exit after cleanup. A gated
+GitHub Actions test also exercises a real unhandled fixture exit; local runs
+skip that test before starting the process, and the fixture itself requires a
+second dedicated opt-in token before its crash mode can run.
+
+The default injector timeout is 15 seconds. Set
+`WPF_TOOLS_MCP_INJECTOR_TIMEOUT_MS` to a positive millisecond value to change
+it. Valid values are clamped to 1,000 through 120,000 milliseconds; invalid or
+non-positive values use the default.
+
 ## Development
 
 Source builds require:

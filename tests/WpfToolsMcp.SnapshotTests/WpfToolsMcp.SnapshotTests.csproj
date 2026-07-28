@@ -45,6 +45,7 @@
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.TreeView\WpfToolsMcp.TestApp.TreeView.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.ViewportProbe\WpfToolsMcp.TestApp.ViewportProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.BindingErrors\WpfToolsMcp.TestApp.BindingErrors.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\WpfToolsMcp.ProcessFixture\WpfToolsMcp.ProcessFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

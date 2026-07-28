@@ -27,6 +27,7 @@ public sealed partial class AutomationController : IDisposable
     private Application? _application;
     private UIA3Automation? _automation;
     private readonly SemaphoreSlim _toolMutex = new(1, 1);
+    private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly string _resourceOwnerId = Guid.NewGuid().ToString("N");
     private LastHighlightRequest? _lastHighlight;
     private int _disposeStarted;
@@ -65,6 +66,7 @@ public sealed partial class AutomationController : IDisposable
 
     public bool IsAttached => IsApplicationRunning(_application);
     internal bool IsDisposing => Volatile.Read(ref _disposeStarted) != 0;
+    internal CancellationToken LifetimeToken => _lifetimeCts.Token;
 
     public void Dispose()
     {
@@ -73,6 +75,7 @@ public sealed partial class AutomationController : IDisposable
             return;
         }
 
+        _lifetimeCts.Cancel();
         _toolMutex.Wait();
         try
         {
@@ -85,6 +88,7 @@ public sealed partial class AutomationController : IDisposable
         finally
         {
             _toolMutex.Release();
+            _lifetimeCts.Dispose();
         }
     }
 
