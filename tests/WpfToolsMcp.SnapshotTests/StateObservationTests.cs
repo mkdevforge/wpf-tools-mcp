@@ -541,7 +541,7 @@ public sealed class StateObservationTests
                     Is.EqualTo("dispatcher-only"));
             });
 
-            await InvokeAsync("Observation_SecondaryChange", secondaryWindow.Handle);
+            await InvokeAsync("Observation_ChangeSecondary");
             await WaitForMarkerAsync(
                 "secondary-change-complete",
                 TimeSpan.FromSeconds(5),
@@ -701,7 +701,7 @@ public sealed class StateObservationTests
         throw new TimeoutException($"Window '{title}' did not appear within {timeout}.");
     }
 
-    private async Task InvokeAsync(string automationId, long? windowHandle = null)
+    private async Task InvokeAsync(string automationId)
     {
         var response = await _mcp.CallToolAsync<InvokeResponse>(
             "invoke",
@@ -711,8 +711,7 @@ public sealed class StateObservationTests
                 ["locator"] = new Dictionary<string, object?>
                 {
                     ["automationId"] = automationId
-                },
-                ["windowHandle"] = windowHandle
+                }
             },
             _testCts.Token);
         Assert.That(response.Invoked, Is.True, $"Expected {automationId} to be invoked.");

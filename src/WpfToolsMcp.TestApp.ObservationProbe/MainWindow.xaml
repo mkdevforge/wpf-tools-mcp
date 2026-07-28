@@ -60,8 +60,13 @@
             <Button AutomationProperties.AutomationId="Observation_OpenSecondary"
                     Content="Open secondary"
                     Width="120"
-                    Margin="0,0,0,8"
+                    Margin="0,0,8,8"
                     Click="OpenSecondary_Click" />
+            <Button AutomationProperties.AutomationId="Observation_ChangeSecondary"
+                    Content="Change secondary"
+                    Width="120"
+                    Margin="0,0,0,8"
+                    Click="ChangeSecondary_Click" />
         </WrapPanel>
     </StackPanel>
 </Window>

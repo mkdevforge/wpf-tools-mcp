@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private readonly object _markerSync = new();
     private Thread? _secondaryThread;
     private Dispatcher? _secondaryDispatcher;
+    private ObservationViewModel? _secondaryViewModel;
     private int _orderedStateIndex;
 
     internal MainWindow(ObservationProbeOptions options)
@@ -156,11 +157,29 @@ public partial class MainWindow : Window
         thread.Start();
     }
 
+    private void ChangeSecondary_Click(object sender, RoutedEventArgs e)
+    {
+        var dispatcher = Volatile.Read(ref _secondaryDispatcher);
+        var viewModel = Volatile.Read(ref _secondaryViewModel);
+        if (dispatcher is null || viewModel is null ||
+            dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        _ = dispatcher.BeginInvoke(() =>
+        {
+            viewModel.Phase = "secondary-changed";
+            AppendMarker("secondary-change-complete");
+        }, DispatcherPriority.Normal);
+    }
+
     private void RunSecondaryWindow()
     {
         var dispatcher = Dispatcher.CurrentDispatcher;
         Volatile.Write(ref _secondaryDispatcher, dispatcher);
         var viewModel = new ObservationViewModel(dispatcher);
+        Volatile.Write(ref _secondaryViewModel, viewModel);
         var target = new TextBox
         {
             Width = 280,
@@ -172,23 +191,6 @@ public partial class MainWindow : Window
         target.SetBinding(
             TextBox.TextProperty,
             new Binding(nameof(ObservationViewModel.Phase)) { Mode = BindingMode.OneWay });
-        var changeButton = new Button
-        {
-            Content = "Change secondary",
-            Width = 140,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Margin = new Thickness(20, 0, 20, 20)
-        };
-        AutomationProperties.SetAutomationId(changeButton, "Observation_SecondaryChange");
-        changeButton.Click += (_, _) =>
-        {
-            viewModel.Phase = "secondary-changed";
-            AppendMarker("secondary-change-complete");
-        };
-        var content = new StackPanel();
-        content.Children.Add(target);
-        content.Children.Add(changeButton);
-
         var window = new Window
         {
             Title = "WPF Tools MCP ObservationProbe Secondary",
@@ -197,7 +199,7 @@ public partial class MainWindow : Window
             Left = 840,
             Top = 160,
             WindowStartupLocation = WindowStartupLocation.Manual,
-            Content = content,
+            Content = target,
             DataContext = viewModel
         };
         AutomationProperties.SetAutomationId(window, "Observation_SecondaryWindow");
@@ -205,6 +207,7 @@ public partial class MainWindow : Window
         window.Closed += (_, _) => dispatcher.BeginInvokeShutdown(DispatcherPriority.Send);
         window.Show();
         Dispatcher.Run();
+        Volatile.Write(ref _secondaryViewModel, null);
         Volatile.Write(ref _secondaryDispatcher, null);
     }
 
