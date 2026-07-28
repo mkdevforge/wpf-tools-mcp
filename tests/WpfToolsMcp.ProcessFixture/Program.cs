@@ -122,8 +122,14 @@ internal static class FixtureProgram
 
     private static async Task<int> HangAsync(IReadOnlyList<string> args)
     {
-        var pidPath = Path.GetFullPath(RequiredOption(args, "--pid-path"));
-        WriteFile(pidPath, Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+        var pidPath = OptionalOption(args, "--pid-path");
+        if (pidPath is not null)
+        {
+            WriteFile(
+                Path.GetFullPath(pidPath),
+                Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+        }
+
         Console.WriteLine($"hanging pid={Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}");
         await Task.Delay(Timeout.InfiniteTimeSpan);
         return 0;
@@ -145,8 +151,6 @@ internal static class FixtureProgram
             CreateNoWindow = true
         };
         childStartInfo.ArgumentList.Add("hang");
-        childStartInfo.ArgumentList.Add("--pid-path");
-        childStartInfo.ArgumentList.Add(childPidPath);
 
         using var child = Process.Start(childStartInfo)
             ?? throw new InvalidOperationException("Failed to start the fixture child process.");
@@ -160,6 +164,12 @@ internal static class FixtureProgram
 
     private static string RequiredOption(IReadOnlyList<string> args, string name)
     {
+        return OptionalOption(args, name)
+            ?? throw new ArgumentException($"Missing required option {name}.");
+    }
+
+    private static string? OptionalOption(IReadOnlyList<string> args, string name)
+    {
         for (var index = 1; index < args.Count - 1; index++)
         {
             if (string.Equals(args[index], name, StringComparison.Ordinal))
@@ -168,7 +178,7 @@ internal static class FixtureProgram
             }
         }
 
-        throw new ArgumentException($"Missing required option {name}.");
+        return null;
     }
 
     private static void WriteFile(string path, string contents)
