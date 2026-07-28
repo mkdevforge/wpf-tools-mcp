@@ -127,7 +127,9 @@ public sealed class ElementHandleSnapshots
         {
             ElementId = "<element>",
             ClassName = string.IsNullOrWhiteSpace(element.ClassName) ? null : "<class>",
-            Bounds = element.Bounds is null ? null : new Rect(0, 0, 0, 0)
+            Bounds = element.Bounds is null ? null : new Rect(0, 0, 0, 0),
+            IsVisible = null,
+            IsOffscreen = null
         };
 
     private static async Task<ElementRef> FindSingleWpfElementAsync(
@@ -486,7 +488,7 @@ public sealed class ElementHandleSnapshots
                 Resolve = resolved with
                 {
                     WindowHandleUsed = 0,
-                    Element = resolved.Element with { ElementId = "<element>" }
+                    Element = ScrubElementRefForSnapshot(resolved.Element)
                 },
                 Path = path
             });
@@ -572,7 +574,7 @@ public sealed class ElementHandleSnapshots
                 Resolve = resolved with
                 {
                     WindowHandleUsed = 0,
-                    Element = resolved.Element with { ElementId = "<element>" }
+                    Element = ScrubElementRefForSnapshot(resolved.Element)
                 },
                 Remove = remove,
                 Error = error
@@ -706,7 +708,7 @@ public sealed class ElementHandleSnapshots
                 Resolve = resolved with
                 {
                     WindowHandleUsed = 0,
-                    Element = resolved.Element with { ElementId = "<element>" }
+                    Element = ScrubElementRefForSnapshot(resolved.Element)
                 },
                 DataContextTypeByElementId = byElementId.DataContextType,
                 DataContextTypeByLocator = byLocator.DataContextType,
@@ -775,10 +777,7 @@ public sealed class ElementHandleSnapshots
                 Resolve = resolved with
                 {
                     WindowHandleUsed = 0,
-                    Element = resolved.Element with
-                    {
-                        ElementId = "<element>"
-                    }
+                    Element = ScrubElementRefForSnapshot(resolved.Element)
                 },
                 InitialPath = initialPath,
                 CurrentPath = currentPath.XPath,

@@ -243,14 +243,21 @@ public sealed class PickerHighlightSnapshots
         var element = response.Element with
         {
             ElementId = "<element>",
-            Bounds = response.Element.Bounds is { } bounds ? bounds with { X = 0, Y = 0 } : null
+            Bounds = response.Element.Bounds is { } bounds ? bounds with { X = 0, Y = 0 } : null,
+            IsVisible = null,
+            IsOffscreen = null
         };
 
         IReadOnlyList<ElementRef>? ancestors = null;
         if (response.Ancestors is { Count: > 0 })
         {
             ancestors = response.Ancestors
-                .Select((a, i) => a with { ElementId = $"<ancestor:{i}>" })
+                .Select((a, i) => a with
+                {
+                    ElementId = $"<ancestor:{i}>",
+                    IsVisible = null,
+                    IsOffscreen = null
+                })
                 .ToArray();
         }
 

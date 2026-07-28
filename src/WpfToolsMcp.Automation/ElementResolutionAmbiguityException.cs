@@ -1,0 +1,48 @@
+using System.Text;
+using WpfToolsMcp.Contracts;
+
+namespace WpfToolsMcp.Automation;
+
+public sealed class ElementResolutionAmbiguityException : InvalidOperationException
+{
+    public ElementResolutionAmbiguityException(ResolveElementAmbiguity ambiguity)
+        : base(BuildMessage(ambiguity))
+    {
+        Ambiguity = ambiguity;
+    }
+
+    public ResolveElementAmbiguity Ambiguity { get; }
+
+    private static string BuildMessage(ResolveElementAmbiguity ambiguity)
+    {
+        ArgumentNullException.ThrowIfNull(ambiguity);
+
+        var builder = new StringBuilder(
+            $"{ambiguity.Code}: Locator is ambiguous (found {ambiguity.DiscoveredCandidates}). " +
+            "Retry with locator.index using a candidate index, or reuse a candidate elementId.");
+
+        foreach (var candidate in ambiguity.Candidates.Take(5))
+        {
+            var element = candidate.Element;
+            builder.AppendLine();
+            builder.Append($"[{candidate.Index}] {Bound(element.Type)}");
+            AppendIdentity(builder, "automationId", element.AutomationId);
+            AppendIdentity(builder, "name", element.Name);
+            AppendIdentity(builder, "elementId", element.ElementId);
+            AppendIdentity(builder, "xpath", element.XPath);
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendIdentity(StringBuilder builder, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            builder.Append($", {name}='{Bound(value)}'");
+        }
+    }
+
+    private static string Bound(string value) =>
+        value.Length <= 160 ? value : value[..160] + "...";
+}

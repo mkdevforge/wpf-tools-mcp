@@ -123,6 +123,18 @@ internal static class AgentServer
             {
                 case "ping":
                     return new AgentResponse(request.Id, Ok: true, Result: JsonValue.Create("pong"));
+                case AgentProtocolCapabilities.GetCapabilitiesMethod:
+                    return new AgentResponse(
+                        request.Id,
+                        Ok: true,
+                        Result: JsonSerializer.SerializeToNode(
+                            new AgentCapabilitiesResponse(
+                                AgentProtocolCapabilities.CurrentProtocolVersion,
+                                [
+                                    AgentProtocolCapabilities.ResolveElementDetailed,
+                                    AgentProtocolCapabilities.FindElementsDiscoveryCounts
+                                ]),
+                            JsonOptions));
                 case "wpf/get_visual_tree":
                     return await RunOnUiAsync(() =>
                     {
@@ -197,6 +209,18 @@ internal static class AgentServer
                             ?? new ResolveWpfElementRequest();
 
                         var response = WpfVisualTreeInspector.ResolveElement(ownerId, typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
+                case AgentProtocolCapabilities.ResolveElementDetailed:
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<ResolveWpfElementRequest>(JsonOptions)
+                            ?? new ResolveWpfElementRequest();
+
+                        var response = WpfVisualTreeInspector.ResolveElementDetailed(ownerId, typedRequest, cancellationToken);
                         return new AgentResponse(
                             request.Id,
                             Ok: true,

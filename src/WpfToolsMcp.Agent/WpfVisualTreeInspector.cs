@@ -583,6 +583,23 @@ internal static partial class WpfVisualTreeInspector
 
     private sealed record XPathSegment(string TypeName, int? OneBasedIndex);
 
+    private sealed class WpfLocatorAmbiguousException : InvalidOperationException
+    {
+        private const string ErrorPrefix = "wpf_resolve:ambiguous:";
+
+        public WpfLocatorAmbiguousException(
+            string message,
+            IReadOnlyList<(DependencyObject Element, string XPath)> orderedCandidates)
+            : base(message.StartsWith(ErrorPrefix, StringComparison.OrdinalIgnoreCase)
+                ? message
+                : $"{ErrorPrefix} {message}")
+        {
+            OrderedCandidates = orderedCandidates.ToArray();
+        }
+
+        public IReadOnlyList<(DependencyObject Element, string XPath)> OrderedCandidates { get; }
+    }
+
     private static XPathSegment ParseXPathSegment(string segment)
     {
         if (string.IsNullOrWhiteSpace(segment))
@@ -683,7 +700,8 @@ internal static partial class WpfVisualTreeInspector
             if (matching.Length > 1)
             {
                 throw new InvalidOperationException(
-                    $"XPath segment '{segment.TypeName}' is ambiguous (found {matching.Length}). Provide an index.");
+                    $"XPath segment '{segment.TypeName}' is ambiguous (found {matching.Length}). "
+                    + "Add a one-based '[n]' index to that XPath segment.");
             }
 
             current = matching[0];
@@ -1027,6 +1045,38 @@ internal static partial class WpfVisualTreeInspector
         return IsInViewportWpf(element, viewportBounds);
     }
 
+    private static bool? TryGetIsVisibleWpf(DependencyObject element)
+    {
+        try
+        {
+            return element is UIElement uiElement ? uiElement.IsVisible : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool? TryGetIsOffscreenWpf(
+        DependencyObject element,
+        ContractRect? bounds,
+        bool? isVisible)
+    {
+        if (isVisible == false)
+        {
+            return true;
+        }
+
+        if (bounds is null)
+        {
+            return null;
+        }
+
+        var window = GetContainingWindow(element);
+        var viewportBounds = window is null ? null : TryGetClientBoundsScreen(window);
+        return viewportBounds is null ? null : !RectIntersects(bounds, viewportBounds);
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
 
@@ -1323,20 +1373,27 @@ internal static partial class WpfVisualTreeInspector
         string ownerId,
         DependencyObject element,
         string xpath,
-        FindReturnFields returnFields)
+        FindReturnFields returnFields,
+        bool includeElementId = true)
     {
-        var elementIdWpf = ElementHandles.Register(ownerId, element);
+        var elementIdWpf = includeElementId ? ElementHandles.Register(ownerId, element) : null;
 
         if (returnFields == FindReturnFields.Standard)
         {
+            var bounds = GetBoundsWpf(element);
+            var isVisible = TryGetIsVisibleWpf(element);
             return new ElementRef(
                 Type: element.GetType().Name,
                 AutomationId: GetAutomationId(element),
                 Name: GetName(element),
                 XPath: xpath,
                 ClassName: element.GetType().FullName,
-                Bounds: GetBoundsWpf(element),
-                ElementIdWpf: elementIdWpf);
+                Bounds: bounds,
+                ElementIdWpf: elementIdWpf)
+            {
+                IsVisible = isVisible,
+                IsOffscreen = TryGetIsOffscreenWpf(element, bounds, isVisible)
+            };
         }
 
         return new ElementRef(
@@ -1427,6 +1484,7 @@ internal static partial class WpfVisualTreeInspector
         }
 
         var matches = new List<ElementRef>();
+        var discoveredMatches = 0;
         var scannedNodes = 0;
         var truncated = false;
         string? truncatedReason = null;
@@ -1456,8 +1514,17 @@ internal static partial class WpfVisualTreeInspector
             if (IsQueryMatchWpf(current, query) &&
                 (!request.InteractiveOnly || IsInteractiveWpf(current, request.InteractiveMode)))
             {
-                matches.Add(BuildElementRefWpf(ownerId, current, currentXPath, request.ReturnFields));
-                if (matches.Count >= maxResults)
+                discoveredMatches++;
+                if (matches.Count < maxResults)
+                {
+                    matches.Add(BuildElementRefWpf(
+                        ownerId,
+                        current,
+                        currentXPath,
+                        request.ReturnFields,
+                        request.IncludeElementIds));
+                }
+                else
                 {
                     truncated = true;
                     truncatedReason = "maxResults";
@@ -1509,7 +1576,10 @@ internal static partial class WpfVisualTreeInspector
             ScannedNodes: scannedNodes,
             Truncated: truncated,
             TruncatedReason: truncatedReason,
-            Warnings: null);
+            Warnings: null)
+        {
+            DiscoveredMatches = discoveredMatches
+        };
     }
 
     private static IEnumerable<(DependencyObject Element, string XPath)> EnumerateDescendantsWithXPath(
@@ -1598,6 +1668,8 @@ internal static partial class WpfVisualTreeInspector
             return matches[0];
         }
 
+        var ordered = OrderMatchesForLocator(matches, locator);
+
         if (locator.Index is int index)
         {
             if (index < 0)
@@ -1605,7 +1677,6 @@ internal static partial class WpfVisualTreeInspector
                 throw new ArgumentOutOfRangeException(nameof(locator), "index must be >= 0.");
             }
 
-            var ordered = OrderMatchesForLocator(matches, locator);
             if (index >= ordered.Count)
             {
                 throw new InvalidOperationException(
@@ -1617,12 +1688,12 @@ internal static partial class WpfVisualTreeInspector
 
         if (locator.Strict)
         {
-            throw new InvalidOperationException(
-                $"wpf_resolve:ambiguous: Locator is ambiguous (found {matches.Count}). Provide 'index' to disambiguate.");
+            throw new WpfLocatorAmbiguousException(
+                $"Locator is ambiguous (found {matches.Count}). Provide 'index' to disambiguate.",
+                ordered);
         }
 
-        var orderedDefault = OrderMatchesForLocator(matches, locator);
-        return orderedDefault.Count > 0 ? orderedDefault[0] : matches[0];
+        return ordered[0];
     }
 
     private static IReadOnlyList<(DependencyObject Element, string XPath)> OrderMatchesForLocator(
@@ -1669,7 +1740,10 @@ internal static partial class WpfVisualTreeInspector
                 return cmp;
             }
 
-            return string.Compare(GetName(a.Element), GetName(b.Element), StringComparison.Ordinal);
+            cmp = string.Compare(GetName(a.Element), GetName(b.Element), StringComparison.Ordinal);
+            return cmp != 0
+                ? cmp
+                : string.Compare(a.XPath, b.XPath, StringComparison.Ordinal);
         });
         return list;
     }
@@ -2130,6 +2204,65 @@ internal static partial class WpfVisualTreeInspector
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
 
+        return ResolveElementOrThrow(ownerId, request, window, treeService, maxNodes, cancellationToken);
+    }
+
+    public static ResolveWpfElementDetailedResponse ResolveElementDetailed(
+        string ownerId,
+        ResolveWpfElementRequest request,
+        CancellationToken cancellationToken)
+    {
+        const int maxCandidates = 5;
+
+        var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
+        var window = ResolveWindow(request.WindowHandle);
+        var resolvedWindowHandle = new WindowInteropHelper(window).Handle.ToInt64();
+        var windowHandleUsed = resolvedWindowHandle != 0
+            ? resolvedWindowHandle
+            : request.WindowHandle.GetValueOrDefault();
+        using var treeService = new VisualTreeService();
+
+        try
+        {
+            var element = ResolveElementOrThrow(ownerId, request, window, treeService, maxNodes, cancellationToken);
+            return new ResolveWpfElementDetailedResponse(Element: element, Ambiguity: null);
+        }
+        catch (WpfLocatorAmbiguousException ex)
+        {
+            var candidates = ex.OrderedCandidates
+                .Take(maxCandidates)
+                .Select((candidate, index) => new ResolveElementCandidate(
+                    Index: index,
+                    Element: BuildElementRefWpf(
+                        ownerId,
+                        candidate.Element,
+                        candidate.XPath,
+                        FindReturnFields.Standard)))
+                .ToArray();
+            var truncated = candidates.Length < ex.OrderedCandidates.Count;
+
+            return new ResolveWpfElementDetailedResponse(
+                Element: null,
+                Ambiguity: new ResolveElementAmbiguity(
+                    Code: "ambiguous_element",
+                    BackendUsed: InspectionBackend.Wpf,
+                    WindowHandleUsed: windowHandleUsed,
+                    ReturnedCandidates: candidates.Length,
+                    DiscoveredCandidates: ex.OrderedCandidates.Count,
+                    Truncated: truncated,
+                    Candidates: candidates,
+                    TruncatedReason: truncated ? "maxCandidates" : null));
+        }
+    }
+
+    private static ElementRef ResolveElementOrThrow(
+        string ownerId,
+        ResolveWpfElementRequest request,
+        Window window,
+        VisualTreeService treeService,
+        int maxNodes,
+        CancellationToken cancellationToken)
+    {
         var rootObject = (DependencyObject)window;
         var rootXPath = "/Window";
 

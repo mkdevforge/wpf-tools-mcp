@@ -8260,10 +8260,13 @@ public sealed partial class AutomationController : IDisposable
                     InteractiveMode: interactiveMode,
                     MaxResults: maxResults,
                     MaxNodes: maxNodes,
-                    ReturnFields: returnFields);
+                    ReturnFields: returnFields,
+                    IncludeElementIds: includeElementIds);
 
                 var wpf = await FindElementsWpfAsync(request, injectIfMissing: true, cancellationToken).ConfigureAwait(false);
-                var responseWpf = includeElementIds ? AttachWpfElementIds(wpf, resolvedWindowHandle) : wpf;
+                var responseWpf = includeElementIds
+                    ? AttachWpfElementIds(wpf, resolvedWindowHandle)
+                    : StripElementIds(wpf);
 
                 if (responseWpf.Truncated && responseWpf.ReturnedMatches == 0)
                 {
@@ -8320,12 +8323,15 @@ public sealed partial class AutomationController : IDisposable
                         InteractiveMode: interactiveMode,
                         MaxResults: maxResults,
                         MaxNodes: maxNodes,
-                        ReturnFields: returnFields);
+                        ReturnFields: returnFields,
+                        IncludeElementIds: includeElementIds);
 
                     var wpf = await TryFindElementsWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
                     if (wpf is not null)
                     {
-                        var responseWpf = includeElementIds ? AttachWpfElementIds(wpf, resolvedWindowHandle) : wpf;
+                        var responseWpf = includeElementIds
+                            ? AttachWpfElementIds(wpf, resolvedWindowHandle)
+                            : StripElementIds(wpf);
 
                         if (responseWpf.Truncated && responseWpf.ReturnedMatches == 0)
                         {
@@ -8372,6 +8378,10 @@ public sealed partial class AutomationController : IDisposable
                 cancellationToken);
 
             var finalResponse = warnings is null ? response : response with { Warnings = warnings };
+            if (!includeElementIds)
+            {
+                finalResponse = StripElementIds(finalResponse);
+            }
             if (finalResponse.Truncated && finalResponse.ReturnedMatches == 0)
             {
                 var nextWarnings = finalResponse.Warnings is null
@@ -9868,145 +9878,171 @@ public sealed partial class AutomationController : IDisposable
             return null;
         }
 
-        if (locator.Index is null)
+        if (locator.Index is int index)
         {
-            if (matches.Count == 1)
+            if (index < 0)
             {
-                return matches[0];
+                throw new InvalidOperationException("index must be >= 0.");
             }
 
-            var orderedForAction = OrderMatchesForAction(matches, locator, actionKind);
-            if (locator.Strict)
+            var orderedByIdentity = OrderMatchesDeterministic(matches, locator);
+            if (index >= orderedByIdentity.Count)
             {
-                var details = BuildAmbiguousCandidatesDetails(orderedForAction, maxCandidates: 5);
                 throw new InvalidOperationException(
-                    $"Locator is ambiguous (found {matches.Count}). Provide 'index' to disambiguate."
-                    + details);
+                    $"Locator matched {orderedByIdentity.Count} elements but index {index} is out of range.");
             }
 
-            return orderedForAction.Count > 0 ? orderedForAction[0] : matches[0];
+            return orderedByIdentity[index];
         }
 
-        var index = locator.Index.Value;
-        if (index < 0)
+        var ordered = OrderMatchesForAction(matches, locator, actionKind);
+        if (ordered.Count == 1)
         {
-            throw new InvalidOperationException("index must be >= 0.");
+            return ordered[0];
         }
 
-        var ordered = OrderMatchesDeterministic(matches, locator);
-        if (index >= ordered.Count)
+        if (locator.Strict)
         {
-            throw new InvalidOperationException(
-                $"Locator matched {ordered.Count} elements but index {index} is out of range.");
+            throw new UiaLocatorAmbiguousException(ordered);
         }
 
-        return ordered[index];
+        return ordered[0];
     }
 
-    private static IReadOnlyList<AutomationElement> OrderMatchesDeterministic(IReadOnlyList<AutomationElement> matches, ElementLocator locator)
+    private sealed class UiaLocatorAmbiguousException : InvalidOperationException
+    {
+        public UiaLocatorAmbiguousException(IReadOnlyList<AutomationElement> candidates)
+            : base(
+                $"Locator is ambiguous (found {candidates.Count}). Provide 'index' to disambiguate."
+                + BuildAmbiguousCandidatesDetails(candidates, maxCandidates: 5))
+        {
+            Candidates = candidates.ToArray();
+        }
+
+        public IReadOnlyList<AutomationElement> Candidates { get; }
+    }
+
+    private static string BuildAmbiguousCandidatesDetails(
+        IReadOnlyList<AutomationElement> matches,
+        int maxCandidates)
+    {
+        if (matches.Count == 0 || maxCandidates <= 0)
+        {
+            return "";
+        }
+
+        var take = Math.Min(maxCandidates, matches.Count);
+        var details = new StringBuilder();
+        details.AppendLine();
+        details.AppendLine("Candidates:");
+
+        for (var index = 0; index < take; index++)
+        {
+            var element = matches[index];
+            var bounds = TryGetBounds(element);
+            var boundsText = bounds is null || bounds.Value.Width <= 0 || bounds.Value.Height <= 0
+                ? "bounds=n/a"
+                : $"bounds={bounds.Value.Left},{bounds.Value.Top} {bounds.Value.Width}x{bounds.Value.Height}";
+
+            details.Append("  - ");
+            details.Append(GetXPathLabel(element));
+            AppendCandidateIdentity(details, "name", GetName(element));
+            AppendCandidateIdentity(details, "automationId", GetAutomationId(element));
+            details.Append($", {boundsText}");
+
+            var enabled = TryGetBooleanString(() => element.Properties.IsEnabled.Value);
+            var offscreen = TryGetBooleanString(() => element.Properties.IsOffscreen.Value);
+            if (enabled is not null)
+            {
+                details.Append($", enabled={enabled}");
+            }
+
+            if (offscreen is not null)
+            {
+                details.Append($", offscreen={offscreen}");
+            }
+
+            details.AppendLine();
+        }
+
+        if (matches.Count > take)
+        {
+            details.AppendLine($"  ... and {matches.Count - take} more");
+        }
+
+        return details.ToString().TrimEnd();
+    }
+
+    private static void AppendCandidateIdentity(StringBuilder details, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            details.Append($", {name}='{value}'");
+        }
+    }
+
+    private static string? TryGetBooleanString(Func<bool> action)
+    {
+        try
+        {
+            return action() ? "true" : "false";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<AutomationElement> OrderMatchesDeterministic(
+        IReadOnlyList<AutomationElement> matches,
+        ElementLocator locator) =>
+        OrderMatches(matches, locator, actionKind: null);
+
+    private static IReadOnlyList<AutomationElement> OrderMatchesForAction(
+        IReadOnlyList<AutomationElement> matches,
+        ElementLocator locator,
+        ActionKind actionKind) =>
+        OrderMatches(matches, locator, actionKind);
+
+    private static IReadOnlyList<AutomationElement> OrderMatches(
+        IReadOnlyList<AutomationElement> matches,
+        ElementLocator locator,
+        ActionKind? actionKind)
     {
         if (matches.Count <= 1)
         {
             return matches;
         }
 
-        var list = matches.ToList();
-        list.Sort((a, b) =>
-        {
-            var offA = locator.PreferVisible ? GetOffscreenRank(a) : 0;
-            var offB = locator.PreferVisible ? GetOffscreenRank(b) : 0;
-            var cmp = offA.CompareTo(offB);
-            if (cmp != 0)
+        return matches
+            .Select((element, ordinal) =>
             {
-                return cmp;
-            }
-
-            cmp = GetEnabledRank(a).CompareTo(GetEnabledRank(b));
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            var ba = TryGetBounds(a);
-            var bb = TryGetBounds(b);
-            cmp = (ba?.Top ?? int.MaxValue).CompareTo(bb?.Top ?? int.MaxValue);
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            cmp = (ba?.Left ?? int.MaxValue).CompareTo(bb?.Left ?? int.MaxValue);
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            cmp = string.Compare(GetAutomationId(a), GetAutomationId(b), StringComparison.Ordinal);
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            cmp = string.Compare(GetName(a), GetName(b), StringComparison.Ordinal);
-            return cmp;
-        });
-        return list;
-    }
-
-    private static IReadOnlyList<AutomationElement> OrderMatchesForAction(IReadOnlyList<AutomationElement> matches, ElementLocator locator, ActionKind actionKind)
-    {
-        if (matches.Count <= 1)
-        {
-            return matches;
-        }
-
-        var list = matches.ToList();
-        list.Sort((a, b) =>
-        {
-            var offA = locator.PreferVisible ? GetOffscreenRank(a) : 0;
-            var offB = locator.PreferVisible ? GetOffscreenRank(b) : 0;
-            var cmp = offA.CompareTo(offB);
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            cmp = GetEnabledRank(a).CompareTo(GetEnabledRank(b));
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            cmp = GetActionAffinityRank(a, actionKind).CompareTo(GetActionAffinityRank(b, actionKind));
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            var ba = TryGetBounds(a);
-            var bb = TryGetBounds(b);
-            cmp = (ba?.Top ?? int.MaxValue).CompareTo(bb?.Top ?? int.MaxValue);
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            cmp = (ba?.Left ?? int.MaxValue).CompareTo(bb?.Left ?? int.MaxValue);
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            cmp = string.Compare(GetAutomationId(a), GetAutomationId(b), StringComparison.Ordinal);
-            if (cmp != 0)
-            {
-                return cmp;
-            }
-
-            cmp = string.Compare(GetName(a), GetName(b), StringComparison.Ordinal);
-            return cmp;
-        });
-        return list;
+                var bounds = TryGetBounds(element);
+                return new
+                {
+                    Element = element,
+                    Ordinal = ordinal,
+                    OffscreenRank = locator.PreferVisible ? GetOffscreenRank(element) : 0,
+                    EnabledRank = GetEnabledRank(element),
+                    ActionAffinityRank = actionKind is ActionKind value
+                        ? GetActionAffinityRank(element, value)
+                        : 0,
+                    Top = bounds?.Top ?? int.MaxValue,
+                    Left = bounds?.Left ?? int.MaxValue,
+                    AutomationId = GetAutomationId(element),
+                    Name = GetName(element)
+                };
+            })
+            .OrderBy(candidate => candidate.OffscreenRank)
+            .ThenBy(candidate => candidate.EnabledRank)
+            .ThenBy(candidate => candidate.ActionAffinityRank)
+            .ThenBy(candidate => candidate.Top)
+            .ThenBy(candidate => candidate.Left)
+            .ThenBy(candidate => candidate.AutomationId, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Name, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Ordinal)
+            .Select(candidate => candidate.Element)
+            .ToArray();
     }
 
     private static int GetActionAffinityRank(AutomationElement element, ActionKind actionKind)
@@ -10223,13 +10259,23 @@ public sealed partial class AutomationController : IDisposable
 
     private static int GetOffscreenRank(AutomationElement element)
     {
+        return TryGetIsOffscreen(element) switch
+        {
+            false => 0,
+            true => 1,
+            null => 2
+        };
+    }
+
+    private static bool? TryGetIsOffscreen(AutomationElement element)
+    {
         try
         {
-            return element.Properties.IsOffscreen.Value ? 1 : 0;
+            return element.Properties.IsOffscreen.Value;
         }
         catch
         {
-            return 2;
+            return null;
         }
     }
 
@@ -10250,77 +10296,6 @@ public sealed partial class AutomationController : IDisposable
         try
         {
             return element.BoundingRectangle;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string BuildAmbiguousCandidatesDetails(IReadOnlyList<AutomationElement> matches, int maxCandidates)
-    {
-        if (matches.Count == 0 || maxCandidates <= 0)
-        {
-            return "";
-        }
-
-        var take = Math.Min(maxCandidates, matches.Count);
-        var sb = new StringBuilder();
-        sb.AppendLine();
-        sb.AppendLine("Candidates:");
-        for (var i = 0; i < take; i++)
-        {
-            var e = matches[i];
-            var type = GetXPathLabel(e);
-            var name = GetName(e);
-            var automationId = GetAutomationId(e);
-            var bounds = TryGetBounds(e);
-            var boundsText = bounds is null || bounds.Value.Width <= 0 || bounds.Value.Height <= 0
-                ? "bounds=n/a"
-                : $"bounds={bounds.Value.Left},{bounds.Value.Top} {bounds.Value.Width}x{bounds.Value.Height}";
-
-            var enabled = TryGetBooleanString(() => e.Properties.IsEnabled.Value);
-            var offscreen = TryGetBooleanString(() => e.Properties.IsOffscreen.Value);
-
-            sb.Append("  - ");
-            sb.Append(type);
-            if (!string.IsNullOrWhiteSpace(name))
-            {
-                sb.Append($", name='{name}'");
-            }
-
-            if (!string.IsNullOrWhiteSpace(automationId))
-            {
-                sb.Append($", automationId='{automationId}'");
-            }
-
-            sb.Append($", {boundsText}");
-            if (enabled is not null)
-            {
-                sb.Append($", enabled={enabled}");
-            }
-
-            if (offscreen is not null)
-            {
-                sb.Append($", offscreen={offscreen}");
-            }
-
-            sb.AppendLine();
-        }
-
-        if (matches.Count > take)
-        {
-            sb.AppendLine($"  ... and {matches.Count - take} more");
-        }
-
-        return sb.ToString().TrimEnd();
-    }
-
-    private static string? TryGetBooleanString(Func<bool> action)
-    {
-        try
-        {
-            return action() ? "true" : "false";
         }
         catch
         {
@@ -11042,6 +11017,7 @@ public sealed partial class AutomationController : IDisposable
         }
 
         var matches = new List<ElementRef>();
+        var discoveredMatches = 0;
         var scannedNodes = 0;
         var truncated = false;
         string? truncatedReason = null;
@@ -11070,6 +11046,14 @@ public sealed partial class AutomationController : IDisposable
 
             if (IsQueryMatchUia(current, query) && (!interactiveOnly || IsInteractiveUia(current, interactiveMode)))
             {
+                discoveredMatches++;
+                if (matches.Count >= maxResults)
+                {
+                    truncated = true;
+                    truncatedReason = "maxResults";
+                    break;
+                }
+
                 string? elementId = null;
                 if (includeElementIds)
                 {
@@ -11084,12 +11068,6 @@ public sealed partial class AutomationController : IDisposable
                 }
 
                 matches.Add(BuildElementRefUia(current, currentXPath, returnFields, elementId));
-                if (matches.Count >= maxResults)
-                {
-                    truncated = true;
-                    truncatedReason = "maxResults";
-                    break;
-                }
             }
 
             var rawChildren = GetChildren(current, walker).ToArray();
@@ -11136,7 +11114,10 @@ public sealed partial class AutomationController : IDisposable
             ScannedNodes: scannedNodes,
             Truncated: truncated,
             TruncatedReason: truncatedReason,
-            Warnings: null);
+            Warnings: null)
+        {
+            DiscoveredMatches = discoveredMatches
+        };
     }
 
     private static bool IsVisibleInSearch(AutomationElement element, bool includeOffViewport, Rect? viewportBounds)
@@ -11233,14 +11214,25 @@ public sealed partial class AutomationController : IDisposable
     {
         if (returnFields == FindReturnFields.Standard)
         {
+            var rawBounds = TryGetBounds(element);
+            var bounds = rawBounds is Rectangle value ? ToRect(value) : null;
+            var isOffscreen = TryGetIsOffscreen(element);
+            bool? isVisible = rawBounds is null || isOffscreen is null
+                ? null
+                : rawBounds.Value.Width > 0 && rawBounds.Value.Height > 0 && !isOffscreen.Value;
+
             return new ElementRef(
                 Type: element.ControlType.ToString(),
                 AutomationId: GetAutomationId(element),
                 Name: GetName(element),
                 XPath: xpath,
                 ClassName: GetClassName(element),
-                Bounds: ToRect(element.BoundingRectangle),
-                ElementId: elementId);
+                Bounds: bounds,
+                ElementId: elementId)
+            {
+                IsVisible = isVisible,
+                IsOffscreen = isOffscreen
+            };
         }
 
         return new ElementRef(
