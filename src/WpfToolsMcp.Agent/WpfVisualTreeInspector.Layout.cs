@@ -1471,7 +1471,7 @@ internal static partial class WpfVisualTreeInspector
     {
         if (element is not Visual visual)
         {
-            evidence.Add(xpath, "geometry.dpi", LayoutEvidenceStatus.Unsupported, "not_visual");
+            AddLayoutDpiEvidence(evidence, xpath, LayoutEvidenceStatus.Unsupported, "not_visual");
             return (null, null);
         }
 
@@ -1483,14 +1483,24 @@ internal static partial class WpfVisualTreeInspector
                 return (dpi.DpiScaleX, dpi.DpiScaleY);
             }
 
-            evidence.Add(xpath, "geometry.dpi", LayoutEvidenceStatus.Unavailable, "non_finite_value");
+            AddLayoutDpiEvidence(evidence, xpath, LayoutEvidenceStatus.Unavailable, "non_finite_value");
         }
         catch
         {
-            evidence.Add(xpath, "geometry.dpi", LayoutEvidenceStatus.Unavailable, "dpi_read_failed");
+            AddLayoutDpiEvidence(evidence, xpath, LayoutEvidenceStatus.Unavailable, "dpi_read_failed");
         }
 
         return (null, null);
+    }
+
+    private static void AddLayoutDpiEvidence(
+        LayoutEvidenceCollector evidence,
+        string xpath,
+        LayoutEvidenceStatus status,
+        string reason)
+    {
+        evidence.Add(xpath, LayoutContextEvidenceFields.DpiScaleX, status, reason);
+        evidence.Add(xpath, LayoutContextEvidenceFields.DpiScaleY, status, reason);
     }
 
     private static LayoutElementIdentity BuildLayoutIdentity(DependencyObject element, string xpath)

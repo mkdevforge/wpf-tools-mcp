@@ -97,4 +97,19 @@ public sealed class LayoutContextContractTests
             Assert.That(json, Does.Not.Contain("ExplicitClipBoundsLocalWpfDips"));
         });
     }
+
+    [Test]
+    public void Dpi_evidence_keys_map_to_each_geometry_response_field()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                $"geometry.{JsonNamingPolicy.CamelCase.ConvertName(nameof(LayoutGeometryInfo.DpiScaleX))}",
+                Is.EqualTo(LayoutContextEvidenceFields.DpiScaleX));
+            Assert.That(
+                $"geometry.{JsonNamingPolicy.CamelCase.ConvertName(nameof(LayoutGeometryInfo.DpiScaleY))}",
+                Is.EqualTo(LayoutContextEvidenceFields.DpiScaleY));
+            Assert.That(LayoutContextEvidenceFields.DpiScaleX, Is.Not.EqualTo(LayoutContextEvidenceFields.DpiScaleY));
+        });
+    }
 }

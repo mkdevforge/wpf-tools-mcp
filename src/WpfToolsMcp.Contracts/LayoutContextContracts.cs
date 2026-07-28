@@ -254,3 +254,9 @@ internal static class LayoutContextText
         return value[..length];
     }
 }
+
+internal static class LayoutContextEvidenceFields
+{
+    public const string DpiScaleX = "geometry.dpiScaleX";
+    public const string DpiScaleY = "geometry.dpiScaleY";
+}
