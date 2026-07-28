@@ -62,18 +62,13 @@ internal static class SnoopInjector
             CreateNoWindow = true
         };
 
-        using var injector = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Failed to start Snoop.InjectorLauncher.");
+        using var workspace = InjectorLaunchWorkspace.Create();
+        workspace.ApplyTo(startInfo);
 
-        var stdoutTask = injector.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = injector.StandardError.ReadToEndAsync(cancellationToken);
-
-        await injector.WaitForExitAsync(cancellationToken);
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-
-        return new InjectionRunResult(injector.ExitCode, stdout, stderr);
+        return await InjectorProcessRunner.RunAsync(
+            startInfo,
+            InjectorProcessRunner.GetConfiguredTimeout(),
+            cancellationToken).ConfigureAwait(false);
     }
 }
 

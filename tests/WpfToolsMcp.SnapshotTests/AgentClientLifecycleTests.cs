@@ -56,6 +56,50 @@ public sealed class AgentClientLifecycleTests
     }
 
     [Test]
+    public async Task Controller_dispose_cancels_lifetime_before_waiting_for_in_flight_work()
+    {
+        var controller = new AutomationController();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var inFlight = controller.RunExclusiveAsync(async () =>
+        {
+            entered.SetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, controller.LifetimeToken);
+        });
+        Task? disposeTask = null;
+
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            disposeTask = Task.Run(controller.Dispose);
+
+            Assert.CatchAsync<OperationCanceledException>(async () =>
+                await inFlight.WaitAsync(TimeSpan.FromSeconds(2)));
+            await disposeTask.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.That(controller.IsDisposing, Is.True);
+        }
+        finally
+        {
+            if (!controller.IsDisposing)
+            {
+                controller.Dispose();
+            }
+
+            try
+            {
+                await inFlight.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            if (disposeTask is not null)
+            {
+                await disposeTask.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+        }
+    }
+
+    [Test]
     public async Task Dispose_interrupts_an_in_flight_agent_call_and_releases_promptly()
     {
         var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";

@@ -189,9 +189,14 @@ public sealed partial class AutomationController
 
     public async Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default)
     {
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetimeCts.Token);
+        var operationToken = operationCancellation.Token;
         var trace = BeginTraceSpan("inject_agent");
         try
         {
+            operationToken.ThrowIfCancellationRequested();
             var application = EnsureAttached();
             var automation = EnsureAutomation();
 
@@ -217,7 +222,7 @@ public sealed partial class AutomationController
             // Ensure the agent is still responsive
             try
             {
-                var capabilities = await VerifyAgentAndGetCapabilitiesAsync(existingClient, cancellationToken);
+                var capabilities = await VerifyAgentAndGetCapabilitiesAsync(existingClient, operationToken);
                 lock (_agentSync)
                 {
                     if (ReferenceEquals(_agentClient, existingClient))
@@ -231,7 +236,7 @@ public sealed partial class AutomationController
                 trace?.SetSummary($"injected={response.Injected} pipe={response.PipeName}");
                 return response;
             }
-            catch
+            catch (Exception) when (!operationToken.IsCancellationRequested)
             {
                 CleanupAgent();
             }
@@ -247,14 +252,14 @@ public sealed partial class AutomationController
         var connectFirstClient = await TryConnectToAgentWithRetryAsync(
             pipeName,
             totalTimeout: TimeSpan.FromSeconds(2),
-            cancellationToken);
+            operationToken);
 
         if (connectFirstClient is not null)
         {
             AgentCapabilitiesResponse capabilities;
             try
             {
-                capabilities = await VerifyAgentAndGetCapabilitiesAsync(connectFirstClient, cancellationToken);
+                capabilities = await VerifyAgentAndGetCapabilitiesAsync(connectFirstClient, operationToken);
             }
             catch
             {
@@ -293,7 +298,7 @@ public sealed partial class AutomationController
             targetHwnd: hwnd.ToInt64(),
             targetArchitecture: architecture,
             pipeName: pipeName,
-            cancellationToken: cancellationToken);
+            cancellationToken: operationToken);
 
         if (injectResult.ExitCode != 0)
         {
@@ -301,11 +306,11 @@ public sealed partial class AutomationController
             throw new InvalidOperationException($"Snoop injection failed (exit code {injectResult.ExitCode}).{details}");
         }
 
-        var client = await ConnectToAgentWithRetryAsync(pipeName, cancellationToken);
+        var client = await ConnectToAgentWithRetryAsync(pipeName, operationToken);
         AgentCapabilitiesResponse injectedCapabilities;
         try
         {
-            injectedCapabilities = await VerifyAgentAndGetCapabilitiesAsync(client, cancellationToken);
+            injectedCapabilities = await VerifyAgentAndGetCapabilitiesAsync(client, operationToken);
         }
         catch
         {
