@@ -219,7 +219,8 @@ public sealed partial class AutomationController
             element,
             xpath,
             FindReturnFields.Standard,
-            elementId);
+            elementId,
+            TryGetClientBoundsScreen(window, out var clientBounds) ? clientBounds : null);
 
         return new ResolveElementResponse(InspectionBackend.Uia, elementRef, hwnd);
     }
@@ -636,6 +637,7 @@ public sealed partial class AutomationController
         var candidates = new List<ResolveElementCandidate>(
             Math.Min(maxCandidates, exception.Candidates.Count));
         var candidateUnavailable = false;
+        var viewportBounds = TryGetClientBoundsScreen(window, out var clientBounds) ? clientBounds : null;
 
         for (var index = 0; index < exception.Candidates.Count && index < maxCandidates; index++)
         {
@@ -653,7 +655,7 @@ public sealed partial class AutomationController
                     GetClassName(element));
                 candidates.Add(new ResolveElementCandidate(
                     index,
-                    BuildElementRefUia(element, xpath, FindReturnFields.Standard, elementId)));
+                    BuildElementRefUia(element, xpath, FindReturnFields.Standard, elementId, viewportBounds)));
             }
             catch
             {

@@ -183,7 +183,12 @@ public sealed partial class AutomationController
             GetName(element),
             GetClassName(element));
 
-        var elementRef = BuildElementRefUia(element, xpath, FindReturnFields.Standard, elementId);
+        var elementRef = BuildElementRefUia(
+            element,
+            xpath,
+            FindReturnFields.Standard,
+            elementId,
+            TryGetClientBoundsScreen(window, out var clientBounds) ? clientBounds : null);
 
         IReadOnlyList<ElementRef>? ancestors = null;
         if (request.IncludeAncestors)

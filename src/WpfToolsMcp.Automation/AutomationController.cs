@@ -8359,7 +8359,7 @@ public sealed partial class AutomationController : IDisposable
             var rootXPath = ComputeXPath(window, rootElement, rawWalker);
 
             var windowHwnd = window.Properties.NativeWindowHandle.Value.ToInt64();
-            var viewportBounds = visibleOnly && !includeOffViewport && TryGetClientBoundsScreen(window, out var clientBounds) ? clientBounds : null;
+            var viewportBounds = TryGetClientBoundsScreen(window, out var clientBounds) ? clientBounds : null;
             var response = FindElementsUia(
                 rootElement,
                 rootXPath,
@@ -11067,7 +11067,7 @@ public sealed partial class AutomationController : IDisposable
                         GetClassName(current));
                 }
 
-                matches.Add(BuildElementRefUia(current, currentXPath, returnFields, elementId));
+                matches.Add(BuildElementRefUia(current, currentXPath, returnFields, elementId, viewportBounds));
             }
 
             var rawChildren = GetChildren(current, walker).ToArray();
@@ -11210,13 +11210,18 @@ public sealed partial class AutomationController : IDisposable
         return true;
     }
 
-    private static ElementRef BuildElementRefUia(AutomationElement element, string xpath, FindReturnFields returnFields, string? elementId)
+    private static ElementRef BuildElementRefUia(
+        AutomationElement element,
+        string xpath,
+        FindReturnFields returnFields,
+        string? elementId,
+        Rect? viewportBounds = null)
     {
         if (returnFields == FindReturnFields.Standard)
         {
             var rawBounds = TryGetBounds(element);
             var bounds = rawBounds is Rectangle value ? ToRect(value) : null;
-            var isOffscreen = TryGetIsOffscreen(element);
+            var isOffscreen = ResolveUiaIsOffscreen(TryGetIsOffscreen(element), bounds, viewportBounds);
             bool? isVisible = rawBounds is null || isOffscreen is null
                 ? null
                 : rawBounds.Value.Width > 0 && rawBounds.Value.Height > 0 && !isOffscreen.Value;
@@ -11241,6 +11246,36 @@ public sealed partial class AutomationController : IDisposable
             Name: GetName(element),
             XPath: xpath,
             ElementId: elementId);
+    }
+
+    internal static bool? ResolveUiaIsOffscreen(
+        bool? providerIsOffscreen,
+        Rect? bounds,
+        Rect? viewportBounds)
+    {
+        if (providerIsOffscreen == true)
+        {
+            return true;
+        }
+
+        if (bounds is not Rect elementBounds)
+        {
+            return providerIsOffscreen;
+        }
+
+        // Some providers keep IsOffscreen=false for scrolled descendants, while their
+        // bounds still prove that the element cannot intersect the window viewport.
+        if (elementBounds.Width <= 0 || elementBounds.Height <= 0)
+        {
+            return true;
+        }
+
+        if (viewportBounds is Rect viewport && !RectIntersects(elementBounds, viewport))
+        {
+            return true;
+        }
+
+        return providerIsOffscreen;
     }
 
     private static IReadOnlyList<AutomationElement> GetChildren(AutomationElement element, ITreeWalker walker)
