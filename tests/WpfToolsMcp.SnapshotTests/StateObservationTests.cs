@@ -549,7 +549,13 @@ public sealed class StateObservationTests
                 _testCts.Token);
             var changes = await PollUntilAsync(
                 subscription.SubscriptionId,
-                result => result.Events.Any(EventIsChange),
+                result => result.Events
+                    .Where(EventIsChange)
+                    .Select(DeserializeObservationEvent)
+                    .Any(item =>
+                        item.Source == ObserveStateSource.DataContextPath &&
+                        string.Equals(item.Path, "Phase", StringComparison.Ordinal) &&
+                        string.Equals(GetString(item.NewValue), "secondary-changed", StringComparison.Ordinal)),
                 TimeSpan.FromSeconds(5));
             Assert.That(
                 changes.Events
