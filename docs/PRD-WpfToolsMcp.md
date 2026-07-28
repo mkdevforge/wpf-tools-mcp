@@ -253,7 +253,8 @@ Phase 2 enriches existing tools and adds new ones. When the Snoop agent is avail
 | `get_binding_info` | Inspect bindings on an element | For each binding: path, source, mode, converter, current value, status (Active/Error/Detached), and error message if broken |
 | `get_binding_errors` | List broken or non-active bindings in the current visual tree | Binding path, target element/property, binding status, and available validation error details |
 | `subscribe_binding_errors` | Subscribe to binding errors (poll-based) | Subscription ID |
-| `poll_subscription` | Poll queued subscription events | Batch of events |
+| `subscribe_property_changes` | Observe an allowlist of dependency properties and dotted DataContext paths on one WPF element using target-side change notifications | Subscription ID, effective bounds, selected watches, and start/expiry metadata |
+| `poll_subscription` | Poll bounded subscription events and delivery-loss metadata | Ordered event batch; dropped, coalesced, and truncated counts; completion state |
 | `unsubscribe` | Unsubscribe a subscription | Unsubscribe result |
 | `get_data_context` | Serialize the DataContext of an element | JSON representation of the DataContext object, its type, and property values. Configurable depth to avoid serializing the entire object graph. |
 | `get_computed_properties` | Inspect computed dependency property values | Effective values + optional value-source details |
@@ -294,6 +295,9 @@ large app with scenario pages:
 - `WpfToolsMcp.TestApp`: the primary basic-controls fixture.
 - `WpfToolsMcp.TestApp.Minimal`: fallback locators and ambiguity without stable
   AutomationIds.
+- `WpfToolsMcp.TestApp.ObservationProbe`: ordered short-lived dependency-property
+  and DataContext transitions, queue pressure, truncation, primary/secondary
+  dispatcher routing, and lifecycle cleanup.
 - `WpfToolsMcp.TestApp.BindingErrors`: binding and DataContext diagnostics.
 - `WpfToolsMcp.TestApp.BrokenAutomation`: controls with missing UIA peers.
 - `WpfToolsMcp.TestApp.CustomControls`: user controls and templated controls.
@@ -369,6 +373,9 @@ Current build, focused-test, full-test, and smoke commands are documented in
 - **Snoop.Core contains UI code.** `Snoop.Core.dll` is not a clean inspection library — it includes Snoop's WPF windows, views, and controls. We reference the assembly but only call inspection-oriented types. This means a larger-than-necessary dependency; a future optimization could extract only the needed classes, but this is not worth doing upfront.
 - **`PropertyInformation` is a DependencyObject.** Snoop's primary inspection class sets up WPF bindings to keep property values live-updated for its UI grid. The agent must wrap these in plain DTOs and avoid leaking `PropertyInformation` instances across the named pipe boundary.
 - **Binding detail is best effort.** The .NET 8 agent inspects `BindingExpression` status and available validation errors without rewriting bindings. Some failures expose a non-active status without a detailed error message.
+- **DataContext change notifications are best effort.** Live state observation uses WPF bindings so dependency properties and `INotifyPropertyChanged` paths are event-driven. Plain CLR properties that emit no notification do not produce changes; the tool does not add invasive target polling.
+- **Live observation work is capped across subscriptions.** Each subscription has bounded watches and queues, and the server admits at most eight active property subscriptions per session and 64 per server process.
+- **Live state observation requires a live WPF window source.** Explicit window handles are resolved to their owning `HwndSource` before traversal, including windows on secondary UI dispatchers; non-WPF or already-destroyed handles fail without attaching handlers.
 - **Reflection into non-public WPF internals.** Style/template inspection uses non-public members (`ThemeStyle`, `TemplateInternal`, `Style.IsBasedOnModified`) via reflection. This works on current WPF versions but is a compatibility risk on future versions. These tools should degrade gracefully if reflection fails.
 - **Dispatcher marshalling.** All Snoop.Core inspection operations must run on the owning element's `Dispatcher`. The agent must enforce this for every request. Snoop provides `RunInDispatcher()` extension methods we can reuse.
 - **Multi-dispatcher applications.** WPF apps can have multiple `Dispatcher` instances. The agent must detect and handle this (Snoop has `SnoopModes.MultipleDispatcherMode` guards).

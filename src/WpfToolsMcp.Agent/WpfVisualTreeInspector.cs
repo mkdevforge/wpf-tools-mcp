@@ -24,7 +24,7 @@ using ContractRect = WpfToolsMcp.Contracts.Rect;
 
 namespace WpfToolsMcp.Agent;
 
-internal static class WpfVisualTreeInspector
+internal static partial class WpfVisualTreeInspector
 {
     private static string? _activeHighlightOwnerId;
     private static IDisposable? _activeHighlight;
@@ -723,22 +723,42 @@ internal static class WpfVisualTreeInspector
         return trimmed;
     }
 
+    public static Dispatcher ResolveObservationDispatcher(long? windowHandle)
+    {
+        if (windowHandle is long requestedHwnd && requestedHwnd != 0)
+        {
+            return ResolveHwndSource(requestedHwnd).Dispatcher;
+        }
+
+        return Application.Current?.Dispatcher
+            ?? throw new InvalidOperationException("Application.Current.Dispatcher is not available. Is the target a WPF app?");
+    }
+
+    private static HwndSource ResolveHwndSource(long requestedHwnd)
+    {
+        var source = HwndSource.FromHwnd(new IntPtr(requestedHwnd));
+        return source
+            ?? throw new InvalidOperationException(
+                $"wpf_window_not_found: HWND {requestedHwnd} is not owned by a WPF HwndSource.");
+    }
+
     private static Window ResolveWindow(long? windowHandle)
     {
+        if (windowHandle is long requestedHwnd && requestedHwnd != 0)
+        {
+            var source = ResolveHwndSource(requestedHwnd);
+            if (!source.Dispatcher.CheckAccess())
+            {
+                throw new InvalidOperationException("wpf_window_dispatcher_required");
+            }
+
+            return source.RootVisual as Window
+                ?? throw new InvalidOperationException(
+                    $"wpf_window_not_found: HWND {requestedHwnd} does not have a WPF Window root.");
+        }
+
         var application = Application.Current
             ?? throw new InvalidOperationException("Application.Current is null. Is the target a WPF application?");
-
-        if (windowHandle is long requestedHwnd)
-        {
-            foreach (Window window in application.Windows)
-            {
-                var hwnd = new WindowInteropHelper(window).Handle;
-                if (hwnd != IntPtr.Zero && hwnd.ToInt64() == requestedHwnd)
-                {
-                    return window;
-                }
-            }
-        }
 
         if (application.MainWindow is not null)
         {

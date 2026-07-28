@@ -334,6 +334,53 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case "wpf/observe_state_start":
+                    {
+                        var typedRequest = request.Params?.Deserialize<ObserveStateStartRequest>(JsonOptions)
+                            ?? new ObserveStateStartRequest();
+                        var dispatcher = WpfVisualTreeInspector.ResolveObservationDispatcher(
+                            typedRequest.WindowHandle);
+
+                        return await RunOnDispatcherAsync(dispatcher, () =>
+                        {
+                            var response = WpfVisualTreeInspector.StartObserveState(
+                                ownerId,
+                                typedRequest,
+                                cancellationToken);
+                            return new AgentResponse(
+                                request.Id,
+                                Ok: true,
+                                Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                        }, request.Id, cancellationToken);
+                    }
+                case "wpf/observe_state_poll":
+                    {
+                        var typedRequest = request.Params?.Deserialize<ObserveStatePollRequest>(JsonOptions)
+                            ?? throw new InvalidOperationException("Missing request params.");
+
+                        var response = WpfVisualTreeInspector.PollObserveState(ownerId, typedRequest);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }
+                case "wpf/observe_state_stop":
+                    {
+                        var typedRequest = request.Params?.Deserialize<ObserveStateStopRequest>(JsonOptions)
+                            ?? throw new InvalidOperationException("Missing request params.");
+                        var dispatcher = WpfVisualTreeInspector.ResolveObserveStateDispatcher(
+                            ownerId,
+                            typedRequest.ObservationId);
+
+                        return await RunOnDispatcherAsync(dispatcher, () =>
+                        {
+                            var response = WpfVisualTreeInspector.StopObserveState(ownerId, typedRequest);
+                            return new AgentResponse(
+                                request.Id,
+                                Ok: true,
+                                Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                        }, request.Id, cancellationToken);
+                    }
                 case "wpf/get_style_chain":
                     return await RunOnUiAsync(() =>
                     {
@@ -376,6 +423,15 @@ internal static class AgentServer
 
     private static async Task ReleaseOwnerResourcesAsync(string ownerId)
     {
+        try
+        {
+            await WpfVisualTreeInspector.ReleaseOwnerObservationsAsync(ownerId).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Observation teardown is best-effort while owning dispatchers shut down.
+        }
+
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
         {
@@ -427,12 +483,29 @@ internal static class AgentServer
                 Error: new AgentError("Application.Current.Dispatcher is not available. Is the target a WPF app?"));
         }
 
+        return await RunOnDispatcherAsync(dispatcher, action, requestId, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<AgentResponse> RunOnDispatcherAsync(
+        Dispatcher dispatcher,
+        Func<AgentResponse> action,
+        string requestId,
+        CancellationToken cancellationToken)
+    {
+        if (dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+        {
+            return new AgentResponse(
+                Id: requestId,
+                Ok: false,
+                Error: new AgentError("The target WPF dispatcher is shutting down."));
+        }
+
         if (dispatcher.CheckAccess())
         {
             return action();
         }
 
         var op = dispatcher.InvokeAsync(action, DispatcherPriority.Send, cancellationToken);
-        return await op.Task;
+        return await op.Task.ConfigureAwait(false);
     }
 }

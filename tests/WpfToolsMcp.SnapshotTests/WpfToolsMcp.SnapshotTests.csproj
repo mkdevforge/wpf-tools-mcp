@@ -39,6 +39,7 @@
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.DynamicContent\WpfToolsMcp.TestApp.DynamicContent.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.FocusProbe\WpfToolsMcp.TestApp.FocusProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.LifecycleProbe\WpfToolsMcp.TestApp.LifecycleProbe.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.ObservationProbe\WpfToolsMcp.TestApp.ObservationProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Scroll\WpfToolsMcp.TestApp.Scroll.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Tabs\WpfToolsMcp.TestApp.Tabs.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.TreeView\WpfToolsMcp.TestApp.TreeView.csproj" ReferenceOutputAssembly="false" />
