@@ -48,7 +48,8 @@ public sealed partial class AutomationController
     public async Task<TraceStopResponse> TraceStopAsync(
         string traceId,
         string? outputPath,
-        bool includeEvents,
+        bool includeEvents = false,
+        int maxEvents = 100,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -94,12 +95,25 @@ public sealed partial class AutomationController
 
         _traceSession = null;
 
+        IReadOnlyList<TraceEvent>? responseEvents = null;
+        if (includeEvents)
+        {
+            var boundedMaxEvents = Math.Clamp(maxEvents, 1, 1000);
+            responseEvents = payload.Events.Take(boundedMaxEvents).ToArray();
+        }
+
+        var returnedEventCount = responseEvents?.Count ?? 0;
+        var truncated = includeEvents && returnedEventCount < payload.Events.Count;
+
         return new TraceStopResponse(
             TraceId: traceId,
             StoppedAtUtc: stoppedAt,
             OutputPath: path,
             EventCount: payload.Events.Count,
-            Events: includeEvents ? payload.Events : null);
+            ReturnedEventCount: returnedEventCount,
+            Truncated: truncated,
+            TruncatedReason: truncated ? "maxEvents" : null,
+            Events: responseEvents);
     }
 
     private ToolTraceSpan? BeginTraceSpan(string tool)

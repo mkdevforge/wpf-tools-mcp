@@ -217,6 +217,20 @@ public sealed class CustomControlsSnapshots
             Assert.That(properties.UiaMapping!.Ambiguous, Is.True);
             Assert.That(properties.UiaMapping.Candidates, Has.Count.GreaterThan(1));
 
+            var locators = await _mcp.CallToolAsync<GetUiaLocatorsResponse>("get_uia_locators", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["elementId"] = button.ElementId
+            });
+            Assert.That(locators.UiaMapping, Is.Not.Null);
+            Assert.Multiple(() =>
+            {
+                Assert.That(locators.UiaMapping!.ReturnedCandidates, Is.EqualTo(locators.UiaMapping.Candidates.Count));
+                Assert.That(locators.UiaMapping.TotalCandidates, Is.GreaterThanOrEqualTo(locators.UiaMapping.ReturnedCandidates));
+                Assert.That(locators.UiaMapping.Truncated,
+                    Is.EqualTo(locators.UiaMapping.ReturnedCandidates < locators.UiaMapping.TotalCandidates));
+            });
+
             await Verifier.Verify(new
             {
                 Button = ScrubElementRefForSnapshot(button),

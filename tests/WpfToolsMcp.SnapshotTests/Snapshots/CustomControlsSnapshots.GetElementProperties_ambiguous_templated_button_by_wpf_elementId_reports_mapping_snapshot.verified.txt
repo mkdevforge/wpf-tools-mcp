@@ -46,7 +46,10 @@
           XPath: /Window/Button[4]/Button,
           Score: 280
         }
-      ]
+      ],
+      ReturnedCandidates: 2,
+      TotalCandidates: 2,
+      Truncated: false
     }
   }
 }

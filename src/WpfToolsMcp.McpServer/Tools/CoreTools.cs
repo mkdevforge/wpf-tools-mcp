@@ -234,7 +234,7 @@ public static class CoreInspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_element_properties"), Description("Return UI Automation properties and supported patterns for one element.")]
+    [McpServerTool(Name = "get_element_properties"), Description("Return bounded UI Automation properties and supported patterns. Values cap strings at 2,000 characters, collections at 50 items, depth at 2, and share a 20,000-character budget; oversized XPaths are omitted.")]
     public static Task<GetElementPropertiesResponse> GetElementProperties(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -251,7 +251,9 @@ public static class CoreInspectionTools
                     locator?.ToElementLocator(),
                     elementId,
                     hasElementId ? windowHandle : effectiveWindowHandle,
-                    cancellationToken),
+                    ElementPropertiesPreset.Summary,
+                    maxProperties: 25,
+                    cancellationToken: cancellationToken),
                 cancellationToken);
         });
 

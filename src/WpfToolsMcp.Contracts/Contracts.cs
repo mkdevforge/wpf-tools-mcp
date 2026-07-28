@@ -136,7 +136,15 @@ public sealed record ElementSummary(
     Rect Bounds,
     bool IsEnabled,
     bool IsOffscreen,
-    string XPath);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? XPath,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? XPathOmitted = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ElementPropertiesPreset
+{
+    Summary,
+    Full
+}
 
 public sealed record UiaMappingCandidate(
     string ElementType,
@@ -144,19 +152,31 @@ public sealed record UiaMappingCandidate(
     string? Name,
     string? ClassName,
     Rect Bounds,
-    string XPath,
-    int Score);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? XPath,
+    int Score,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? XPathOmitted = null);
 
 public sealed record UiaMappingDiagnostics(
     bool Ambiguous,
-    string SelectedXPath,
-    IReadOnlyList<UiaMappingCandidate> Candidates);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SelectedXPath,
+    IReadOnlyList<UiaMappingCandidate> Candidates,
+    int ReturnedCandidates = 0,
+    int TotalCandidates = 0,
+    bool Truncated = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? SelectedXPathOmitted = null);
 
 public sealed record GetElementPropertiesResponse(
     ElementSummary Element,
     IReadOnlyDictionary<string, JsonNode?> Properties,
     IReadOnlyDictionary<string, JsonNode?> Patterns,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null,
+    ElementPropertiesPreset Preset = ElementPropertiesPreset.Summary,
+    int ReturnedProperties = 0,
+    int SelectedProperties = 0,
+    int ScannedProperties = 0,
+    bool Truncated = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? TruncatedReasons = null);
 
 public sealed record WpfLocatorIdentity(
     string? Type,
@@ -971,4 +991,7 @@ public sealed record TraceStopResponse(
     DateTime StoppedAtUtc,
     string OutputPath,
     int EventCount,
+    int ReturnedEventCount,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TraceEvent>? Events = null);

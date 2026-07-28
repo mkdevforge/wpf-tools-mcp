@@ -130,10 +130,60 @@ public sealed class ToolProfileTests
 
         var tools = (await mcp.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
 
-        Assert.That(GetInputPropertyCount(tools["take_screenshot"]), Is.LessThanOrEqualTo(5));
-        Assert.That(GetInputPropertyCount(tools["get_visual_tree"]), Is.LessThanOrEqualTo(6));
-        Assert.That(GetInputPropertyCount(tools["click_element"]), Is.LessThanOrEqualTo(4));
-        Assert.That(GetInputPropertyCount(tools["drag"]), Is.LessThanOrEqualTo(7));
+        Assert.That(GetInputPropertyNames(tools["take_screenshot"]), Is.EqualTo(
+            new[] { "elementId", "locator", "outputPath", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["get_visual_tree"]), Is.EqualTo(
+            new[] { "depth", "maxNodes", "root", "sessionId", "visibleOnly", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["find_elements"]), Is.EqualTo(
+            new[] { "maxResults", "query", "sessionId", "visibleOnly", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["get_uia_tree"]), Is.EqualTo(
+            new[] { "depth", "maxNodes", "root", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["get_element_properties"]), Is.EqualTo(
+            new[] { "elementId", "locator", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["get_binding_errors"]), Is.EqualTo(
+            new[] { "depth", "rootXPath", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["get_data_context"]), Is.EqualTo(
+            new[] { "elementId", "locator", "maxDepth", "properties", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["get_computed_properties"]), Is.EqualTo(
+            new[] { "elementId", "locator", "propertyNames", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["click_element"]), Is.EqualTo(
+            new[] { "clickType", "elementId", "locator", "sessionId" }));
+        Assert.That(GetInputPropertyNames(tools["drag"]), Is.EqualTo(
+            new[] { "elementId", "locator", "sessionId", "targetElementId", "targetLocator", "toX", "toY" }));
+
+        foreach (var toolName in new[]
+                 {
+                     "take_screenshot",
+                     "get_visual_tree",
+                     "find_elements",
+                     "get_uia_tree",
+                     "get_element_properties",
+                     "get_binding_errors",
+                     "get_data_context",
+                     "get_computed_properties",
+                     "click_element",
+                     "drag"
+                 })
+        {
+            Assert.That(
+                tools[toolName].JsonSchema.GetRawText().Length,
+                Is.LessThanOrEqualTo(4096),
+                $"{toolName} input schema exceeded the compact-profile character budget.");
+        }
+    }
+
+    [Test]
+    public async Task Diagnostics_profile_exposes_explicit_evidence_expansion_controls()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+
+        var tools = (await mcp.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+
+        Assert.That(GetInputPropertyNames(tools["get_element_properties"]), Does.Contain("preset"));
+        Assert.That(GetInputPropertyNames(tools["get_element_properties"]), Does.Contain("maxProperties"));
+        Assert.That(GetInputPropertyNames(tools["trace_stop"]), Does.Contain("includeEvents"));
+        Assert.That(GetInputPropertyNames(tools["trace_stop"]), Does.Contain("maxEvents"));
     }
 
     [Test]
@@ -540,17 +590,21 @@ public sealed class ToolProfileTests
         }
     }
 
-    private static int GetInputPropertyCount(McpClientTool tool)
+    private static string[] GetInputPropertyNames(McpClientTool tool)
     {
         var schema = tool.JsonSchema;
         if (schema.ValueKind != JsonValueKind.Object ||
             !schema.TryGetProperty("properties", out var properties) ||
             properties.ValueKind != JsonValueKind.Object)
         {
-            return 0;
+            return [];
         }
 
-        return properties.EnumerateObject().Count();
+        return properties
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static async Task<LaunchAppResponse> LaunchPrimaryTestAppAsync(McpTestContext mcp)

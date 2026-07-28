@@ -26,12 +26,12 @@ public static class TraceTools
         [Description("Session ID")] string sessionId,
         [Description("Trace ID (from trace_start)")] string traceId,
         [Description("Optional output file path (auto-generated when omitted)")] string? outputPath = null,
-        [Description("Include events in response")] bool includeEvents = true,
+        [Description("Include events in response (defaults to false)")] bool includeEvents = false,
+        [Description("Maximum events returned when includeEvents=true (clamped to 1-1000)")] int maxEvents = 100,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
             var (automation, _) = sessions.GetController(sessionId);
-            return automation.RunExclusiveAsync(() => automation.TraceStopAsync(traceId, outputPath, includeEvents, cancellationToken), cancellationToken);
+            return automation.RunExclusiveAsync(() => automation.TraceStopAsync(traceId, outputPath, includeEvents, maxEvents, cancellationToken), cancellationToken);
         });
 }
-

@@ -125,7 +125,7 @@ see `README.md` for the current profile split and configuration.
 | `get_path_to_element` | Get the XPath for a resolved element | XPath string |
 | `pick_element_at_point` | Pick an element at a coordinate (`coordSpace`: screen/client) | ElementRef + optional ancestor chain |
 | `highlight_element` | Highlight an element on-screen. Can optionally return an annotated screenshot (`returnScreenshot=true`). | Highlight result + bounds + method used |
-| `get_element_properties` | Inspect a single element via UIA | All UIA automation properties, supported patterns, current values |
+| `get_element_properties` | Inspect a single element via UIA | Bounded UIA properties, supported patterns, current values, and property-count/truncation metadata. The summary preset is the default; diagnostics can request the full preset with an explicit limit. Property and pattern values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, and share a 20,000-character serialized-value budget. XPaths over 2,000 characters are explicitly omitted rather than truncated. |
 | `get_uia_locators` | Export stable UIA locator recommendations for a WPF or UIA element | WPF/UIA identity, ranked locators, and FlaUI snippets |
 | `get_uia_tree` | Return a bounded UIA automation tree for a window or subtree | UIA identity, paths, and children |
 
@@ -165,7 +165,7 @@ Phase 2 enriches existing tools and adds new ones. When the Snoop agent is avail
 | Tool | Phase 2 enhancement |
 |---|---|
 | `get_visual_tree` | Returns the real WPF visual tree (not UIA): actual CLR types, visibility, and DataContext type. Configurable depth. Falls back to UIA tree if agent unavailable. |
-| `get_element_properties` | Resolves UIA or WPF targets and returns UIA properties and supported patterns. Use `get_computed_properties` for WPF dependency-property values and value sources. |
+| `get_element_properties` | Resolves UIA or WPF targets and returns bounded UIA properties and supported patterns. Use the diagnostics profile for the full property preset, and use `get_computed_properties` for WPF dependency-property values and value sources. |
 
 **New tools (Phase 2 only):**
 
@@ -187,7 +187,7 @@ Phase 2 enriches existing tools and adds new ones. When the Snoop agent is avail
 | `performance_start` | Start lightweight UI-thread latency sampling | Run ID |
 | `performance_stop` | Stop a performance run | Summary |
 | `trace_start` | Start MCP tool tracing | Trace ID |
-| `trace_stop` | Stop tool tracing and write a JSON trace | Trace summary + output path |
+| `trace_stop` | Stop tool tracing and write the complete JSON trace | Trace summary + output path; inline events are opt-in and bounded by `maxEvents` |
 
 ### Element Locator Strategies
 
@@ -320,7 +320,7 @@ Phase 1 delivers a fully functional MCP server that can see and interact with WP
 
 #### P1-M1 — See (UIA inspection)
 - `get_visual_tree` returning the UIA automation tree (element type, AutomationId, Name, ClassName, BoundingRectangle, IsEnabled, IsOffscreen). Configurable depth.
-- `get_element_properties` — all UIA properties and supported patterns for a single element
+- `get_element_properties` — bounded UIA property presets and supported patterns for a single element
 - `take_screenshot` for individual elements (not just full window)
 - All locator strategies working (AutomationId, Name, ClassName, XPath-like, index)
 - Snapshot tests for all inspection tools
