@@ -724,7 +724,26 @@ public sealed partial class AutomationController : IDisposable
             var fallbackUsed = false;
 
             (Bitmap Bitmap, Rect CapturedBounds, Rect? RequestedBounds, bool WasClipped, ScreenshotCaptureMode CaptureModeUsed)? capture = null;
+            ViewportConditions? capturedViewport = null;
             var recovered = false;
+
+            async Task<(Bitmap Bitmap, Rect CapturedBounds, Rect? RequestedBounds, bool WasClipped, ScreenshotCaptureMode CaptureModeUsed)> CaptureWithViewportAsync(
+                Rect? requestedBounds)
+            {
+                var stableCapture = await ViewportCaptureStabilityCoordinator.CaptureAsync(
+                    request.IncludeViewport,
+                    () => CaptureViewportConditions(new IntPtr(windowHandleUsed)),
+                    () => CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay: false),
+                    rejected => rejected.Bitmap.Dispose(),
+                    async token =>
+                    {
+                        _ = await WaitForStableViewportAsync(new IntPtr(windowHandleUsed), token).ConfigureAwait(false);
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                capturedViewport = stableCapture.Viewport;
+                return stableCapture.Capture;
+            }
 
             try
             {
@@ -984,7 +1003,7 @@ public sealed partial class AutomationController : IDisposable
 
                 try
                 {
-                    capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay: false);
+                    capture = await CaptureWithViewportAsync(requestedBounds).ConfigureAwait(false);
                 }
                 catch (InvalidOperationException ex) when (autoScroll &&
                                                           hasElementTarget &&
@@ -1029,7 +1048,7 @@ public sealed partial class AutomationController : IDisposable
                         }
                     }
 
-                    capture = CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay: false);
+                    capture = await CaptureWithViewportAsync(requestedBounds).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
@@ -1099,7 +1118,7 @@ public sealed partial class AutomationController : IDisposable
                             }
                         }
 
-                        capture = CaptureScreenshotWithMetadata(window, wpfElementBounds, mode, area, clip, includeOverlay: false);
+                        capture = await CaptureWithViewportAsync(wpfElementBounds).ConfigureAwait(false);
                         recovered = true;
                     }
                     catch (Exception fallbackEx)
@@ -1170,7 +1189,10 @@ public sealed partial class AutomationController : IDisposable
                 WasClipped: wasClipped,
                 WindowHandleUsed: windowHandleUsed,
                 CaptureModeUsed: captureModeUsed,
-                Base64: base64);
+                Base64: base64)
+            {
+                Viewport = capturedViewport
+            };
 
             trace?.SetSummary($"{response.Format} {response.Width}x{response.Height} {Path.GetFileName(response.Path)} backend={backendUsed} fallback={fallbackUsed}");
             return response;

@@ -118,7 +118,7 @@ see `README.md` for the current profile split and configuration.
 |---|---|---|
 | `list_windows` | Enumerate all windows of the target process | Window titles, handles, dimensions, process info |
 | `list_displays` | List connected displays and virtual screen bounds (multi-monitor diagnostics) | Virtual screen bounds + per-display bounds |
-| `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload |
+| `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`) and viewport evidence (`includeViewport=true`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload and `ViewportConditions` |
 | `get_visual_tree` | Return an inspection tree (UIA or WPF) for the main window or a subtree | Structured JSON. Configurable depth. `visibleOnly=true` means **in-viewport**; use `includeOffViewport=true` to include offscreen elements. |
 | `find_elements` | Find elements without dumping the full tree | Matches with element summaries and optional `elementId`s |
 | `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef (includes `elementId`, XPath, bounds, etc.) |
@@ -145,6 +145,7 @@ see `README.md` for the current profile split and configuration.
 | `get_active_window` | Get the active window for this session | `sessionId` |
 | `set_active_window` | Bring a window to the foreground and set it as the session’s active window | `sessionId` + window handle or title |
 | `set_window_bounds` | Move/resize a window by setting its bounds (outer window rectangle) | `sessionId` + optional `windowHandle` + `x/y/width/height` |
+| `set_window_viewport` | Set an exact client-area size and report the resulting physical, logical, DPI, monitor, and constraint conditions | `sessionId` + `clientWidth/clientHeight` + `unit` (`physicalPixels` or `wpfDips`) + optional window/policy controls |
 | `set_window_state` | Set a window state (normal/minimized/maximized) | `sessionId` + optional `windowHandle` + state |
 
 ### Phase 1 — App Lifecycle
@@ -180,6 +181,42 @@ Interaction responses expose `Effects` for the mechanism actually used:
 specific path. The policy and effects cover automation performed by this
 server. Code reached by a semantic invocation can independently open, restore,
 or activate the application's own windows.
+
+### Deterministic Viewport Contract
+
+`set_window_viewport` is a diagnostics-profile operation for responsive-layout
+review. It sizes the client area rather than treating the outer window frame as
+the viewport. The caller supplies a positive `clientWidth` and `clientHeight`
+in either physical pixels or WPF device-independent pixels. Physical pixels are
+the default unit. WPF DIPs are converted to the target window's logical/render
+pixels using its window-effective DPI, then to final screen pixels through the
+target HWND's DPI-virtualization mapping. This preserves the 1/96-inch WPF unit
+for unaware, system-aware, and per-monitor-aware windows. The response reports
+window-effective DPI and monitor-effective DPI separately.
+
+The non-intrusive defaults are `ensureForeground=false` and
+`clampToWorkArea=false`. Callers can explicitly request work-area clamping or a
+foreground transition. The normal session and operation `interactionPolicy`
+rules apply when foreground activation is requested.
+
+The response contains:
+
+- `Requested`: the caller's unit and size normalized to physical pixels and
+  WPF DIPs, including the requested client bounds;
+- `Actual`: client and outer physical bounds, physical and logical client
+  sizes, frame insets, separate window and monitor DPI scales, DPI-awareness
+  context, monitor bounds/work area, and window state;
+- `Adjustment`: the applied physical size, physical and DIP deltas, exact-match
+  and clamping flags, minimum-size status, resize attempts, and structured
+  constraint reasons;
+- `Effects`: any foreground activation or restore performed by the operation.
+
+`take_screenshot(includeViewport=true)` returns the same `ViewportConditions`
+with the image metadata. Screenshot evidence can therefore be compared using
+the actual client size and DPI conditions instead of an approximate outer
+window size. Capture conditions are sampled immediately before and after the
+bitmap operation and must match; unstable attempts are discarded and retried,
+then reported as `screenshot_viewport_unstable` if stability cannot be reached.
 
 ### Phase 2 — Upgraded inspection (Snoop, in-process)
 
@@ -255,6 +292,8 @@ large app with scenario pages:
 - `WpfToolsMcp.TestApp.Scroll`: off-viewport discovery and scrolling.
 - `WpfToolsMcp.TestApp.Tabs`: tab selection with nested selectable content.
 - `WpfToolsMcp.TestApp.TreeView`: hierarchical selection.
+- `WpfToolsMcp.TestApp.ViewportProbe`: independent WPF logical-size, physical
+  client-size, DPI, minimum-size, and application-coercion verification.
 
 The fixtures start in known states. Stable AutomationIds are used where they
 are part of the scenario; other fixtures intentionally omit or break UIA
@@ -279,8 +318,9 @@ real stdio MCP server. Coverage includes:
   DataContext, styles, templates, and coverage diagnostics;
 - clicks, invocation, typing, value setting, selection, drag, scrolling, and
   waits;
-- screenshots, annotations, highlighting, display coordinates, traces,
-  subscriptions, and performance sampling;
+- screenshots, annotations, highlighting, deterministic viewport sizing and
+  DPI context, display coordinates, traces, subscriptions, and performance
+  sampling;
 - expected failures for missing peers, ambiguous locators, stale elements,
   unavailable injection assets, and protocol errors.
 

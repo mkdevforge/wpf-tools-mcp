@@ -64,6 +64,10 @@ internal static class McpToolErrors
             "no_hit_at_point" => first,
             "invalid_request" => first,
             "interaction_policy_blocked" => first,
+            "screenshot_viewport_unstable" => first,
+            "viewport_conditions_unstable" => first,
+            "dpi_context_unavailable" => first,
+            "monitor_dpi_unavailable" => first,
             _ => null
         };
     }

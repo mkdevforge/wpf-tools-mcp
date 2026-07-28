@@ -552,6 +552,42 @@ public sealed class NonIntrusiveInteractionTests
     }
 
     [Test]
+    public async Task Strict_background_policy_can_resize_the_client_viewport_without_activation()
+    {
+        var probes = await StartProbePairAsync(attachTarget: true, strictTargetPolicy: true);
+        try
+        {
+            AssertStrictPolicy(probes.TargetInteractionPolicy);
+            await FocusSentinelAsync(probes);
+            PlaceCursorAtKnownPoint();
+            var before = CaptureDesktopState(probes.Target.WindowHandle);
+            AssertSentinelIsForeground(before, probes);
+
+            var resized = await SetWindowViewportAsync(
+                probes.TargetSessionId!,
+                probes.Target.WindowHandle,
+                clientWidth: 600,
+                clientHeight: 500);
+            var after = CaptureDesktopState(probes.Target.WindowHandle);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(resized.Actual.ClientSizePhysicalPixels, Is.EqualTo(new ViewportSize(600, 500)));
+                Assert.That(resized.Adjustment.ExactMatch, Is.True);
+                Assert.That(resized.Effects?.ForegroundActivated, Is.False);
+                Assert.That(resized.Effects?.MouseInput, Is.False);
+                Assert.That(resized.Effects?.KeyboardInput, Is.False);
+                Assert.That(resized.Effects?.CursorMoved, Is.False);
+                AssertDesktopStatePreserved(before, after);
+            });
+        }
+        finally
+        {
+            await CloseProbePairAsync(probes);
+        }
+    }
+
+    [Test]
     public async Task Permissive_operation_override_allows_fallback_and_reports_physical_effects()
     {
         var probes = await StartProbePairAsync(attachTarget: true, strictTargetPolicy: true);
@@ -860,6 +896,21 @@ public sealed class NonIntrusiveInteractionTests
             ["windowHandle"] = windowHandle.ToInt64(),
             ["state"] = state.ToString().ToLowerInvariant(),
             ["ensureForeground"] = ensureForeground
+        });
+
+    private async Task<SetWindowViewportResponse> SetWindowViewportAsync(
+        string sessionId,
+        IntPtr windowHandle,
+        double clientWidth,
+        double clientHeight) =>
+        await _mcp.CallToolAsync<SetWindowViewportResponse>("set_window_viewport", new Dictionary<string, object?>
+        {
+            ["sessionId"] = sessionId,
+            ["windowHandle"] = windowHandle.ToInt64(),
+            ["clientWidth"] = clientWidth,
+            ["clientHeight"] = clientHeight,
+            ["unit"] = "physicalPixels",
+            ["ensureForeground"] = false
         });
 
     private async Task<TypeTextResponse> TypeTextIntoKeyboardFallbackTargetAsync(

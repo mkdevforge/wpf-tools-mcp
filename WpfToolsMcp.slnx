@@ -17,6 +17,7 @@
     <Project Path="src/WpfToolsMcp.TestApp.Scroll/WpfToolsMcp.TestApp.Scroll.csproj" />
     <Project Path="src/WpfToolsMcp.TestApp.Tabs/WpfToolsMcp.TestApp.Tabs.csproj" />
     <Project Path="src/WpfToolsMcp.TestApp.TreeView/WpfToolsMcp.TestApp.TreeView.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.ViewportProbe/WpfToolsMcp.TestApp.ViewportProbe.csproj" />
     <Project Path="src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj" />
   </Folder>
   <Folder Name="/tests/">
