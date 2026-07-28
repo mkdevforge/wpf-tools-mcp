@@ -160,7 +160,7 @@ public sealed class TraceResponseTests
     [Test]
     public async Task Trace_stop_omits_inline_events_by_default_and_preserves_full_artifact()
     {
-        var controller = new AutomationController();
+        using var controller = new AutomationController();
         var traceStart = await controller.TraceStartAsync(resetIfRunning: false);
         var outputPath = CreateOutputPath();
 
@@ -200,7 +200,7 @@ public sealed class TraceResponseTests
     [Test]
     public async Task Trace_stop_bounds_inline_events_and_reports_truncation_without_truncating_artifact()
     {
-        var controller = new AutomationController();
+        using var controller = new AutomationController();
         var traceStart = await controller.TraceStartAsync(resetIfRunning: false);
         var outputPath = CreateOutputPath();
 
