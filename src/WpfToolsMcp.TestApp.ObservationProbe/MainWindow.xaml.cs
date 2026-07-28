@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Interop;
 using System.Windows.Threading;
 
 namespace WpfToolsMcp.TestApp.ObservationProbe;
@@ -203,6 +204,8 @@ public partial class MainWindow : Window
             DataContext = viewModel
         };
         AutomationProperties.SetAutomationId(window, "Observation_SecondaryWindow");
+        window.SourceInitialized += (_, _) =>
+            AppendMarker($"secondary-hwnd:{new WindowInteropHelper(window).Handle.ToInt64()}");
         window.Loaded += (_, _) => AppendMarker("secondary-started");
         window.Closed += (_, _) => dispatcher.BeginInvokeShutdown(DispatcherPriority.Send);
         window.Show();

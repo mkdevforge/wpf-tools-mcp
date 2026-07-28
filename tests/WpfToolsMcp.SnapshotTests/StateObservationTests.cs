@@ -510,15 +510,16 @@ public sealed class StateObservationTests
     {
         await InvokeAsync("Observation_OpenSecondary");
         await WaitForMarkerAsync("secondary-started", TimeSpan.FromSeconds(5), _testCts.Token);
-        var secondaryWindow = await WaitForWindowAsync(
-            "WPF Tools MCP ObservationProbe Secondary",
-            TimeSpan.FromSeconds(5));
+        var secondaryWindowHandle = await WaitForWindowHandleMarkerAsync(
+            "secondary-hwnd:",
+            TimeSpan.FromSeconds(5),
+            _testCts.Token);
 
         var subscription = await SubscribeAsync(
             dependencyProperties: ["Text"],
             dataContextPaths: ["Phase", "DispatcherGuardedValue"],
             durationMs: 30_000,
-            windowHandle: secondaryWindow.Handle,
+            windowHandle: secondaryWindowHandle,
             automationId: "Observation_SecondaryTarget");
         var unsubscribed = false;
         try
@@ -679,28 +680,6 @@ public sealed class StateObservationTests
         }
     }
 
-    private async Task<WindowInfo> WaitForWindowAsync(string title, TimeSpan timeout)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        while (stopwatch.Elapsed < timeout)
-        {
-            var response = await _mcp.CallToolAsync<ListWindowsResponse>(
-                "list_windows",
-                new Dictionary<string, object?> { ["sessionId"] = _sessionId },
-                _testCts.Token);
-            var window = response.Windows.FirstOrDefault(item =>
-                string.Equals(item.Title, title, StringComparison.Ordinal));
-            if (window is not null)
-            {
-                return window;
-            }
-
-            await Task.Delay(100, _testCts.Token);
-        }
-
-        throw new TimeoutException($"Window '{title}' did not appear within {timeout}.");
-    }
-
     private async Task InvokeAsync(string automationId)
     {
         var response = await _mcp.CallToolAsync<InvokeResponse>(
@@ -802,6 +781,41 @@ public sealed class StateObservationTests
         }
 
         throw new AssertionException($"Marker '{marker}' was not written within {timeout.TotalSeconds:0.###} seconds.");
+    }
+
+    private async Task<long> WaitForWindowHandleMarkerAsync(
+        string markerPrefix,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (File.Exists(_markerPath))
+                {
+                    foreach (var line in File.ReadAllLines(_markerPath))
+                    {
+                        if (line.StartsWith(markerPrefix, StringComparison.Ordinal) &&
+                            long.TryParse(line.AsSpan(markerPrefix.Length), out var windowHandle) &&
+                            windowHandle != 0)
+                        {
+                            return windowHandle;
+                        }
+                    }
+                }
+            }
+            catch (IOException)
+            {
+            }
+
+            await Task.Delay(20, cancellationToken);
+        }
+
+        throw new AssertionException(
+            $"Window handle marker '{markerPrefix}' was not written within {timeout.TotalSeconds:0.###} seconds.");
     }
 
     private static ObserveStateEvent DeserializeObservationEvent(SubscriptionEvent subscriptionEvent) =>
