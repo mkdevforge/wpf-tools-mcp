@@ -132,6 +132,14 @@ public sealed class ElementHandleSnapshots
             IsOffscreen = null
         };
 
+    private static ElementRef ScrubResolvedElementRefForSnapshot(ElementRef element) =>
+        element with
+        {
+            ElementId = "<element>",
+            IsVisible = null,
+            IsOffscreen = null
+        };
+
     private static async Task<ElementRef> FindSingleWpfElementAsync(
         McpTestContext mcp,
         string sessionId,
@@ -488,7 +496,7 @@ public sealed class ElementHandleSnapshots
                 Resolve = resolved with
                 {
                     WindowHandleUsed = 0,
-                    Element = ScrubElementRefForSnapshot(resolved.Element)
+                    Element = ScrubResolvedElementRefForSnapshot(resolved.Element)
                 },
                 Path = path
             });
@@ -574,7 +582,7 @@ public sealed class ElementHandleSnapshots
                 Resolve = resolved with
                 {
                     WindowHandleUsed = 0,
-                    Element = ScrubElementRefForSnapshot(resolved.Element)
+                    Element = ScrubResolvedElementRefForSnapshot(resolved.Element)
                 },
                 Remove = remove,
                 Error = error
@@ -708,7 +716,7 @@ public sealed class ElementHandleSnapshots
                 Resolve = resolved with
                 {
                     WindowHandleUsed = 0,
-                    Element = ScrubElementRefForSnapshot(resolved.Element)
+                    Element = ScrubResolvedElementRefForSnapshot(resolved.Element)
                 },
                 DataContextTypeByElementId = byElementId.DataContextType,
                 DataContextTypeByLocator = byLocator.DataContextType,
@@ -777,7 +785,7 @@ public sealed class ElementHandleSnapshots
                 Resolve = resolved with
                 {
                     WindowHandleUsed = 0,
-                    Element = ScrubElementRefForSnapshot(resolved.Element)
+                    Element = ScrubResolvedElementRefForSnapshot(resolved.Element)
                 },
                 InitialPath = initialPath,
                 CurrentPath = currentPath.XPath,
