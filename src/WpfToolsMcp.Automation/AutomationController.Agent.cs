@@ -146,14 +146,45 @@ public sealed partial class AutomationController
             $"stale_element: not_found for '{target.PublicElementId}'.{context} Call resolve_element again. Last agent error: {lastAgentError}");
     }
 
-    private ElementRef StripAgentElementId(ElementRef element, string? publicElementId = null)
+    private async Task<ElementRef> StripAgentElementIdAsync(
+        AgentClient client,
+        ElementRef element,
+        string? publicElementId)
     {
         if (!string.IsNullOrWhiteSpace(publicElementId))
         {
-            _elementHandles.TryUpdateWpfResolution(publicElementId, element);
+            var update = _elementHandles.TryUpdateWpfResolution(publicElementId, element);
+            await TryReleaseWpfAgentElementAsync(
+                client,
+                update.WpfAgentElementIdToRelease).ConfigureAwait(false);
         }
 
-        return element with { ElementIdWpf = null };
+        return StripAgentElementId(element);
+    }
+
+    private static ElementRef StripAgentElementId(ElementRef element) =>
+        element with { ElementIdWpf = null };
+
+    private static async Task TryReleaseWpfAgentElementAsync(
+        AgentClient client,
+        string? agentElementId)
+    {
+        if (string.IsNullOrWhiteSpace(agentElementId))
+        {
+            return;
+        }
+
+        try
+        {
+            _ = await client.CallAsync<ReleaseElementResponse>(
+                "wpf/release_element",
+                new ReleaseWpfElementRequest(agentElementId),
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Rebinding succeeded locally; stale in-proc handle cleanup is best-effort.
+        }
     }
 
     public async Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default)
@@ -420,7 +451,10 @@ public sealed partial class AutomationController
                 cancellationToken).ConfigureAwait(false);
             response = response with
             {
-                Element = StripAgentElementId(response.Element, target.PublicElementId)
+                Element = await StripAgentElementIdAsync(
+                    client,
+                    response.Element,
+                    target.PublicElementId).ConfigureAwait(false)
             };
             var observation = new WpfStateObservation(client, processId, response);
             trace?.SetSummary(
@@ -596,7 +630,13 @@ public sealed partial class AutomationController
             fallbackRequest,
             target,
             cancellationToken);
-        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        response = response with
+        {
+            Element = await StripAgentElementIdAsync(
+                client,
+                response.Element,
+                target.PublicElementId).ConfigureAwait(false)
+        };
         trace?.SetSummary($"bindings={response.Bindings.Count} truncated={response.Truncated}");
         return response;
         }
@@ -785,7 +825,13 @@ public sealed partial class AutomationController
             fallbackRequest,
             target,
             cancellationToken);
-        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        response = response with
+        {
+            Element = await StripAgentElementIdAsync(
+                client,
+                response.Element,
+                target.PublicElementId).ConfigureAwait(false)
+        };
         trace?.SetSummary($"props={response.Properties.Count} truncated={response.Truncated}");
         return response;
         }
@@ -833,7 +879,13 @@ public sealed partial class AutomationController
             fallbackRequest,
             target,
             cancellationToken);
-        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        response = response with
+        {
+            Element = await StripAgentElementIdAsync(
+                client,
+                response.Element,
+                target.PublicElementId).ConfigureAwait(false)
+        };
         trace?.SetSummary($"entries={response.Styles.Count}");
         return response;
         }
@@ -883,7 +935,13 @@ public sealed partial class AutomationController
             fallbackRequest,
             target,
             cancellationToken);
-        response = response with { Element = StripAgentElementId(response.Element, target.PublicElementId) };
+        response = response with
+        {
+            Element = await StripAgentElementIdAsync(
+                client,
+                response.Element,
+                target.PublicElementId).ConfigureAwait(false)
+        };
         var named = response.Template.NamedElements is null ? 0 : response.Template.NamedElements.Count;
         trace?.SetSummary($"named={named}");
         return response;
@@ -1009,13 +1067,27 @@ public sealed partial class AutomationController
             legacyRequest,
             cancellationToken);
 
+        return NormalizeLegacyFindElementsResponse(legacy, requestedMaxResults);
+    }
+
+    internal static FindElementsResponse NormalizeLegacyFindElementsResponse(
+        FindElementsResponse legacy,
+        int requestedMaxResults)
+    {
+        ArgumentNullException.ThrowIfNull(legacy);
+
+        requestedMaxResults = Math.Clamp(requestedMaxResults, 1, 5000);
         var discoveredMatches = legacy.Matches.Count;
         var exceededRequestedLimit = discoveredMatches > requestedMaxResults;
         var matches = exceededRequestedLimit
             ? legacy.Matches.Take(requestedMaxResults).ToArray()
             : legacy.Matches;
         var truncated = exceededRequestedLimit || legacy.Truncated;
-        var truncatedReason = exceededRequestedLimit ? "maxResults" : legacy.TruncatedReason;
+        var truncatedReason = !string.IsNullOrWhiteSpace(legacy.TruncatedReason)
+            ? legacy.TruncatedReason
+            : exceededRequestedLimit
+                ? "maxResults"
+                : null;
 
         return legacy with
         {

@@ -1062,6 +1062,10 @@ public sealed partial class AutomationController
         bool Released,
         string? WpfAgentElementIdToRelease);
 
+    internal readonly record struct ElementHandleUpdate(
+        bool Updated,
+        string? WpfAgentElementIdToRelease);
+
     internal sealed class ElementHandleStore
     {
         private readonly object _sync = new();
@@ -1173,7 +1177,7 @@ public sealed partial class AutomationController
             }
         }
 
-        public bool TryUpdateWpfResolution(string elementId, ElementRef element)
+        public ElementHandleUpdate TryUpdateWpfResolution(string elementId, ElementRef element)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(elementId);
             ArgumentNullException.ThrowIfNull(element);
@@ -1182,12 +1186,12 @@ public sealed partial class AutomationController
             {
                 if (!_entries.TryGetValue(elementId, out var existing))
                 {
-                    return false;
+                    return new ElementHandleUpdate(Updated: false, WpfAgentElementIdToRelease: null);
                 }
 
                 if (existing.Backend != InspectionBackend.Wpf)
                 {
-                    return false;
+                    return new ElementHandleUpdate(Updated: false, WpfAgentElementIdToRelease: null);
                 }
 
                 var updated = existing with
@@ -1203,15 +1207,22 @@ public sealed partial class AutomationController
                     Bounds = element.Bounds ?? existing.Bounds
                 };
 
+                string? wpfAgentElementIdToRelease = null;
                 if (GetWpfAgentHandleKey(existing) != GetWpfAgentHandleKey(updated))
                 {
-                    _ = RemoveWpfAgentHandleReference(existing);
+                    if (RemoveWpfAgentHandleReference(existing))
+                    {
+                        wpfAgentElementIdToRelease = existing.WpfAgentElementId;
+                    }
+
                     AddWpfAgentHandleReference(updated);
                 }
 
                 _entries[elementId] = updated;
                 Touch(elementId);
-                return true;
+                return new ElementHandleUpdate(
+                    Updated: true,
+                    WpfAgentElementIdToRelease: wpfAgentElementIdToRelease);
             }
         }
 

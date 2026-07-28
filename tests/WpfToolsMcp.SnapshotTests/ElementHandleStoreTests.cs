@@ -51,13 +51,38 @@ public sealed class ElementHandleStoreTests
     }
 
     [Test]
-    public void Updating_a_recovered_handle_moves_its_agent_reference()
+    public void Updating_last_reference_surfaces_old_agent_handle_for_release()
+    {
+        var store = new AutomationController.ElementHandleStore(capacity: 10);
+        var recovered = RegisterWpf(store, "agent_old", "/Window/Button[1]");
+
+        var update = store.TryUpdateWpfResolution(
+            recovered,
+            new ElementRef(
+                Type: "Button",
+                AutomationId: "PrimaryButton",
+                Name: "Primary",
+                XPath: "/Window/Button[1]",
+                ElementIdWpf: "agent_new"));
+
+        var recoveredRelease = store.Release(recovered);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(update.Updated, Is.True);
+            Assert.That(update.WpfAgentElementIdToRelease, Is.EqualTo("agent_old"));
+            Assert.That(recoveredRelease.WpfAgentElementIdToRelease, Is.EqualTo("agent_new"));
+        });
+    }
+
+    [Test]
+    public void Updating_shared_reference_keeps_old_agent_handle_until_alias_is_released()
     {
         var store = new AutomationController.ElementHandleStore(capacity: 10);
         var recovered = RegisterWpf(store, "agent_old", "/Window/Button[1]");
         var oldAlias = RegisterWpf(store, "agent_old", "/Window/Button[1]");
 
-        var updated = store.TryUpdateWpfResolution(
+        var update = store.TryUpdateWpfResolution(
             recovered,
             new ElementRef(
                 Type: "Button",
@@ -71,7 +96,8 @@ public sealed class ElementHandleStoreTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(updated, Is.True);
+            Assert.That(update.Updated, Is.True);
+            Assert.That(update.WpfAgentElementIdToRelease, Is.Null);
             Assert.That(oldRelease.WpfAgentElementIdToRelease, Is.EqualTo("agent_old"));
             Assert.That(recoveredRelease.WpfAgentElementIdToRelease, Is.EqualTo("agent_new"));
         });
