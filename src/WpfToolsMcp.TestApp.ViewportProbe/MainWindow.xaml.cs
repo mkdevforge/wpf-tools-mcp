@@ -26,7 +26,8 @@ public partial class MainWindow : Window
             UpdateViewportStatus();
         };
         SizeChanged += (_, _) => UpdateViewportStatus();
-        LayoutUpdated += (_, _) => UpdateViewportStatus();
+        LocationChanged += (_, _) => UpdateViewportStatus();
+        StateChanged += (_, _) => UpdateViewportStatus();
     }
 
     private IntPtr WindowMessageHook(
