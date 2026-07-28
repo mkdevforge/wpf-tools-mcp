@@ -85,8 +85,54 @@ public static class AppTools
             return automation.RunExclusiveAsync(() => automation.ListWindowsAsync(cancellationToken), cancellationToken);
         });
 
-    [McpServerTool(Name = "take_screenshot"), Description("Capture a screenshot of the main window or a specified window handle.")]
     public static Task<TakeScreenshotResponse> TakeScreenshot(
+        SessionManager sessions,
+        string sessionId,
+        long? windowHandle = null,
+        ElementLocator? locator = null,
+        string? elementId = null,
+        InspectionBackend backend = InspectionBackend.Auto,
+        string? captureMode = null,
+        string? area = null,
+        string? clip = null,
+        string? format = null,
+        int? jpegQuality = null,
+        string? outputPath = null,
+        bool includeOverlay = false,
+        bool autoScroll = true,
+        bool fullyVisible = true,
+        bool annotate = false,
+        string annotationColor = "#3B82F6",
+        int annotationThickness = 3,
+        string? annotationLabel = null,
+        bool returnBase64 = false,
+        CancellationToken cancellationToken = default) =>
+        TakeScreenshotWithViewport(
+            sessions,
+            sessionId,
+            windowHandle,
+            locator,
+            elementId,
+            backend,
+            captureMode,
+            area,
+            clip,
+            format,
+            jpegQuality,
+            outputPath,
+            includeOverlay,
+            autoScroll,
+            fullyVisible,
+            annotate,
+            annotationColor,
+            annotationThickness,
+            annotationLabel,
+            returnBase64,
+            includeViewport: false,
+            cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "take_screenshot"), Description("Capture a screenshot of the main window or a specified window handle.")]
+    public static Task<TakeScreenshotResponse> TakeScreenshotWithViewport(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
         [Description("Native window handle")] long? windowHandle = null,
@@ -107,6 +153,7 @@ public static class AppTools
         [Description("Annotation stroke thickness (px)")] int annotationThickness = 3,
         [Description("Optional annotation label")] string? annotationLabel = null,
         [Description("Include base64 payload in response (defaults to false)")] bool returnBase64 = false,
+        [Description("Include the window's client, outer, DPI, monitor, and state conditions in the response")] bool includeViewport = false,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -132,7 +179,10 @@ public static class AppTools
                         AnnotationColor: annotationColor,
                         AnnotationThickness: annotationThickness,
                         AnnotationLabel: annotationLabel,
-                        ReturnBase64: returnBase64),
+                        ReturnBase64: returnBase64)
+                    {
+                        IncludeViewport = includeViewport
+                    },
                     cancellationToken),
                 cancellationToken);
         });

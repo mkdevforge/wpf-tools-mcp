@@ -141,14 +141,33 @@ public static class CoreAppTools
 
 public static class CoreInspectionTools
 {
-    [McpServerTool(Name = "take_screenshot"), Description("Capture a screenshot of the active window or a target element.")]
     public static Task<TakeScreenshotResponse> TakeScreenshot(
+        SessionManager sessions,
+        string sessionId,
+        long? windowHandle = null,
+        CoreElementLocator? locator = null,
+        string? elementId = null,
+        string? outputPath = null,
+        CancellationToken cancellationToken = default) =>
+        TakeScreenshotWithViewport(
+            sessions,
+            sessionId,
+            windowHandle,
+            locator,
+            elementId,
+            outputPath,
+            includeViewport: false,
+            cancellationToken: cancellationToken);
+
+    [McpServerTool(Name = "take_screenshot"), Description("Capture a screenshot of the active window or a target element.")]
+    public static Task<TakeScreenshotResponse> TakeScreenshotWithViewport(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Optional target locator")] CoreElementLocator? locator = null,
         [Description("Optional target elementId")] string? elementId = null,
         [Description("Optional output file path")] string? outputPath = null,
+        [Description("Include the window's client, outer, DPI, monitor, and state conditions in the response")] bool includeViewport = false,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -161,7 +180,10 @@ public static class CoreInspectionTools
                         Locator: locator?.ToElementLocator(),
                         ElementId: elementId,
                         Backend: InspectionBackend.Auto,
-                        OutputPath: outputPath),
+                        OutputPath: outputPath)
+                    {
+                        IncludeViewport = includeViewport
+                    },
                     cancellationToken,
                     autoInject: true),
                 cancellationToken);

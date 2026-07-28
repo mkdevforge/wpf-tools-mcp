@@ -58,6 +58,7 @@ public sealed class ToolProfileTests
         "release_element",
         "set_window_bounds",
         "set_window_state",
+        "set_window_viewport",
         "subscribe_binding_errors",
         "trace_start",
         "trace_stop",
@@ -131,7 +132,7 @@ public sealed class ToolProfileTests
         var tools = (await mcp.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
 
         Assert.That(GetInputPropertyNames(tools["take_screenshot"]), Is.EqualTo(
-            new[] { "elementId", "locator", "outputPath", "sessionId", "windowHandle" }));
+            new[] { "elementId", "includeViewport", "locator", "outputPath", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_visual_tree"]), Is.EqualTo(
             new[] { "depth", "maxNodes", "root", "sessionId", "visibleOnly", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["find_elements"]), Is.EqualTo(
@@ -223,6 +224,7 @@ public sealed class ToolProfileTests
             "set_active_window",
             "set_window_bounds",
             "set_window_state",
+            "set_window_viewport",
             "click_element",
             "mouse_click",
             "invoke",
@@ -244,6 +246,28 @@ public sealed class ToolProfileTests
                 Is.EqualTo(new[] { "allowForegroundActivation", "allowPhysicalInput" }),
                 $"{toolName} should expose the complete nested interaction policy.");
         }
+    }
+
+    [Test]
+    public async Task Diagnostics_profile_exposes_deterministic_viewport_control_schema()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+
+        var tools = (await mcp.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+
+        Assert.That(GetInputPropertyNames(tools["set_window_viewport"]), Is.EqualTo(
+            new[]
+            {
+                "clampToWorkArea",
+                "clientHeight",
+                "clientWidth",
+                "ensureForeground",
+                "interactionPolicy",
+                "sessionId",
+                "unit",
+                "windowHandle"
+            }));
     }
 
     [Test]

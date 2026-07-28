@@ -53,7 +53,7 @@ agent workflows:
 | Profile | Tools | Purpose |
 |---|---:|---|
 | `core` (default) | 25 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 46 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `diagnostics` | 47 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Enable the full profile with a command argument:
 
@@ -91,7 +91,7 @@ The `diagnostics` profile additionally exposes:
 - `inject_agent`, `agent_ping`, `get_active_window`, `get_path_to_element`, and
   `release_element`.
 - `pick_element_at_point`, `highlight_element`, `mouse_click`, `list_displays`,
-  `set_window_bounds`, and `set_window_state`.
+  `set_window_bounds`, `set_window_viewport`, and `set_window_state`.
 - `get_style_chain`, `get_template_info`, and `uia_coverage_report`.
 - `subscribe_binding_errors`, `poll_subscription`, and `unsubscribe`.
 - `trace_start`, `trace_stop`, `performance_start`, and `performance_stop`.
@@ -142,6 +142,43 @@ fields describe MCP automation, not arbitrary side effects of the invoked
 application code. For example, a semantic command handler may independently
 open or activate one of its own windows.
 
+### Deterministic Viewports
+
+The diagnostics-only `set_window_viewport` tool sets the client area, rather
+than the outer window rectangle, to a repeatable size. Supply `clientWidth`,
+`clientHeight`, and a `unit` of `physicalPixels` or `wpfDips`:
+
+```json
+{
+  "sessionId": "session-id",
+  "clientWidth": 1280,
+  "clientHeight": 720,
+  "unit": "physicalPixels"
+}
+```
+
+The operation defaults to `ensureForeground=false` and
+`clampToWorkArea=false`, so exact background sizing is preferred over silently
+changing the requested viewport. Set `clampToWorkArea=true` when keeping the
+entire outer window within the current monitor work area is more important.
+
+The response records the normalized request, actual client and outer bounds in
+physical pixels, client size in both physical pixels and WPF DIPs, non-client
+frame insets, separate window-effective and monitor-effective DPI values, DPI
+awareness, monitor bounds and work area, and window state. WPF-DIP requests are
+first converted at the target window's render DPI and then through its DPI
+virtualization scale to monitor pixels, so unaware and system-aware windows are
+repeatable on mixed-DPI desktops. `Adjustment.ExactMatch`, size deltas, resize
+attempts, and `Constraints` make DPI rounding, work-area clamping, minimum
+sizes, and other application constraints explicit.
+
+Set `includeViewport=true` on `take_screenshot` to include the same
+`ViewportConditions` alongside the image metadata. This ties visual evidence
+to the client size, DPI, monitor, and state under which it was captured. The
+viewport is sampled immediately before and after capture; unstable captures
+are retried and fail with `screenshot_viewport_unstable` rather than returning
+mislabeled evidence.
+
 ### Response Budgets
 
 Responses are concise and bounded by default. Increase a tool's explicit limit
@@ -177,11 +214,13 @@ common-workflow rationale plus inventory and compact-schema contract coverage.
    `interactionPolicy`, and retain the returned `sessionId`.
 2. Use `list_windows` to choose among top-level windows. Call
    `set_active_window` only when foreground activation is intended.
-3. Inspect with `get_visual_tree` or `find_elements`, then retain an
+3. For responsive-layout evidence, use `set_window_viewport` to establish the
+   exact client size and request `includeViewport` with screenshots.
+4. Inspect with `get_visual_tree` or `find_elements`, then retain an
    `elementId` from `resolve_element` for follow-up calls.
-4. Interact, wait for the expected state, and inspect again to verify the
+5. Interact, wait for the expected state, and inspect again to verify the
    result.
-5. Call `close_session` when finished.
+6. Call `close_session` when finished.
 
 In the core profile, inspection tools that support both backends prefer the WPF
 agent and fall back when a UIA equivalent exists. Tree and search responses

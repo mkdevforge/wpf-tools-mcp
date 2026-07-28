@@ -291,7 +291,10 @@ public sealed record TakeScreenshotRequest(
     string AnnotationColor = "#3B82F6",
     int AnnotationThickness = 3,
     string? AnnotationLabel = null,
-    bool ReturnBase64 = false);
+    bool ReturnBase64 = false)
+{
+    public bool IncludeViewport { get; init; }
+}
 
 public sealed record TakeScreenshotResponse(
     string Path,
@@ -303,7 +306,11 @@ public sealed record TakeScreenshotResponse(
     bool WasClipped,
     long WindowHandleUsed,
     ScreenshotCaptureMode CaptureModeUsed,
-    string? Base64 = null);
+    string? Base64 = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ViewportConditions? Viewport { get; init; }
+}
 
 public sealed record PickElementAtPointRequest(
     int X,
@@ -380,6 +387,97 @@ public enum WindowState
     Minimized,
     Maximized
 }
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ViewportUnit
+{
+    PhysicalPixels,
+    WpfDips
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ViewportConstraint
+{
+    DpiRounding,
+    WorkAreaClamped,
+    MinimumSize,
+    MinimumExceedsWorkArea,
+    ApplicationConstraint
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum DpiAwareness
+{
+    Unknown,
+    Unaware,
+    SystemAware,
+    PerMonitorAware
+}
+
+public sealed record ViewportSize(double Width, double Height);
+
+public sealed record ViewportFrameInsets(int Left, int Top, int Right, int Bottom);
+
+public sealed record ViewportDpi(
+    uint WindowDpiX,
+    uint WindowDpiY,
+    double WindowScaleX,
+    double WindowScaleY,
+    uint MonitorDpiX,
+    uint MonitorDpiY,
+    double MonitorScaleX,
+    double MonitorScaleY,
+    DpiAwareness Awareness);
+
+public sealed record ViewportMonitor(
+    string DeviceName,
+    Rect BoundsPhysicalPixels,
+    Rect WorkAreaPhysicalPixels,
+    bool IsPrimary);
+
+public sealed record ViewportConditions(
+    Rect ClientBoundsPhysicalPixels,
+    Rect OuterBoundsPhysicalPixels,
+    ViewportSize ClientSizePhysicalPixels,
+    ViewportSize ClientSizeWpfDips,
+    ViewportFrameInsets FramePhysicalPixels,
+    ViewportDpi Dpi,
+    ViewportMonitor Monitor,
+    WindowState WindowState);
+
+public sealed record ViewportRequest(
+    ViewportUnit Unit,
+    ViewportSize ClientSize,
+    Rect ClientBoundsPhysicalPixels,
+    ViewportSize ClientSizePhysicalPixels,
+    ViewportSize ClientSizeWpfDips);
+
+public sealed record ViewportAdjustment(
+    ViewportSize AppliedClientSizePhysicalPixels,
+    ViewportSize ClientSizeDeltaPhysicalPixels,
+    ViewportSize ClientSizeDeltaWpfDips,
+    bool ExactMatch,
+    bool WasClamped,
+    bool MinimumSizeConstrained,
+    int ResizeAttempts,
+    IReadOnlyList<ViewportConstraint> Constraints);
+
+public sealed record SetWindowViewportRequest(
+    double ClientWidth,
+    double ClientHeight,
+    ViewportUnit Unit = ViewportUnit.PhysicalPixels,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WindowHandle = null,
+    bool ClampToWorkArea = false,
+    bool EnsureForeground = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
+
+public sealed record SetWindowViewportResponse(
+    bool Updated,
+    long WindowHandleUsed,
+    ViewportRequest Requested,
+    ViewportConditions Actual,
+    ViewportAdjustment Adjustment,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
 public sealed record SetWindowBoundsRequest(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WindowHandle = null,

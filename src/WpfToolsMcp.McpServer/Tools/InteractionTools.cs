@@ -70,6 +70,35 @@ public static class InteractionTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "set_window_viewport"), Description("Set an exact client-area size in physical pixels or WPF DIPs and report the resulting viewport conditions.")]
+    public static Task<SetWindowViewportResponse> SetWindowViewport(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Requested client width in the selected unit")] double clientWidth,
+        [Description("Requested client height in the selected unit")] double clientHeight,
+        [Description("Client-size unit: physicalPixels | wpfDips")] ViewportUnit unit = ViewportUnit.PhysicalPixels,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Clamp the resulting outer window bounds to the monitor work area")] bool clampToWorkArea = false,
+        [Description("Bring the window to the foreground first")] bool ensureForeground = false,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.SetWindowViewportAsync(
+                    new SetWindowViewportRequest(
+                        ClientWidth: clientWidth,
+                        ClientHeight: clientHeight,
+                        Unit: unit,
+                        WindowHandle: effectiveWindowHandle,
+                        ClampToWorkArea: clampToWorkArea,
+                        EnsureForeground: ensureForeground,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "set_window_state"), Description("Set a window state (normal/minimized/maximized).")]
     public static Task<SetWindowStateResponse> SetWindowState(
         SessionManager sessions,
