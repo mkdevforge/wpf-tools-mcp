@@ -48,15 +48,24 @@ public sealed partial class AutomationController
             }
 
             var backend = request.Backend;
+            long? autoPointWindowHandle = null;
             if (backend == InspectionBackend.Auto)
             {
-                backend = IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia;
+                var routingWindowHandle = request.WindowHandle;
+                if (routingWindowHandle is null)
+                {
+                    autoPointWindowHandle = ResolveWindowHandleAtPointUia(xScreen, yScreen, cancellationToken);
+                    routingWindowHandle = autoPointWindowHandle;
+                }
+
+                var autoWindow = FindWindowByHandle(application, automation, routingWindowHandle.Value);
+                backend = SelectAutoBackend(GetAutoBackendRoute(autoWindow), IsAgentConnected);
             }
 
             long windowHandleForWpf;
             if (backend == InspectionBackend.Wpf)
             {
-                var resolvedWindowHandle = ResolveWindowHandleAtPointUia(xScreen, yScreen, cancellationToken);
+                var resolvedWindowHandle = autoPointWindowHandle ?? ResolveWindowHandleAtPointUia(xScreen, yScreen, cancellationToken);
                 if (request.WindowHandle is long expectedHandle && expectedHandle != resolvedWindowHandle)
                 {
                     throw new InvalidOperationException(
@@ -70,12 +79,23 @@ public sealed partial class AutomationController
                 windowHandleForWpf = 0;
             }
 
-            var response = backend switch
+            PickElementAtPointResponse response;
+            try
             {
-                InspectionBackend.Uia => PickElementAtPointUia(request, xScreen, yScreen, coordSpaceUsed, cancellationToken),
-                InspectionBackend.Wpf => await PickElementAtPointWpfAsync(windowHandleForWpf, request, xScreen, yScreen, coordSpaceUsed, cancellationToken).ConfigureAwait(false),
-                _ => throw new ArgumentOutOfRangeException(nameof(request.Backend), request.Backend, "Unsupported backend.")
-            };
+                response = backend switch
+                {
+                    InspectionBackend.Uia => PickElementAtPointUia(request, xScreen, yScreen, coordSpaceUsed, cancellationToken),
+                    InspectionBackend.Wpf => await PickElementAtPointWpfAsync(windowHandleForWpf, request, xScreen, yScreen, coordSpaceUsed, cancellationToken).ConfigureAwait(false),
+                    _ => throw new ArgumentOutOfRangeException(nameof(request.Backend), request.Backend, "Unsupported backend.")
+                };
+            }
+            catch (InvalidOperationException ex) when (
+                request.Backend == InspectionBackend.Auto &&
+                backend == InspectionBackend.Wpf &&
+                IsPerWindowAutoWpfMiss(ex))
+            {
+                response = PickElementAtPointUia(request, xScreen, yScreen, coordSpaceUsed, cancellationToken);
+            }
 
             trace?.SetSummary($"{response.BackendUsed} {response.Element.Type} {response.Element.XPath}");
             return response;

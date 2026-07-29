@@ -900,10 +900,15 @@ public sealed partial class AutomationController : IDisposable
                     : FindMainWindow(application, automation);
             }
 
+            var autoBackendRoute = requestedBackend == InspectionBackend.Auto
+                ? GetAutoBackendRoute(window)
+                : AutoBackendRoute.ProbeWpfThenUia;
+
             if (requestedBackend == InspectionBackend.Auto &&
                 autoInject &&
                 !hasElementId &&
-                request.Locator is not null)
+                request.Locator is not null &&
+                autoBackendRoute != AutoBackendRoute.Uia)
             {
                 var autoClient = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
                 if (autoClient is not null)
@@ -1279,6 +1284,7 @@ public sealed partial class AutomationController : IDisposable
                     !hasElementId &&
                     request.Locator is not null &&
                     elementBackend == InspectionBackend.Uia &&
+                    autoBackendRoute != AutoBackendRoute.Uia &&
                     IsAgentConnected &&
                     IsEligibleAutoScreenshotFallback(ex))
                 {
@@ -1451,6 +1457,11 @@ public sealed partial class AutomationController : IDisposable
 
     private static bool IsEligibleAutoScreenshotFallback(Exception ex)
     {
+        if (IsPerWindowAutoWpfMiss(ex))
+        {
+            return true;
+        }
+
         ex = ex.GetBaseException();
 
         if (ex is ArgumentException)
@@ -4770,11 +4781,26 @@ public sealed partial class AutomationController : IDisposable
         var application = EnsureAttached();
         var automation = EnsureAutomation();
 
+        Window? locatorWindow = null;
+        if (hasLocator)
+        {
+            locatorWindow = request.WindowHandle is long requestedHandle
+                ? FindWindowByHandle(application, automation, requestedHandle)
+                : FindMainWindow(application, automation);
+        }
+
         var backendForLocator = request.Backend;
         if (hasLocator && backendForLocator == InspectionBackend.Auto)
         {
-            var autoClient = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
-            backendForLocator = autoClient is not null ? InspectionBackend.Wpf : InspectionBackend.Uia;
+            if (GetAutoBackendRoute(locatorWindow!) == AutoBackendRoute.Uia)
+            {
+                backendForLocator = InspectionBackend.Uia;
+            }
+            else
+            {
+                var autoClient = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
+                backendForLocator = autoClient is not null ? InspectionBackend.Wpf : InspectionBackend.Uia;
+            }
         }
 
         if (hasElementId)
@@ -4815,28 +4841,32 @@ public sealed partial class AutomationController : IDisposable
 
         if (hasLocator && backendForLocator == InspectionBackend.Wpf)
         {
-            var uiaWindow = request.WindowHandle is long requestedHandle
-                ? FindWindowByHandle(application, automation, requestedHandle)
-                : FindMainWindow(application, automation);
+            var hwnd = locatorWindow!.Properties.NativeWindowHandle.Value.ToInt64();
+            try
+            {
+                var response = await WaitForWpfAsync(
+                    stateText: request.State,
+                    state,
+                    windowHandle: hwnd,
+                    locator: request.Locator,
+                    xpath: null,
+                    timeoutMs,
+                    pollIntervalMs,
+                    stableMs,
+                    expectedValue: request.ExpectedValue,
+                    expectedText: request.ExpectedText,
+                    throwOnTimeout: request.ThrowOnTimeout,
+                    cancellationToken).ConfigureAwait(false);
 
-            var hwnd = uiaWindow.Properties.NativeWindowHandle.Value.ToInt64();
-
-            var response = await WaitForWpfAsync(
-                stateText: request.State,
-                state,
-                windowHandle: hwnd,
-                locator: request.Locator,
-                xpath: null,
-                timeoutMs,
-                pollIntervalMs,
-                stableMs,
-                expectedValue: request.ExpectedValue,
-                expectedText: request.ExpectedText,
-                throwOnTimeout: request.ThrowOnTimeout,
-                cancellationToken).ConfigureAwait(false);
-
-            trace?.SetSummary($"{request.State} succeeded={response.Succeeded} attempts={response.Attempts}");
-            return response;
+                trace?.SetSummary($"{request.State} succeeded={response.Succeeded} attempts={response.Attempts}");
+                return response;
+            }
+            catch (Exception ex) when (
+                request.Backend == InspectionBackend.Auto &&
+                IsPerWindowAutoWpfMiss(ex))
+            {
+                // Unknown framework windows may reject WPF routing per HWND; continue with UIA.
+            }
         }
 
         Window window;
@@ -4862,9 +4892,7 @@ public sealed partial class AutomationController : IDisposable
         }
         else
         {
-            window = request.WindowHandle is long requestedHandle
-                ? FindWindowByHandle(application, automation, requestedHandle)
-                : FindMainWindow(application, automation);
+            window = locatorWindow!;
 
             xpathHint = request.Locator?.XPath;
         }
@@ -8073,6 +8101,19 @@ public sealed partial class AutomationController : IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool IsWindowVisible(IntPtr hwnd);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowEnabled(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+
+    private const uint GW_OWNER = 4;
+
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
@@ -8189,6 +8230,7 @@ public sealed partial class AutomationController : IDisposable
 
             maxNodes = Math.Clamp(maxNodes, 1, 5000);
             IReadOnlyList<string>? warnings = null;
+            Window? autoWindow = null;
 
             if (backend == InspectionBackend.Wpf)
             {
@@ -8217,13 +8259,20 @@ public sealed partial class AutomationController : IDisposable
 
             if (backend == InspectionBackend.Auto)
             {
-                var resolvedWindowHandle = windowHandle;
+                autoWindow = windowHandle is long requestedHandle
+                    ? FindWindowByHandle(application, automation, requestedHandle)
+                    : FindMainWindow(application, automation);
+                var resolvedWindowHandle = autoWindow.Properties.NativeWindowHandle.Value.ToInt64();
                 var wpfRootXPath = root?.XPath;
-                var canTryWpf = true;
+                var canTryWpf = GetAutoBackendRoute(autoWindow) != AutoBackendRoute.Uia;
 
-                if (root is not null && string.IsNullOrWhiteSpace(wpfRootXPath))
+                if (!canTryWpf)
                 {
-                    resolvedWindowHandle ??= FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
+                    warnings = [GetNativeAutoRoutingWarning(autoWindow)];
+                }
+
+                if (canTryWpf && root is not null && string.IsNullOrWhiteSpace(wpfRootXPath))
+                {
                     var client = autoInject
                         ? await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false)
                         : await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
@@ -8237,7 +8286,7 @@ public sealed partial class AutomationController : IDisposable
                     {
                         try
                         {
-                            wpfRootXPath = await ResolveWpfRootXPathAsync(root, resolvedWindowHandle.Value, cancellationToken).ConfigureAwait(false);
+                            wpfRootXPath = await ResolveWpfRootXPathAsync(root, resolvedWindowHandle, cancellationToken).ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {
@@ -8261,20 +8310,29 @@ public sealed partial class AutomationController : IDisposable
                         Preset: preset,
                         Fields: fields);
 
-                    var wpf = await TryGetVisualTreeWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                    GetVisualTreeResponse? wpf = null;
+                    try
+                    {
+                        wpf = await TryGetVisualTreeWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (IsPerWindowAutoWpfMiss(ex))
+                    {
+                        warnings = [GetPerWindowAutoRoutingWarning()];
+                    }
+
                     if (wpf is not null)
                     {
                         trace?.SetSummary($"{wpf.BackendUsed} returned={wpf.ReturnedNodes} truncated={wpf.Truncated}");
                         return wpf;
                     }
 
-                    warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                    warnings ??= [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
                 }
             }
 
-            var window = windowHandle is long requestedHandle
-                ? FindWindowByHandle(application, automation, requestedHandle)
-                : FindMainWindow(application, automation);
+            var window = autoWindow ?? (windowHandle is long uiaRequestedHandle
+                ? FindWindowByHandle(application, automation, uiaRequestedHandle)
+                : FindMainWindow(application, automation));
 
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
             var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
@@ -8344,6 +8402,7 @@ public sealed partial class AutomationController : IDisposable
             maxResults = Math.Clamp(maxResults, 1, 5000);
             maxNodes = Math.Clamp(maxNodes, 1, 200_000);
             IReadOnlyList<string>? warnings = null;
+            Window? autoWindow = null;
 
             if (backend == InspectionBackend.Wpf)
             {
@@ -8385,11 +8444,19 @@ public sealed partial class AutomationController : IDisposable
 
             if (backend == InspectionBackend.Auto)
             {
-                var resolvedWindowHandle = windowHandle ?? FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
+                autoWindow = windowHandle is long requestedHandle
+                    ? FindWindowByHandle(application, automation, requestedHandle)
+                    : FindMainWindow(application, automation);
+                var resolvedWindowHandle = autoWindow.Properties.NativeWindowHandle.Value.ToInt64();
                 var wpfRootXPath = root?.XPath;
-                var canTryWpf = true;
+                var canTryWpf = GetAutoBackendRoute(autoWindow) != AutoBackendRoute.Uia;
 
-                if (root is not null && string.IsNullOrWhiteSpace(wpfRootXPath))
+                if (!canTryWpf)
+                {
+                    warnings = [GetNativeAutoRoutingWarning(autoWindow)];
+                }
+
+                if (canTryWpf && root is not null && string.IsNullOrWhiteSpace(wpfRootXPath))
                 {
                     var client = autoInject
                         ? await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false)
@@ -8429,7 +8496,16 @@ public sealed partial class AutomationController : IDisposable
                         ReturnFields: returnFields,
                         IncludeElementIds: includeElementIds);
 
-                    var wpf = await TryFindElementsWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                    FindElementsResponse? wpf = null;
+                    try
+                    {
+                        wpf = await TryFindElementsWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (IsPerWindowAutoWpfMiss(ex))
+                    {
+                        warnings = [GetPerWindowAutoRoutingWarning()];
+                    }
+
                     if (wpf is not null)
                     {
                         var responseWpf = includeElementIds
@@ -8448,13 +8524,13 @@ public sealed partial class AutomationController : IDisposable
                         return responseWpf;
                     }
 
-                    warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                    warnings ??= [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
                 }
             }
 
-            var window = windowHandle is long requestedHandle
-                ? FindWindowByHandle(application, automation, requestedHandle)
-                : FindMainWindow(application, automation);
+            var window = autoWindow ?? (windowHandle is long uiaRequestedHandle
+                ? FindWindowByHandle(application, automation, uiaRequestedHandle)
+                : FindMainWindow(application, automation));
 
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
             var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
@@ -9328,15 +9404,22 @@ public sealed partial class AutomationController : IDisposable
     private static Window FindWindowByHandle(Application application, UIA3Automation automation, long nativeWindowHandle)
     {
         var hwnd = new IntPtr(nativeWindowHandle);
-        if (hwnd == IntPtr.Zero)
+        if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
         {
-            throw new InvalidOperationException($"No window found with handle {nativeWindowHandle}.");
+            throw CreateWindowClosedException(nativeWindowHandle);
         }
 
         GetWindowThreadProcessId(hwnd, out var processId);
+        if (processId == 0)
+        {
+            throw CreateWindowClosedException(nativeWindowHandle);
+        }
+
         if (processId != application.ProcessId)
         {
-            throw new InvalidOperationException($"No window found with handle {nativeWindowHandle}.");
+            throw new InvalidOperationException(
+                $"window_outside_session: window handle {nativeWindowHandle} belongs to process {processId}, " +
+                $"not attached process {application.ProcessId}. Start or select the owning session.");
         }
 
         try
@@ -9346,9 +9429,38 @@ public sealed partial class AutomationController : IDisposable
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException($"No window found with handle {nativeWindowHandle}.", ex);
+            if (!IsWindow(hwnd))
+            {
+                throw CreateWindowClosedException(nativeWindowHandle, ex);
+            }
+
+            GetWindowThreadProcessId(hwnd, out var currentProcessId);
+            if (currentProcessId == 0)
+            {
+                throw CreateWindowClosedException(nativeWindowHandle, ex);
+            }
+
+            if (currentProcessId != application.ProcessId)
+            {
+                throw new InvalidOperationException(
+                    $"window_outside_session: window handle {nativeWindowHandle} belongs to process {currentProcessId}, " +
+                    $"not attached process {application.ProcessId}. Start or select the owning session.",
+                    ex);
+            }
+
+            throw new InvalidOperationException(
+                $"window_uia_unavailable: window handle {nativeWindowHandle} belongs to the attached process but " +
+                "does not expose a usable UI Automation window. Select another window with list_windows; " +
+                "owner-drawn dialogs without UIA are outside the supported scope.",
+                ex);
         }
     }
+
+    private static InvalidOperationException CreateWindowClosedException(long nativeWindowHandle, Exception? innerException = null) =>
+        new(
+            $"window_closed: window handle {nativeWindowHandle} is no longer valid. " +
+            "Call list_windows and select a live window.",
+            innerException);
 
     private static Window FindWindowByTitle(Application application, UIA3Automation automation, string title)
     {
@@ -9407,17 +9519,154 @@ public sealed partial class AutomationController : IDisposable
     private static WindowInfo ToWindowInfo(Window window)
     {
         var bounds = window.BoundingRectangle;
+        var handle = window.Properties.NativeWindowHandle.Value;
+        var ownerHandle = TryGetOwnerHandle(handle);
         return new WindowInfo(
             Title: GetWindowTitle(window),
-            Handle: window.Properties.NativeWindowHandle.Value.ToInt64(),
+            Handle: handle.ToInt64(),
             Bounds: new Rect(
                 X: bounds.Left,
                 Y: bounds.Top,
                 Width: bounds.Width,
                 Height: bounds.Height),
-            IsVisible: !window.IsOffscreen,
-            IsEnabled: window.IsEnabled);
+            IsVisible: GetWindowVisibility(window, handle),
+            IsEnabled: GetWindowEnabled(window, handle))
+        {
+            OwnerHandle = ownerHandle,
+            IsModal = TryGetModalState(window, ownerHandle),
+            FrameworkId = TryGetFrameworkId(window)
+        };
     }
+
+    private static bool GetWindowVisibility(Window window, IntPtr handle) =>
+        ResolveWindowVisibility(
+            TryGetNativeWindowVisibility(handle),
+            () => window.IsOffscreen);
+
+    private static bool GetWindowEnabled(Window window, IntPtr handle) =>
+        ResolveWindowEnabled(
+            TryGetNativeWindowEnabled(handle),
+            () => window.IsEnabled);
+
+    private static bool? TryGetNativeWindowVisibility(IntPtr handle)
+    {
+        if (!OperatingSystem.IsWindows() || handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            return IsWindowVisible(handle);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool? TryGetNativeWindowEnabled(IntPtr handle)
+    {
+        if (!OperatingSystem.IsWindows() || handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            return IsWindowEnabled(handle);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal static bool ResolveWindowVisibility(
+        bool? nativeIsVisible,
+        Func<bool> getProviderIsOffscreen)
+    {
+        ArgumentNullException.ThrowIfNull(getProviderIsOffscreen);
+
+        var providerIsOffscreen = SafeGetBool(getProviderIsOffscreen);
+        if (providerIsOffscreen is bool isOffscreen)
+        {
+            return !isOffscreen;
+        }
+
+        return nativeIsVisible ?? true;
+    }
+
+    internal static bool ResolveWindowEnabled(
+        bool? nativeIsEnabled,
+        Func<bool> getProviderIsEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(getProviderIsEnabled);
+
+        return SafeGetBool(getProviderIsEnabled) ?? nativeIsEnabled ?? false;
+    }
+
+    private static long? TryGetOwnerHandle(IntPtr handle)
+    {
+        if (!OperatingSystem.IsWindows() || handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            var owner = GetWindow(handle, GW_OWNER);
+            return owner == IntPtr.Zero ? null : owner.ToInt64();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool? TryGetModalState(Window window, long? ownerHandle)
+    {
+        try
+        {
+            return window.IsModal;
+        }
+        catch
+        {
+            if (ownerHandle is not long owner || owner == 0 || !OperatingSystem.IsWindows())
+            {
+                return null;
+            }
+
+            try
+            {
+                return !IsWindowEnabled(new IntPtr(owner));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    private static string? TryGetFrameworkId(Window window)
+    {
+        try
+        {
+            return window.FrameworkType == FrameworkType.None
+                ? null
+                : window.FrameworkType.ToString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string GetNativeAutoRoutingWarning(Window window) =>
+        $"backend=auto: target framework {TryGetFrameworkId(window) ?? "native"} is not WPF; used UIA.";
+
+    private static string GetPerWindowAutoRoutingWarning() =>
+        "backend=auto: target window is not backed by a WPF HwndSource; used UIA.";
 
     private static string GetWindowTitle(Window window)
     {

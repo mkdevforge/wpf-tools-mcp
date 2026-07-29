@@ -93,7 +93,17 @@ public sealed record WindowInfo(
     long Handle,
     Rect Bounds,
     bool IsVisible,
-    bool IsEnabled);
+    bool IsEnabled)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? OwnerHandle { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsModal { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FrameworkId { get; init; }
+}
 
 public sealed record Rect(int X, int Y, int Width, int Height);
 

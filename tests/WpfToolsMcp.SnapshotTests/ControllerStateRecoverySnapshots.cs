@@ -480,6 +480,8 @@ public sealed class ControllerStateRecoverySnapshots
             Assert.That(session.BackendCapabilities, Does.Not.Contain("wpf"));
             Assert.That(session.BackendCapabilityStates.Single(s => s.Backend == "uia").State, Is.EqualTo("unavailable"));
             Assert.That(session.BackendCapabilityStates.Single(s => s.Backend == "wpf").State, Is.EqualTo("unavailable"));
+            Assert.That(session.ActiveWindowHandle, Is.Zero);
+            Assert.That(session.ActiveWindowTitle, Is.Empty);
             Assert.That(close, Is.Not.Null);
 
             await Verifier.Verify(new

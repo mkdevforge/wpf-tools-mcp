@@ -1131,7 +1131,12 @@ public sealed partial class AutomationController
         }
         catch (Exception ex)
         {
-            if (autoInject)
+            if (IsPerWindowAutoWpfMiss(ex))
+            {
+                throw;
+            }
+
+            if (autoInject && ShouldRecordAutoAgentFailure(ex))
             {
                 SetAutoAgentFailure(ex);
             }
@@ -1176,7 +1181,12 @@ public sealed partial class AutomationController
         }
         catch (Exception ex)
         {
-            if (autoInject)
+            if (IsPerWindowAutoWpfMiss(ex))
+            {
+                throw;
+            }
+
+            if (autoInject && ShouldRecordAutoAgentFailure(ex))
             {
                 SetAutoAgentFailure(ex);
             }

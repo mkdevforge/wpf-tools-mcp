@@ -39,48 +39,71 @@ public sealed partial class AutomationController
             stableMs = Math.Clamp(stableMs, 0, 5000);
 
             var effectiveBackend = backend;
+            AutoBackendRoute? autoRoute = null;
             if (backend == InspectionBackend.Auto)
             {
-                if (autoInject)
+                var application = EnsureAttached();
+                var automation = EnsureAutomation();
+                var window = windowHandle is long requestedHandle
+                    ? FindWindowByHandle(application, automation, requestedHandle)
+                    : FindMainWindow(application, automation);
+
+                autoRoute = GetAutoBackendRoute(window);
+                var wpfBackendAvailable = false;
+                if (autoRoute != AutoBackendRoute.Uia)
                 {
-                    var autoClient = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
-                    effectiveBackend = autoClient is not null ? InspectionBackend.Wpf : InspectionBackend.Uia;
+                    wpfBackendAvailable = autoInject
+                        ? await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false) is not null
+                        : IsAgentConnected;
                 }
-                else
-                {
-                    effectiveBackend = IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia;
-                }
+
+                effectiveBackend = SelectAutoBackend(autoRoute.Value, wpfBackendAvailable);
             }
 
-            var response = await (effectiveBackend switch
+            ResolveElementResponse response;
+            try
             {
-                InspectionBackend.Uia => ResolveUiaElementAsync(
-                    locator,
-                    windowHandle,
-                    timeoutMs,
-                    pollIntervalMs,
-                    stableMs,
-                    visibleOnly,
-                    includeOffViewport,
-                    interactiveOnly,
-                    interactiveMode,
-                    cancellationToken),
-                InspectionBackend.Wpf => ResolveWpfElementAsync(
-                    locator,
-                    windowHandle,
-                    timeoutMs,
-                    pollIntervalMs,
-                    stableMs,
-                    visibleOnly,
-                    includeOffViewport,
-                    interactiveOnly,
-                    interactiveMode,
-                    cancellationToken),
-                _ => throw new ArgumentOutOfRangeException(nameof(backend), backend, "Unsupported backend.")
-            }).ConfigureAwait(false);
+                response = await ResolveElementWithBackendAsync(effectiveBackend).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex) when (
+                backend == InspectionBackend.Auto &&
+                effectiveBackend == InspectionBackend.Wpf &&
+                (IsPerWindowAutoWpfMiss(ex) ||
+                 autoRoute == AutoBackendRoute.ProbeWpfThenUia && IsAutoWpfLocatorMiss(ex)))
+            {
+                response = await ResolveElementWithBackendAsync(InspectionBackend.Uia).ConfigureAwait(false);
+            }
 
             trace?.SetSummary($"{response.BackendUsed} {response.Element.Type} {response.Element.XPath}");
             return response;
+
+            Task<ResolveElementResponse> ResolveElementWithBackendAsync(InspectionBackend selectedBackend) =>
+                selectedBackend switch
+                {
+                    InspectionBackend.Uia => ResolveUiaElementAsync(
+                        locator,
+                        windowHandle,
+                        timeoutMs,
+                        pollIntervalMs,
+                        stableMs,
+                        visibleOnly,
+                        includeOffViewport,
+                        interactiveOnly,
+                        interactiveMode,
+                        cancellationToken),
+                    InspectionBackend.Wpf => ResolveWpfElementAsync(
+                        locator,
+                        windowHandle,
+                        timeoutMs,
+                        pollIntervalMs,
+                        stableMs,
+                        visibleOnly,
+                        includeOffViewport,
+                        interactiveOnly,
+                        interactiveMode,
+                        cancellationToken),
+                    _ => throw new ArgumentOutOfRangeException(nameof(selectedBackend), selectedBackend, "Unsupported backend.")
+                };
         }
         catch (Exception ex)
         {
@@ -446,6 +469,11 @@ public sealed partial class AutomationController
         InteractiveMode interactiveMode,
         CancellationToken cancellationToken)
     {
+        if (GetAutoBackendRoute(window) == AutoBackendRoute.Uia)
+        {
+            return null;
+        }
+
         if (await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false) is null)
         {
             return null;
@@ -481,6 +509,10 @@ public sealed partial class AutomationController
             throw new InvalidOperationException(CleanAutoWpfResolveMessage(ex));
         }
         catch (InvalidOperationException ex) when (IsAutoWpfLocatorMiss(ex))
+        {
+            return null;
+        }
+        catch (InvalidOperationException ex) when (IsPerWindowAutoWpfMiss(ex))
         {
             return null;
         }

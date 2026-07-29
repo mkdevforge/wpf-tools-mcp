@@ -17,7 +17,9 @@
         Height: 650
       },
       IsVisible: true,
-      IsEnabled: true
+      IsEnabled: true,
+      IsModal: false,
+      FrameworkId: Wpf
     }
   ]
 }

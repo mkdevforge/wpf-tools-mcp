@@ -35,9 +35,21 @@
                     HorizontalAlignment="Left"
                     Click="OpenDialog_Click" />
 
+            <Button AutomationProperties.AutomationId="Dialogs_OpenNativeFileDialog"
+                    Content="Open native file dialog"
+                    Width="200"
+                    Margin="0,0,0,12"
+                    HorizontalAlignment="Left"
+                    Click="OpenNativeFileDialog_Click" />
+
             <TextBlock x:Name="DialogsStatus"
                        AutomationProperties.AutomationId="Dialogs_Status"
                        Text="Dialog: (none)"
+                       Margin="0,0,0,12" />
+
+            <TextBlock x:Name="NativeDialogStatus"
+                       AutomationProperties.AutomationId="Dialogs_NativeStatus"
+                       Text="Native dialog: (none)"
                        Margin="0,0,0,12" />
 
             <TextBlock Text="The confirm dialog is a separate window. Use list_windows + set_active_window + windowHandle to interact."

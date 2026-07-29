@@ -41,19 +41,39 @@ public sealed partial class AutomationController
         {
             case ScreenshotCorrelationBackend.Auto:
             {
-                var client = await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
+                var route = GetAutoBackendRoute(window);
+                var client = route == AutoBackendRoute.Uia
+                    ? null
+                    : await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
                 if (client is not null && AgentSupportsCapability(client, AgentProtocolCapabilities.CorrelateScreenshotRegion))
                 {
-                    backends.Add(await CorrelateScreenshotWpfAsync(
-                        client,
-                        windowHandle,
-                        screenRegion,
-                        screenPoint,
-                        maxCandidates,
-                        maxNodes,
-                        options.IncludeAncestors,
-                        maxAncestors,
-                        cancellationToken).ConfigureAwait(false));
+                    try
+                    {
+                        backends.Add(await CorrelateScreenshotWpfAsync(
+                            client,
+                            windowHandle,
+                            screenRegion,
+                            screenPoint,
+                            maxCandidates,
+                            maxNodes,
+                            options.IncludeAncestors,
+                            maxAncestors,
+                            cancellationToken).ConfigureAwait(false));
+                    }
+                    catch (InvalidOperationException ex) when (IsPerWindowAutoWpfMiss(ex))
+                    {
+                        backends.Add(CorrelateScreenshotUia(
+                            window,
+                            windowHandle,
+                            screenRegion,
+                            screenPoint,
+                            maxCandidates,
+                            maxNodes,
+                            options.IncludeAncestors,
+                            maxAncestors,
+                            captureContext.Viewport,
+                            cancellationToken));
+                    }
                 }
                 else
                 {

@@ -145,7 +145,7 @@ public static class CoreAppTools
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() => sessions.ListSessionsAsync(cancellationToken));
 
-    [McpServerTool(Name = "list_windows"), Description("Enumerate top-level windows of the attached process.")]
+    [McpServerTool(Name = "list_windows"), Description("Enumerate visible top-level windows of the attached process, including native dialogs and owner, modal, and framework context.")]
     public static Task<ListWindowsResponse> ListWindows(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

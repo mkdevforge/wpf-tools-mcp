@@ -28,6 +28,7 @@ public sealed partial class AutomationController
             string? resolvedElementId = null;
             string? effectiveWpfAgentElementId = null;
             var backend = request.Backend;
+            AutoBackendRoute? autoRoute = null;
             ElementLocator effectiveLocator = request.Locator ?? new ElementLocator();
 
             long windowHandleUsed;
@@ -48,13 +49,16 @@ public sealed partial class AutomationController
             }
             else
             {
+                var window = request.WindowHandle is long requestedHandle
+                    ? FindWindowByHandle(application, automation, requestedHandle)
+                    : FindMainWindow(application, automation);
+                windowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64();
+
                 if (backend == InspectionBackend.Auto)
                 {
-                    backend = IsAgentConnected ? InspectionBackend.Wpf : InspectionBackend.Uia;
+                    autoRoute = GetAutoBackendRoute(window);
+                    backend = SelectAutoBackend(autoRoute.Value, IsAgentConnected);
                 }
-
-                windowHandleUsed = request.WindowHandle
-                    ?? FindMainWindow(application, automation).Properties.NativeWindowHandle.Value.ToInt64();
             }
 
             Rect bounds;
@@ -68,6 +72,21 @@ public sealed partial class AutomationController
                         ?? new Rect(0, 0, 0, 0),
                     _ => throw new ArgumentOutOfRangeException(nameof(backend), backend, "Unsupported backend.")
                 };
+            }
+            catch (InvalidOperationException ex) when (
+                !hasElementId &&
+                request.Backend == InspectionBackend.Auto &&
+                backend == InspectionBackend.Wpf &&
+                (IsPerWindowAutoWpfMiss(ex) ||
+                 autoRoute == AutoBackendRoute.ProbeWpfThenUia && IsAutoWpfLocatorMiss(ex)))
+            {
+                backend = InspectionBackend.Uia;
+                bounds = ResolveHighlightBoundsUia(
+                    application,
+                    automation,
+                    windowHandleUsed,
+                    effectiveLocator,
+                    resolvedElementId);
             }
             catch (InvalidOperationException ex) when (hasElementId &&
                                                       resolvedElementId is not null &&
