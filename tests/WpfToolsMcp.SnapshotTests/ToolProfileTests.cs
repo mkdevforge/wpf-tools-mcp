@@ -207,6 +207,45 @@ public sealed class ToolProfileTests
     }
 
     [Test]
+    public async Task Screenshot_correlation_controls_are_diagnostics_only()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var core = await McpTestContext.StartAsync(serverExe, toolProfile: "core");
+        await using var diagnostics = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+
+        var coreTools = (await core.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var diagnosticTools = (await diagnostics.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var coreInputs = GetInputPropertyNames(coreTools["take_screenshot"]);
+        var diagnosticInputs = GetInputPropertyNames(diagnosticTools["take_screenshot"]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(coreInputs, Is.EqualTo(
+                new[] { "elementId", "includeViewport", "locator", "outputPath", "sessionId", "windowHandle" }));
+            Assert.That(coreInputs, Does.Not.Contain("correlation"));
+            Assert.That(diagnosticInputs, Does.Contain("correlation"));
+            Assert.That(
+                GetInputObjectPropertyNames(diagnosticTools["take_screenshot"], "correlation"),
+                Is.EqualTo(new[]
+                {
+                    "annotate",
+                    "backend",
+                    "height",
+                    "includeAncestors",
+                    "maxAncestors",
+                    "maxCandidates",
+                    "maxNodes",
+                    "width",
+                    "x",
+                    "y"
+                }));
+            Assert.That(
+                GetInputObjectEnumValues(diagnosticTools["take_screenshot"], "correlation", "backend"),
+                Is.EqualTo(new[] { "Auto", "Both", "Uia", "Wpf" }));
+        });
+    }
+
+    [Test]
     public async Task Core_profile_exposes_explicit_session_lifecycle_schemas()
     {
         var serverExe = McpServerPaths.FindMcpServerExecutable();
@@ -852,6 +891,36 @@ public sealed class ToolProfileTests
             .EnumerateObject()
             .Select(property => property.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string[] GetInputObjectEnumValues(
+        McpClientTool tool,
+        string inputPropertyName,
+        string nestedPropertyName)
+    {
+        var schema = tool.JsonSchema;
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var inputProperties) ||
+            inputProperties.ValueKind != JsonValueKind.Object ||
+            !inputProperties.TryGetProperty(inputPropertyName, out var inputProperty) ||
+            inputProperty.ValueKind != JsonValueKind.Object ||
+            !inputProperty.TryGetProperty("properties", out var nestedProperties) ||
+            nestedProperties.ValueKind != JsonValueKind.Object ||
+            !nestedProperties.TryGetProperty(nestedPropertyName, out var nestedProperty) ||
+            nestedProperty.ValueKind != JsonValueKind.Object ||
+            !nestedProperty.TryGetProperty("enum", out var values) ||
+            values.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return values
+            .EnumerateArray()
+            .Select(value => value.GetString())
+            .Where(value => value is not null)
+            .Select(value => value!)
+            .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
     }
 

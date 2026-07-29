@@ -1,0 +1,139 @@
+<Window x:Class="WpfToolsMcp.TestApp.ScreenshotCorrelationProbe.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AutomationProperties.AutomationId="Correlation_Window"
+        AutomationProperties.Name="Screenshot correlation probe"
+        Title="WPF Tools MCP ScreenshotCorrelationProbe TestApp"
+        Width="760"
+        Height="560"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        Left="140"
+        Top="110"
+        Background="White"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+    <Grid AutomationProperties.AutomationId="Correlation_Root"
+          Background="White">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   AutomationProperties.AutomationId="Correlation_Heading"
+                   Margin="20,14,20,10"
+                   FontSize="20"
+                   FontWeight="SemiBold"
+                   Text="Screenshot correlation probe" />
+
+        <Canvas Grid.Row="1"
+                AutomationProperties.AutomationId="Correlation_Surface"
+                Margin="20,0,20,20"
+                Background="#FFF7F8FA"
+                ClipToBounds="True">
+            <GroupBox AutomationProperties.AutomationId="Correlation_OverlapGroup"
+                      AutomationProperties.Name="Overlapping correlation targets"
+                      Canvas.Left="20"
+                      Canvas.Top="20"
+                      Width="400"
+                      Height="240"
+                      Header="Overlapping targets">
+                <Border AutomationProperties.AutomationId="Correlation_NestedAncestor"
+                        AutomationProperties.Name="Nested correlation ancestor"
+                        Margin="12"
+                        Padding="8"
+                        BorderBrush="#FF697386"
+                        BorderThickness="1"
+                        Background="#FFF0F3F7">
+                    <Canvas AutomationProperties.AutomationId="Correlation_OverlapCanvas"
+                            Background="Transparent">
+                        <Button AutomationProperties.AutomationId="Correlation_BackElement"
+                                AutomationProperties.Name="Back overlap target"
+                                Canvas.Left="36"
+                                Canvas.Top="36"
+                                Panel.ZIndex="1"
+                                Width="190"
+                                Height="96"
+                                Background="#FFB8D8F8"
+                                BorderBrush="#FF28659B"
+                                BorderThickness="2" />
+
+                        <Button AutomationProperties.AutomationId="Correlation_FrontElement"
+                                AutomationProperties.Name="Front overlap target"
+                                Canvas.Left="112"
+                                Canvas.Top="82"
+                                Panel.ZIndex="2"
+                                Width="190"
+                                Height="96"
+                                Background="#FFD8C8F0"
+                                BorderBrush="#FF6B3FA0"
+                                BorderThickness="2" />
+
+                        <Button AutomationProperties.AutomationId="Correlation_NestedLeaf"
+                                AutomationProperties.Name="Nested leaf target"
+                                Canvas.Left="20"
+                                Canvas.Top="154"
+                                Width="132"
+                                Height="36" />
+                    </Canvas>
+                </Border>
+            </GroupBox>
+
+            <Border AutomationProperties.AutomationId="Correlation_ClipHost"
+                    AutomationProperties.Name="Clipping host"
+                    Canvas.Left="520"
+                    Canvas.Top="20"
+                    Width="160"
+                    Height="140"
+                    ClipToBounds="True"
+                    BorderBrush="#FF237A63"
+                    BorderThickness="2"
+                    Background="#FFE3F5EF">
+                <Canvas AutomationProperties.AutomationId="Correlation_ClipCanvas"
+                        Background="Transparent"
+                        ClipToBounds="True">
+                    <Button AutomationProperties.AutomationId="Correlation_ClippedElement"
+                            AutomationProperties.Name="Partially clipped target"
+                            Canvas.Left="122"
+                            Canvas.Top="42"
+                            Width="110"
+                            Height="60" />
+                </Canvas>
+            </Border>
+
+            <Border AutomationProperties.AutomationId="Correlation_RegionPeer"
+                    AutomationProperties.Name="Region-only peer"
+                    Canvas.Left="460"
+                    Canvas.Top="190"
+                    Width="180"
+                    Height="90"
+                    BorderBrush="#FFA64D36"
+                    BorderThickness="2"
+                    Background="#FFF9E1D9">
+                <TextBlock HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           IsHitTestVisible="False"
+                           Text="Region-only peer" />
+            </Border>
+
+            <Button AutomationProperties.AutomationId="Correlation_ShowOwnedOverlay"
+                    AutomationProperties.Name="Show owned overlay"
+                    Canvas.Left="460"
+                    Canvas.Top="330"
+                    Width="180"
+                    Height="42"
+                    Click="ShowOwnedOverlay"
+                    Content="Show owned overlay" />
+
+            <Button AutomationProperties.AutomationId="Correlation_HideOwnedOverlay"
+                    AutomationProperties.Name="Hide owned overlay"
+                    Canvas.Left="460"
+                    Canvas.Top="382"
+                    Width="180"
+                    Height="42"
+                    Click="HideOwnedOverlay"
+                    Content="Hide owned overlay" />
+        </Canvas>
+    </Grid>
+</Window>

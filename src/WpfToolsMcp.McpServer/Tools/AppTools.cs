@@ -147,6 +147,7 @@ public static class AppTools
         int annotationThickness = 3,
         string? annotationLabel = null,
         bool returnBase64 = false,
+        ScreenshotCorrelationOptions? correlation = null,
         CancellationToken cancellationToken = default) =>
         TakeScreenshotWithViewport(
             sessions,
@@ -170,6 +171,7 @@ public static class AppTools
             annotationLabel,
             returnBase64,
             includeViewport: false,
+            correlation: correlation,
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "take_screenshot"), Description("Capture a screenshot of the main window or a specified window handle.")]
@@ -195,6 +197,7 @@ public static class AppTools
         [Description("Optional annotation label")] string? annotationLabel = null,
         [Description("Include base64 payload in response (defaults to false)")] bool returnBase64 = false,
         [Description("Include the window's client, outer, DPI, monitor, and state conditions in the response")] bool includeViewport = false,
+        [Description("Optionally correlate a capture-local point or region with bounded WPF/UIA candidates and annotations")] ScreenshotCorrelationOptions? correlation = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -222,7 +225,8 @@ public static class AppTools
                         AnnotationLabel: annotationLabel,
                         ReturnBase64: returnBase64)
                     {
-                        IncludeViewport = includeViewport
+                        IncludeViewport = includeViewport,
+                        Correlation = correlation
                     },
                     cancellationToken),
                 cancellationToken);

@@ -44,6 +44,7 @@
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.ObservationProbe\WpfToolsMcp.TestApp.ObservationProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.ProvenanceProbe\WpfToolsMcp.TestApp.ProvenanceProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Scroll\WpfToolsMcp.TestApp.Scroll.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.ScreenshotCorrelationProbe\WpfToolsMcp.TestApp.ScreenshotCorrelationProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Tabs\WpfToolsMcp.TestApp.Tabs.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.TreeView\WpfToolsMcp.TestApp.TreeView.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.ViewportProbe\WpfToolsMcp.TestApp.ViewportProbe.csproj" ReferenceOutputAssembly="false" />

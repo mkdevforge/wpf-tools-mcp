@@ -15,4 +15,8 @@
     </ProjectReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="WpfToolsMcp.SnapshotTests" />
+  </ItemGroup>
+
 </Project>

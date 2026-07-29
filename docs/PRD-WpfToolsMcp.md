@@ -117,9 +117,9 @@ see `README.md` for the current profile split and configuration.
 
 | Tool | Description | Returns |
 |---|---|---|
-| `list_windows` | Enumerate all windows of the target process | Window titles, handles, dimensions, process info |
+| `list_windows` | Enumerate all windows of the target process | Native window captions (UI Automation name fallback), handles, dimensions, process info |
 | `list_displays` | List connected displays and virtual screen bounds (multi-monitor diagnostics) | Virtual screen bounds + per-display bounds |
-| `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`) and viewport evidence (`includeViewport=true`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload and `ViewportConditions` |
+| `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`), viewport evidence (`includeViewport=true`), and diagnostics-only point/region correlation (`correlation`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload, `ViewportConditions`, and bounded WPF/UIA correlation evidence |
 | `get_visual_tree` | Return an inspection tree (UIA or WPF) for the main window or a subtree | Structured JSON. Configurable depth. `visibleOnly=true` means **in-viewport**; use `includeOffViewport=true` to include offscreen elements. |
 | `find_elements` | Find elements without dumping the full tree; minimal or standard result context | Deterministically ordered matches, returned/discovered/scanned counts, truncation metadata, and optional `elementId`s |
 | `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef on success; non-XPath ambiguity returns an `ambiguous_element` tool error with up to five structured, index-addressable candidate ElementRefs; ambiguous XPath segments return a path-specific indexing error |
@@ -232,6 +232,21 @@ the actual client size and DPI conditions instead of an approximate outer
 window size. Capture conditions are sampled immediately before and after the
 bitmap operation and must match; unstable attempts are discarded and retried,
 then reported as `screenshot_viewport_unstable` if stability cannot be reached.
+
+In the diagnostics profile, the optional `correlation` object maps a
+capture-local physical-pixel point or region to bounded WPF/UIA candidates.
+`backend=Both` preserves candidates from both trees, overlapping matches remain
+explicit, and optional nearest-first ancestors add context without a full tree
+dump. A point query reports one canonical physical screen point shared by both
+backends, including when capture scaling maps one image pixel to multiple screen
+pixels. Candidate annotations are enabled by default and are drawn into the
+returned artifact. Correlation always includes stable viewport, window, DPI,
+capture-mode, clipping, and obscuration context. It defaults to 8 candidates
+and 10,000 scanned nodes per backend, no ancestors, and at most 4 ancestors per
+candidate when enabled; the public hard caps are 25 candidates per backend,
+200,000 nodes per backend, and 20 ancestors per candidate. Returned, discovered,
+and scanned counts plus truncation metadata distinguish bounded evidence from
+a complete scan.
 
 ### Phase 2 — Upgraded inspection (Snoop, in-process)
 

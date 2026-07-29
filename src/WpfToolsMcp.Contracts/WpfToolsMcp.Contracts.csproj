@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="WpfToolsMcp.Agent" />
+    <InternalsVisibleTo Include="WpfToolsMcp.Automation" />
     <InternalsVisibleTo Include="WpfToolsMcp.SnapshotTests" />
   </ItemGroup>
 
