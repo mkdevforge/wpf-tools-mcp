@@ -28,6 +28,7 @@ public sealed class DialogsSnapshots
 
     // Common Item Dialog control IDs are stable across display languages.
     private const string NativeFileNameAutomationId = "1148";
+    private const string NativeFileNameControlType = "Edit";
     private const string NativeAcceptAutomationId = "1";
     private const string NativeCancelAutomationId = "2";
 
@@ -377,7 +378,8 @@ public sealed class DialogsSnapshots
                     ["windowHandle"] = nativeWindow.Handle,
                     ["locator"] = new Dictionary<string, object?>
                     {
-                        ["automationId"] = NativeFileNameAutomationId
+                        ["automationId"] = NativeFileNameAutomationId,
+                        ["controlTypeEquals"] = NativeFileNameControlType
                     }
                 });
 
@@ -404,7 +406,8 @@ public sealed class DialogsSnapshots
                     ["windowHandle"] = nativeWindow.Handle,
                     ["locator"] = new Dictionary<string, object?>
                     {
-                        ["automationId"] = NativeFileNameAutomationId
+                        ["automationId"] = NativeFileNameAutomationId,
+                        ["controlTypeEquals"] = NativeFileNameControlType
                     },
                     ["sequence"] = new object[]
                     {
@@ -419,7 +422,8 @@ public sealed class DialogsSnapshots
                 ["windowHandle"] = nativeWindow.Handle,
                 ["locator"] = new Dictionary<string, object?>
                 {
-                    ["automationId"] = NativeFileNameAutomationId
+                    ["automationId"] = NativeFileNameAutomationId,
+                    ["controlTypeEquals"] = NativeFileNameControlType
                 },
                 ["text"] = targetFilePath,
                 ["mode"] = "Replace"
@@ -502,6 +506,7 @@ public sealed class DialogsSnapshots
                 Assert.That(tree.BackendUsed, Is.EqualTo(InspectionBackend.Uia));
                 Assert.That(fileNameControl.BackendUsed, Is.EqualTo(InspectionBackend.Uia));
                 Assert.That(fileNameControl.Element.AutomationId, Is.EqualTo(NativeFileNameAutomationId));
+                Assert.That(fileNameControl.Element.Type, Is.EqualTo(NativeFileNameControlType).IgnoreCase);
                 Assert.That(openButtons.BackendUsed, Is.EqualTo(InspectionBackend.Uia));
                 Assert.That(openButtons.Matches, Has.Exactly(1).Matches<ElementRef>(element =>
                     string.Equals(element.AutomationId, NativeAcceptAutomationId, StringComparison.Ordinal) &&
