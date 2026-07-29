@@ -79,11 +79,15 @@ internal static partial class WpfVisualTreeInspector
             request.DataContextProperties,
             budget.MaxItems);
 
-        var remainingPayloadChars = budget.MaxPayloadChars;
         var results = new List<DiagnosticSectionResult>(requestedSections.Count);
 
         foreach (var section in requestedSections)
         {
+            // The server owns the one global request-order budget after UIA, WPF,
+            // and screenshot phases are combined. The pipe applies the same cap
+            // independently to each WPF section so it cannot pre-drop a later
+            // section that would fit in the final cross-phase order.
+            var remainingPayloadChars = budget.MaxPayloadChars;
             results.Add(section switch
             {
                 DiagnosticSection.VisualTree => CaptureWpfDiagnosticSection(
@@ -134,7 +138,8 @@ internal static partial class WpfVisualTreeInspector
                                 IncludeProvenance: false,
                                 MaxProvenanceCandidates: 0),
                             cancellationToken,
-                            visibleOnly: false);
+                            visibleOnly: false,
+                            maxNodes: budget.MaxNodes);
 
                         if (propertyNamesTruncated)
                         {
@@ -170,7 +175,8 @@ internal static partial class WpfVisualTreeInspector
                             MaxAncestors: Math.Min(budget.MaxDepth, budget.MaxItems),
                             MaxSiblings: budget.MaxItems,
                             MaxGridDefinitions: budget.MaxItems),
-                        cancellationToken),
+                        cancellationToken,
+                        maxResolutionNodes: budget.MaxNodes),
                     normalize: static response => response with
                     {
                         Element = StripDiagnosticAgentIds(response.Element)
@@ -195,7 +201,8 @@ internal static partial class WpfVisualTreeInspector
                             MaxProperties: budget.MaxItems,
                             ValueFormat: "string"),
                         cancellationToken,
-                        visibleOnly: false),
+                        visibleOnly: false,
+                        maxNodes: budget.MaxNodes),
                     normalize: response => NormalizeDiagnosticBindings(
                         response,
                         budget.MaxValueLength),
@@ -225,7 +232,8 @@ internal static partial class WpfVisualTreeInspector
                                 IncludeFrameworkProperties: false,
                                 PropertyAllowList: dataContextProperties),
                             cancellationToken,
-                            visibleOnly: false);
+                            visibleOnly: false,
+                            maxNodes: budget.MaxNodes);
 
                         if (dataContextPropertiesTruncated)
                         {

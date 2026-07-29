@@ -33,6 +33,10 @@ phase contributes evidence.
 The input exposes only named read sections and fixed budgets. It accepts no
 method names, scripts, expressions, loops, arbitrary arguments, or action
 steps. Screenshots are file-backed, omit Base64, and disable auto-scroll.
+Depth, item, and node limits apply to section structures that expose those
+dimensions. The value-length and payload budgets cover section evidence while
+the shared target identity, its reusable handle and XPath, and screenshot paths
+remain exact.
 
 ## Interaction Sequences
 

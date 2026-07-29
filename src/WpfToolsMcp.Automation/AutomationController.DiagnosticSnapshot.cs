@@ -26,6 +26,8 @@ public sealed partial class AutomationController
         var captureStartedTimestamp = clock.GetTimestamp();
         var captureId = Guid.NewGuid().ToString("N");
         var trace = BeginTraceSpan("capture_diagnostic_snapshot");
+        string? capturedScreenshotPath = null;
+        var retainCapturedScreenshot = false;
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(request.TimeoutMs);
@@ -132,21 +134,31 @@ public sealed partial class AutomationController
                             await GetElementPropertiesAsync(
                                 elementId: target.Element.ElementId,
                                 maxProperties: budget.MaxItems,
-                                cancellationToken: token).ConfigureAwait(false)),
+                                cancellationToken: token,
+                                requireStableElementIdentity: true,
+                                maxValueLength: budget.MaxValueLength,
+                                maxCollectionItems: budget.MaxItems,
+                                maxValueDepth: budget.MaxDepth,
+                                maxSerializedValueCharacters: Math.Min(
+                                    budget.MaxPayloadChars,
+                                    PropertyValueBudget.MaxSerializedValueCharacters)).ConfigureAwait(false)),
                         DiagnosticSection.VisualTree => ToEvidence(
                             await GetVisualTreeAsync(
-                                InspectionBackend.Uia,
-                                target.WindowHandle,
-                                new ElementLocator(XPath: target.Element.XPath),
-                                budget.MaxDepth,
-                                budget.MaxNodes,
+                                backend: InspectionBackend.Uia,
+                                windowHandle: target.WindowHandle,
+                                root: null,
+                                depth: budget.MaxDepth,
+                                maxNodes: budget.MaxNodes,
                                 visibleOnly: false,
                                 includeOffViewport: true,
                                 interactiveOnly: false,
-                                InteractiveMode.Heuristic,
-                                TreePreset.Minimal,
+                                interactiveMode: InteractiveMode.Heuristic,
+                                preset: TreePreset.Minimal,
                                 fields: null,
-                                token).ConfigureAwait(false)),
+                                cancellationToken: token,
+                                autoInject: false,
+                                rootElementId: target.Element.ElementId,
+                                requireStableRootIdentity: true).ConfigureAwait(false)),
                         _ => throw new ArgumentOutOfRangeException(nameof(section), section, null)
                     },
                     ClassifySectionFailure,
@@ -167,8 +179,9 @@ public sealed partial class AutomationController
                     _ => DiagnosticCaptureSource.Screenshot,
                     GetEvidenceSchema,
                     _ => "screenshot-1",
-                    async (_, token) => ToEvidence(
-                        await TakeScreenshotAsync(
+                    async (_, token) =>
+                    {
+                        var response = await TakeScreenshotAsync(
                             new TakeScreenshotRequest(
                                 WindowHandle: target.WindowHandle,
                                 ElementId: target.Element.ElementId,
@@ -178,18 +191,34 @@ public sealed partial class AutomationController
                                 FullyVisible: false,
                                 ReturnBase64: false)
                             {
-                                IncludeViewport = true
+                                IncludeViewport = true,
+                                RequireStableElementIdentity = true
                             },
                             token,
-                            autoInject: false).ConfigureAwait(false)),
+                            autoInject: false).ConfigureAwait(false);
+                        capturedScreenshotPath = response.Path;
+                        return ToEvidence(response);
+                    },
                     ClassifySectionFailure,
                     operationToken,
                     clock).ConfigureAwait(false);
                 captured[DiagnosticSection.Screenshot] = results[0];
             }
 
-            var ordered = request.Sections.Select(section => captured[section]).ToArray();
+            operationToken.ThrowIfCancellationRequested();
+            var ordered = DiagnosticSnapshotValueBudget.Apply(
+                request.Sections.Select(section => captured[section]).ToArray(),
+                budget.MaxValueLength);
             var bounded = DiagnosticSnapshotCoordinator.ApplyPayloadBudget(ordered, budget.MaxPayloadChars);
+            if (capturedScreenshotPath is not null)
+            {
+                var screenshotResult = bounded.Single(section => section.Section == DiagnosticSection.Screenshot);
+                retainCapturedScreenshot = screenshotResult.Data is not null;
+                if (!retainCapturedScreenshot)
+                {
+                    DiagnosticSnapshotScreenshotCleanup.Delete(capturedScreenshotPath);
+                }
+            }
             var captureCompletedTimestamp = clock.GetTimestamp();
             var captureCompletedAtUtc = captureStartedAtUtc + clock.GetElapsedTime(captureStartedTimestamp, captureCompletedTimestamp);
             var timingSkewMs = bounded.Count == 0
@@ -232,6 +261,11 @@ public sealed partial class AutomationController
         }
         finally
         {
+            if (!retainCapturedScreenshot && capturedScreenshotPath is not null)
+            {
+                DiagnosticSnapshotScreenshotCleanup.Delete(capturedScreenshotPath);
+            }
+
             trace?.Dispose();
         }
     }
@@ -294,6 +328,12 @@ public sealed partial class AutomationController
             locator: null,
             elementId: publicElementId,
             target.WindowHandle);
+        if (string.IsNullOrWhiteSpace(agentTarget.AgentElementId))
+        {
+            throw new InvalidOperationException(
+                $"stale_element: identity_unverifiable for '{publicElementId}'. Call resolve_element again.");
+        }
+
         var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
 
         var request = new CaptureWpfDiagnosticSnapshotRequest(
@@ -305,16 +345,13 @@ public sealed partial class AutomationController
             Budget: budget,
             PropertyNames: propertyNames,
             DataContextProperties: dataContextProperties);
-        var fallbackRequest = agentTarget.RecoveryLocator is null
-            ? null
-            : request with { Locator = agentTarget.RecoveryLocator, ElementId = null };
         var response = await CallCaptureDiagnosticSnapshotWhenSupportedAsync(
             GetAgentCapabilities(client),
             () => CallWpfAgentTargetAsync<CaptureWpfDiagnosticSnapshotResponse>(
                 client,
                 AgentProtocolCapabilities.CaptureDiagnosticSnapshot,
                 request,
-                fallbackRequest,
+                fallbackRequest: null,
                 agentTarget,
                 cancellationToken)).ConfigureAwait(false);
         var normalizedTarget = await StripAgentElementIdAsync(

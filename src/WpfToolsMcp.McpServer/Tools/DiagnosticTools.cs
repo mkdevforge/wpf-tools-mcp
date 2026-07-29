@@ -16,7 +16,7 @@ public static class DiagnosticTools
         [Description("Optional target locator; omit locator and elementId to target the window")] CoreElementLocator? locator = null,
         [Description("Optional resolved target elementId; mutually exclusive with locator")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
-        [Description("Shared depth, item, node, value-length, and payload budgets")] DiagnosticSnapshotBudget? budget = null,
+        [Description("Shared structural and section-evidence value/payload budgets")] DiagnosticSnapshotBudget? budget = null,
         [Description("Required dependency-property allowlist when WpfProperties is requested")] IReadOnlyList<string>? propertyNames = null,
         [Description("Optional root DataContext property allowlist")] IReadOnlyList<string>? dataContextProperties = null,
         [Description("Overall capture deadline in milliseconds (100-30000)")] int timeoutMs = 10_000,
@@ -24,12 +24,15 @@ public static class DiagnosticTools
         McpToolErrors.RunAsync(() =>
         {
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var targetWindowHandle = string.IsNullOrWhiteSpace(elementId)
+                ? effectiveWindowHandle
+                : windowHandle;
             return automation.RunExclusiveAsync(
                 () => automation.CaptureDiagnosticSnapshotAsync(
                     new CaptureDiagnosticSnapshotRequest(
                         SessionId: sessionId,
                         Sections: sections,
-                        WindowHandle: effectiveWindowHandle,
+                        WindowHandle: targetWindowHandle,
                         Locator: locator?.ToElementLocator(),
                         ElementId: elementId,
                         Budget: budget,

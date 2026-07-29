@@ -123,14 +123,21 @@ offsets, and one of `Success`, `Unavailable`, `Truncated`, or `Failed`.
 frames as simultaneous.
 
 The default shared budget is depth 3, 25 items, 200 scanned nodes, 1,000
-characters per value, and 40,000 serialized evidence characters. Hard limits
-are depth 6, 100 items, 1,000 nodes, 2,000 characters per value, and 100,000
-evidence characters. A call also has a 10-second deadline, configurable from
-100 ms through 30 seconds. Later evidence that cannot fit the remaining total
-payload budget is omitted with `Truncated/maxPayloadChars`; other requested
-sections still retain independent results. Screenshot evidence is a
-file-backed PNG with viewport conditions, never inline Base64, and capture does
-not auto-scroll the target.
+characters per evidence value, and 40,000 serialized evidence characters.
+Hard limits are depth 6, 100 items, 1,000 nodes, 2,000 characters per evidence
+value, and 100,000 evidence characters. Structural limits apply wherever a
+section exposes that dimension; for UIA property values they also bound nested
+collection depth and item count. The value limit covers strings inside section
+data and section messages. Shared target metadata, the target's reusable
+element ID and XPath, and screenshot paths remain exact rather than being
+rewritten. The payload limit covers section `Data`, not that common context
+metadata.
+
+A call also has a 10-second deadline, configurable from 100 ms through 30
+seconds. Later evidence that cannot fit the remaining total payload budget is
+omitted with `Truncated/maxPayloadChars`; other requested sections still retain
+independent results. Screenshot evidence is a file-backed PNG with viewport
+conditions, never inline Base64, and capture does not auto-scroll the target.
 
 The snapshot is deliberately read-only. Short interaction sequences have a
 different side-effect, retry, and policy lifecycle and are deferred to a
@@ -603,7 +610,7 @@ complete controls live in the `diagnostics` profile when exposing them in
 
 | Tool | Default response budget | Expanded evidence | Limit metadata |
 |---|---|---|---|
-| `capture_diagnostic_snapshot` | 1-8 explicitly selected sections; depth 3, 25 items, 200 nodes, 1,000 characters per value, and 40,000 evidence characters | Raise shared limits up to depth 6, 100 items, 1,000 nodes, 2,000 characters per value, and 100,000 evidence characters | Shared capture context and timing; per-section source, schema, capture group, `Status`, `Code`, `PayloadChars`, and timing offsets |
+| `capture_diagnostic_snapshot` | 1-8 explicitly selected sections; applicable section structures use depth 3, 25 items, and 200 nodes; section evidence strings use 1,000 characters; section `Data` shares 40,000 characters | Raise limits up to depth 6, 100 items, 1,000 nodes, 2,000 characters per evidence string, and 100,000 section-data characters | Exact shared target identity and timing; per-section source, schema, capture group, `Status`, `Code`, `PayloadChars`, and timing offsets |
 | `take_screenshot` correlation (`diagnostics`) | Per backend: 8 candidates while scanning at most 10,000 nodes; no ancestor chains | Set `maxCandidates` (1-25), `maxNodes` (1-200,000), `includeAncestors`, and `maxAncestors` (0-20); use `backend=Both` for combined WPF and UIA evidence | Per backend: `ReturnedCandidates`, `DiscoveredCandidates`, `ScannedNodes`, `ScanComplete`, `Truncated`, `TruncatedReason`, `DirectHitIndex`, `HasOverlaps`; aggregate `Ambiguous` |
 | `get_visual_tree` | Depth 4, at most 500 nodes, minimal fields | Set `depth`, `maxNodes`, `preset`, or `fields` in `diagnostics` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_uia_tree` | Depth 4, at most 200 nodes | Increase `depth` or `maxNodes` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |

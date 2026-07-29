@@ -326,6 +326,9 @@ public sealed record TakeScreenshotRequest(
 {
     public bool IncludeViewport { get; init; }
 
+    [JsonIgnore]
+    public bool RequireStableElementIdentity { get; init; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ScreenshotCorrelationOptions? Correlation { get; init; }
 }

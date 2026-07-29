@@ -963,7 +963,12 @@ public sealed partial class AutomationController : IDisposable
                     var elementId = request.ElementId!.Trim();
                     if (elementBackend == InspectionBackend.Uia)
                     {
-                        element = ResolveUiaElementById(window, rawWalker, elementId, out _);
+                        element = ResolveUiaElementById(
+                            window,
+                            rawWalker,
+                            elementId,
+                            out _,
+                            request.RequireStableElementIdentity);
 
                         if (autoScroll)
                         {
@@ -990,7 +995,8 @@ public sealed partial class AutomationController : IDisposable
                             autoScroll: autoScroll,
                             cancellationToken,
                             fullyVisible: fullyVisible,
-                            throwIfScrollFailed: autoScroll).ConfigureAwait(false);
+                            throwIfScrollFailed: autoScroll,
+                            allowHandleRecovery: !request.RequireStableElementIdentity).ConfigureAwait(false);
                     }
                     else
                     {
@@ -1153,7 +1159,8 @@ public sealed partial class AutomationController : IDisposable
                                     autoScroll: true,
                                     cancellationToken,
                                     fullyVisible: fullyVisible,
-                                    throwIfScrollFailed: true).ConfigureAwait(false);
+                                    throwIfScrollFailed: true,
+                                    allowHandleRecovery: !request.RequireStableElementIdentity).ConfigureAwait(false);
                             }
                             else if (request.Locator is not null)
                             {
@@ -8379,13 +8386,26 @@ public sealed partial class AutomationController : IDisposable
         TreePreset preset = TreePreset.Minimal,
         IReadOnlyList<string>? fields = null,
         CancellationToken cancellationToken = default,
-        bool autoInject = false)
+        bool autoInject = false,
+        string? rootElementId = null,
+        bool requireStableRootIdentity = false)
     {
         var trace = BeginTraceSpan("get_visual_tree");
         try
         {
             var application = EnsureAttached();
             var automation = EnsureAutomation();
+            var hasRootElementId = !string.IsNullOrWhiteSpace(rootElementId);
+
+            if (root is not null && hasRootElementId)
+            {
+                throw new ArgumentException("Provide either root or rootElementId, not both.");
+            }
+
+            if (hasRootElementId && backend != InspectionBackend.Uia)
+            {
+                throw new ArgumentException("rootElementId is supported only with the UIA backend.");
+            }
 
             if (depth <= 0)
             {
@@ -8500,8 +8520,35 @@ public sealed partial class AutomationController : IDisposable
 
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
             var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
-            var rootElement = root is null ? window : ResolveElement(window, root, controlWalker, rawWalker);
-            var rootXPath = ComputeXPath(window, rootElement, rawWalker);
+            AutomationElement rootElement;
+            string rootXPath;
+            if (hasRootElementId)
+            {
+                var id = rootElementId!.Trim();
+                var handle = RequireHandle(id);
+                var resolvedWindowHandle = window.Properties.NativeWindowHandle.Value.ToInt64();
+                if (handle.Backend != InspectionBackend.Uia)
+                {
+                    throw new InvalidOperationException($"elementId '{id}' is not a UIA handle.");
+                }
+
+                if (handle.WindowHandle != resolvedWindowHandle)
+                {
+                    throw new ArgumentException("windowHandle does not match the rootElementId window.");
+                }
+
+                rootElement = ResolveUiaElementById(
+                    window,
+                    rawWalker,
+                    id,
+                    out rootXPath,
+                    requireStableRootIdentity);
+            }
+            else
+            {
+                rootElement = root is null ? window : ResolveElement(window, root, controlWalker, rawWalker);
+                rootXPath = ComputeXPath(window, rootElement, rawWalker);
+            }
 
             var fieldSet = TreeFieldSet.Resolve(preset, fields);
             var context = new UiaTreeBuildContext(
@@ -8889,7 +8936,12 @@ public sealed partial class AutomationController : IDisposable
         long? windowHandle = null,
         ElementPropertiesPreset preset = ElementPropertiesPreset.Summary,
         int maxProperties = 25,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool requireStableElementIdentity = false,
+        int maxValueLength = PropertyValueBudget.MaxStringLength,
+        int maxCollectionItems = PropertyValueBudget.MaxCollectionItems,
+        int maxValueDepth = PropertyValueBudget.MaxValueDepth,
+        int maxSerializedValueCharacters = PropertyValueBudget.MaxSerializedValueCharacters)
     {
         var trace = BeginTraceSpan("get_element_properties");
         try
@@ -8953,14 +9005,42 @@ public sealed partial class AutomationController : IDisposable
 
             if (handle.Backend == InspectionBackend.Uia)
             {
-                element = ResolveUiaElementById(window, rawWalker, id, out xpath);
+                element = ResolveUiaElementById(
+                    window,
+                    rawWalker,
+                    id,
+                    out xpath,
+                    requireStableElementIdentity);
             }
             else
             {
-                var resolution = ResolveUiaElementByWpfHandleForProperties(window, controlWalker, rawWalker, id, handle);
-                element = resolution.Element;
-                xpath = resolution.XPath;
-                uiaMapping = resolution.UiaMapping;
+                if (requireStableElementIdentity)
+                {
+                    _ = await ResolveWpfElementRefAsync(
+                        handle,
+                        handle.WindowHandle,
+                        visibleOnly: false,
+                        includeOffViewport: true,
+                        interactiveOnly: false,
+                        interactiveMode: InteractiveMode.Heuristic,
+                        cancellationToken,
+                        allowHandleRecovery: false).ConfigureAwait(false);
+
+                    element = ResolveUiaElementByWpfHandle(
+                        window,
+                        controlWalker,
+                        rawWalker,
+                        id,
+                        handle,
+                        out xpath);
+                }
+                else
+                {
+                    var permissive = ResolveUiaElementByWpfHandleForProperties(window, controlWalker, rawWalker, id, handle);
+                    element = permissive.Element;
+                    xpath = permissive.XPath;
+                    uiaMapping = permissive.UiaMapping;
+                }
             }
         }
         else
@@ -8995,7 +9075,12 @@ public sealed partial class AutomationController : IDisposable
             }
         }
 
-        var valueBudget = new PropertyValueBudget();
+        var valueBudget = new PropertyValueBudget(
+            maxStringLength: maxValueLength,
+            maxCollectionItems: maxCollectionItems,
+            maxValueDepth: maxValueDepth,
+            maxSerializedValueCharacters: maxSerializedValueCharacters,
+            maxXPathLength: maxValueLength);
         var boundedXPath = BoundedPropertyValueSerializer.SerializeXPath(
             xpath,
             valueBudget,

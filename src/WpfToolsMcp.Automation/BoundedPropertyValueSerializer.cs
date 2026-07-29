@@ -25,7 +25,33 @@ internal sealed class PropertyValueBudget
     internal const int MaxSerializedValueCharacters = 20_000;
     internal const int MaxXPathLength = 2_000;
 
-    private int _remainingCharacters = MaxSerializedValueCharacters;
+    private readonly int _maxStringLength;
+    private readonly int _maxXPathLength;
+    private int _remainingCharacters;
+
+    internal PropertyValueBudget(
+        int maxStringLength = MaxStringLength,
+        int maxCollectionItems = MaxCollectionItems,
+        int maxValueDepth = MaxValueDepth,
+        int maxSerializedValueCharacters = MaxSerializedValueCharacters,
+        int maxXPathLength = MaxXPathLength)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxStringLength, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxCollectionItems, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxValueDepth, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxSerializedValueCharacters, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxXPathLength, 1);
+
+        _maxStringLength = maxStringLength;
+        MaxCollectionItemsForCapture = maxCollectionItems;
+        MaxValueDepthForCapture = maxValueDepth;
+        _remainingCharacters = maxSerializedValueCharacters;
+        _maxXPathLength = maxXPathLength;
+    }
+
+    internal int MaxCollectionItemsForCapture { get; }
+
+    internal int MaxValueDepthForCapture { get; }
 
     internal PropertyValueTruncation Truncation { get; private set; }
 
@@ -34,13 +60,13 @@ internal sealed class PropertyValueBudget
 
     internal string? ApplyStringLimit(string? value)
     {
-        if (value is null || value.Length <= MaxStringLength)
+        if (value is null || value.Length <= _maxStringLength)
         {
             return value;
         }
 
         Truncation |= PropertyValueTruncation.StringLength;
-        var length = MaxStringLength;
+        var length = _maxStringLength;
         if (char.IsHighSurrogate(value[length - 1]) && char.IsLowSurrogate(value[length]))
         {
             length--;
@@ -69,6 +95,8 @@ internal sealed class PropertyValueBudget
         Truncation |= PropertyValueTruncation.ValueCharacters;
         return false;
     }
+
+    internal bool IsXPathTooLong(string value) => value.Length > _maxXPathLength;
 }
 
 internal static class BoundedPropertyValueSerializer
@@ -97,7 +125,7 @@ internal static class BoundedPropertyValueSerializer
         PropertyValueBudget budget,
         out bool omitted)
     {
-        if (value.Length > PropertyValueBudget.MaxXPathLength)
+        if (budget.IsXPathTooLong(value))
         {
             budget.Mark(PropertyValueTruncation.XPathLength);
             omitted = true;
@@ -346,7 +374,7 @@ internal static class BoundedPropertyValueSerializer
         int depth,
         PropertyValueBudget budget)
     {
-        if (depth >= PropertyValueBudget.MaxValueDepth)
+        if (depth >= budget.MaxValueDepthForCapture)
         {
             budget.Mark(PropertyValueTruncation.ValueDepth);
             return SerializeStringNode("<truncated:maxValueDepth>", budget);
@@ -364,7 +392,7 @@ internal static class BoundedPropertyValueSerializer
             enumerator = enumerable.GetEnumerator();
             while (enumerator.MoveNext())
             {
-                if (array.Count >= PropertyValueBudget.MaxCollectionItems)
+                if (array.Count >= budget.MaxCollectionItemsForCapture)
                 {
                     budget.Mark(PropertyValueTruncation.CollectionItems);
                     break;
@@ -390,7 +418,7 @@ internal static class BoundedPropertyValueSerializer
         }
         catch (Exception ex)
         {
-            if (array.Count < PropertyValueBudget.MaxCollectionItems && !budget.IsCharacterLimitReached)
+            if (array.Count < budget.MaxCollectionItemsForCapture && !budget.IsCharacterLimitReached)
             {
                 if (array.Count == 0 || budget.TryConsume(1))
                 {
@@ -401,7 +429,7 @@ internal static class BoundedPropertyValueSerializer
                     }
                 }
             }
-            else if (array.Count >= PropertyValueBudget.MaxCollectionItems)
+            else if (array.Count >= budget.MaxCollectionItemsForCapture)
             {
                 budget.Mark(PropertyValueTruncation.CollectionItems);
             }

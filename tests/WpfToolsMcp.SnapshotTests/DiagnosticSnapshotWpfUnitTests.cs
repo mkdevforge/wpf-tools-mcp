@@ -178,6 +178,61 @@ public sealed class DiagnosticSnapshotWpfUnitTests
     }
 
     [Test]
+    public void Agent_keeps_individually_bounded_sections_for_server_side_global_ordering()
+    {
+        const string targetName = "DiagnosticCrossPhaseBudgetTarget";
+        var ownerId = $"diagnostic-cross-phase-budget-{Guid.NewGuid():N}";
+        var target = new Border
+        {
+            Name = targetName,
+            Tag = new string('t', 500),
+            DataContext = new GenerationTuple(9, new string('d', 500))
+        };
+        var window = CreateTestWindow(target, "Diagnostic cross-phase budget unit test");
+
+        try
+        {
+            ShowAndLayout(window);
+            var baseline = WpfVisualTreeInspector.CaptureDiagnosticSnapshot(
+                ownerId,
+                CreateRequest(
+                    window,
+                    targetName,
+                    sections: [DiagnosticSection.WpfProperties, DiagnosticSection.DataContext],
+                    budget: new DiagnosticSnapshotBudget(MaxPayloadChars: DiagnosticSnapshotLimits.MaxPayloadChars),
+                    propertyNames: ["Tag"],
+                    dataContextProperties: ["Label"]),
+                CancellationToken.None);
+            var perSectionCap = baseline.Sections.Max(section => section.PayloadChars) + 10;
+            Assert.That(
+                baseline.Sections.Sum(section => section.PayloadChars),
+                Is.GreaterThan(perSectionCap));
+
+            var bounded = WpfVisualTreeInspector.CaptureDiagnosticSnapshot(
+                ownerId,
+                CreateRequest(
+                    window,
+                    targetName,
+                    sections: [DiagnosticSection.WpfProperties, DiagnosticSection.DataContext],
+                    budget: new DiagnosticSnapshotBudget(MaxPayloadChars: perSectionCap),
+                    propertyNames: ["Tag"],
+                    dataContextProperties: ["Label"]),
+                CancellationToken.None);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(bounded.Sections.All(section => section.Data is not null), Is.True);
+                Assert.That(bounded.Sections.All(section => section.PayloadChars <= perSectionCap), Is.True);
+                Assert.That(bounded.Sections.Sum(section => section.PayloadChars), Is.GreaterThan(perSectionCap));
+            });
+        }
+        finally
+        {
+            CloseAndRelease(window, ownerId);
+        }
+    }
+
+    [Test]
     public void Property_and_binding_values_honor_max_value_length()
     {
         const string targetName = "DiagnosticValueBudgetTarget";

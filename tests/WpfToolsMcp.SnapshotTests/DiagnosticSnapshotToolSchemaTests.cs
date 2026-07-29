@@ -121,11 +121,24 @@ public sealed class DiagnosticSnapshotToolSchemaTests
 
             AssertNameArrayBounds(properties.GetProperty("propertyNames"), "propertyNames");
             AssertNameArrayBounds(properties.GetProperty("dataContextProperties"), "dataContextProperties");
+            AssertNonWhitespaceString(properties.GetProperty("elementId"), "elementId");
 
             Assert.That(
                 ForbidsRequiredPropertiesTogether(root, "locator", "elementId"),
                 Is.True,
                 "The schema must reject requests that provide both locator and elementId.");
+            Assert.That(
+                RequiresPropertyForSection(root, "WpfProperties", "propertyNames"),
+                Is.True,
+                "WpfProperties must require propertyNames.");
+            Assert.That(
+                RequiresSectionForProperty(root, "propertyNames", "WpfProperties"),
+                Is.True,
+                "propertyNames must only be accepted with WpfProperties.");
+            Assert.That(
+                RequiresSectionForProperty(root, "dataContextProperties", "DataContext"),
+                Is.True,
+                "dataContextProperties must only be accepted with DataContext.");
 
             var exposedFields = EnumerateExposedPropertyNames(root).ToHashSet(StringComparer.OrdinalIgnoreCase);
             Assert.That(
@@ -151,10 +164,79 @@ public sealed class DiagnosticSnapshotToolSchemaTests
 
         Assert.Multiple(() =>
         {
+            Assert.That(ReadInt32(array, "minItems"), Is.EqualTo(1));
             Assert.That(ReadInt32(array, "maxItems"), Is.EqualTo(DiagnosticSnapshotLimits.MaxPropertyNames));
             Assert.That(ReadBoolean(array, "uniqueItems"), Is.True);
+            Assert.That(ReadInt32(items, "minLength"), Is.EqualTo(1));
             Assert.That(ReadInt32(items, "maxLength"), Is.EqualTo(DiagnosticSnapshotLimits.MaxPropertyNameLength));
+            Assert.That(items.GetProperty("pattern").GetString(), Is.EqualTo("\\S"));
         });
+    }
+
+    private static void AssertNonWhitespaceString(JsonElement schema, string label)
+    {
+        var value = RequireSchemaAllowingType(schema, "string", label);
+        Assert.Multiple(() =>
+        {
+            Assert.That(ReadInt32(value, "minLength"), Is.EqualTo(1));
+            Assert.That(value.GetProperty("pattern").GetString(), Is.EqualTo("\\S"));
+        });
+    }
+
+    private static bool RequiresPropertyForSection(
+        JsonElement root,
+        string section,
+        string propertyName) =>
+        EnumerateAllOf(root).Any(rule =>
+            TryReadContainedSection(rule, "if", out var requiredSection) &&
+            string.Equals(requiredSection, section, StringComparison.Ordinal) &&
+            TryReadRequiredProperty(rule, "then", out var requiredProperty) &&
+            string.Equals(requiredProperty, propertyName, StringComparison.Ordinal));
+
+    private static bool RequiresSectionForProperty(
+        JsonElement root,
+        string propertyName,
+        string section) =>
+        EnumerateAllOf(root).Any(rule =>
+            TryReadRequiredProperty(rule, "if", out var requiredProperty) &&
+            string.Equals(requiredProperty, propertyName, StringComparison.Ordinal) &&
+            TryReadContainedSection(rule, "then", out var requiredSection) &&
+            string.Equals(requiredSection, section, StringComparison.Ordinal));
+
+    private static IEnumerable<JsonElement> EnumerateAllOf(JsonElement root) =>
+        root.TryGetProperty("allOf", out var allOf) && allOf.ValueKind == JsonValueKind.Array
+            ? allOf.EnumerateArray().ToArray()
+            : [];
+
+    private static bool TryReadContainedSection(
+        JsonElement rule,
+        string phase,
+        out string? section)
+    {
+        section = null;
+        return rule.TryGetProperty(phase, out var condition) &&
+               condition.TryGetProperty("properties", out var properties) &&
+               properties.TryGetProperty("sections", out var sections) &&
+               sections.TryGetProperty("contains", out var contains) &&
+               contains.TryGetProperty("const", out var value) &&
+               (section = value.GetString()) is not null;
+    }
+
+    private static bool TryReadRequiredProperty(
+        JsonElement rule,
+        string phase,
+        out string? propertyName)
+    {
+        propertyName = null;
+        if (!rule.TryGetProperty(phase, out var condition) ||
+            !condition.TryGetProperty("required", out var required) ||
+            required.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        propertyName = required.EnumerateArray().Select(value => value.GetString()).FirstOrDefault();
+        return propertyName is not null;
     }
 
     private static JsonElement RequireSchemaAllowingType(JsonElement schema, string type, string label) =>

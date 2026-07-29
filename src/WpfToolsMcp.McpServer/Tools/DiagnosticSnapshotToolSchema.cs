@@ -36,7 +36,10 @@ internal static class DiagnosticSnapshotToolSchema
                 {
                     ["required"] = new JsonArray("locator", "elementId")
                 }
-            });
+            },
+            RequirePropertyForSection(DiagnosticSection.WpfProperties, "propertyNames"),
+            RequireSectionForProperty("propertyNames", DiagnosticSection.WpfProperties),
+            RequireSectionForProperty("dataContextProperties", DiagnosticSection.DataContext));
 
         if (FindSchema(properties["sections"], "items") is JsonObject sections)
         {
@@ -78,6 +81,7 @@ internal static class DiagnosticSnapshotToolSchema
         {
             items["minLength"] = 1;
             items["maxLength"] = DiagnosticSnapshotLimits.MaxPropertyNameLength;
+            items["pattern"] = "\\S";
         }
     }
 
@@ -86,8 +90,63 @@ internal static class DiagnosticSnapshotToolSchema
         if (FindSchema(node, "type", expectedValue: "string") is JsonObject value)
         {
             value["minLength"] = 1;
+            value["pattern"] = "\\S";
         }
     }
+
+    private static JsonObject RequirePropertyForSection(
+        DiagnosticSection section,
+        string propertyName) =>
+        new()
+        {
+            ["if"] = new JsonObject
+            {
+                ["properties"] = new JsonObject
+                {
+                    ["sections"] = ContainsSection(section)
+                },
+                ["required"] = new JsonArray("sections")
+            },
+            ["then"] = new JsonObject
+            {
+                ["required"] = new JsonArray(propertyName),
+                ["properties"] = new JsonObject
+                {
+                    [propertyName] = new JsonObject { ["type"] = "array" }
+                }
+            }
+        };
+
+    private static JsonObject RequireSectionForProperty(
+        string propertyName,
+        DiagnosticSection section) =>
+        new()
+        {
+            ["if"] = new JsonObject
+            {
+                ["properties"] = new JsonObject
+                {
+                    [propertyName] = new JsonObject { ["type"] = "array" }
+                },
+                ["required"] = new JsonArray(propertyName)
+            },
+            ["then"] = new JsonObject
+            {
+                ["properties"] = new JsonObject
+                {
+                    ["sections"] = ContainsSection(section)
+                }
+            }
+        };
+
+    private static JsonObject ContainsSection(DiagnosticSection section) =>
+        new()
+        {
+            ["contains"] = new JsonObject
+            {
+                ["const"] = section.ToString()
+            }
+        };
 
     private static void RefineInteger(JsonNode? node, int minimum, int maximum)
     {
