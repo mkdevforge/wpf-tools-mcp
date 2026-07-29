@@ -476,7 +476,9 @@ common-workflow rationale plus inventory and compact-schema contract coverage.
 1. Call `launch_app` or `attach_to_app`, optionally set the session
    `interactionPolicy`, and retain the returned `sessionId`.
 2. Use `list_windows` to choose among top-level windows. Call
-   `set_active_window` only when foreground activation is intended.
+   `set_active_window` only when foreground activation is intended. Window
+   titles use native captions when available, with the UI Automation name as a
+   fallback and accepted selection alias.
 3. For responsive-layout evidence, use `set_window_viewport` to establish the
    exact client size and request `includeViewport` with screenshots. In the
    diagnostics profile, add `correlation` to map a small image region to

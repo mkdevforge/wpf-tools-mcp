@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Snoop.Data.Tree;
@@ -532,11 +533,21 @@ internal static partial class WpfVisualTreeInspector
         return separator <= 0 ? null : xpath[..separator];
     }
 
-    private static int GetScreenshotCorrelationIdentityRank(DependencyObject element)
+    internal static int GetScreenshotCorrelationIdentityRank(DependencyObject element)
     {
         if (!string.IsNullOrWhiteSpace(GetAutomationId(element)))
         {
             return 3;
+        }
+
+        if (!string.IsNullOrWhiteSpace(GetScreenshotCorrelationAutomationName(element)))
+        {
+            return 2;
+        }
+
+        if (IsScreenshotCorrelationControlTemplatePart(element))
+        {
+            return 0;
         }
 
         if (!string.IsNullOrWhiteSpace(GetName(element)))
@@ -545,6 +556,32 @@ internal static partial class WpfVisualTreeInspector
         }
 
         return element is Control ? 1 : 0;
+    }
+
+    private static string? GetScreenshotCorrelationAutomationName(DependencyObject element)
+    {
+        try
+        {
+            var name = AutomationProperties.GetName(element);
+            return string.IsNullOrWhiteSpace(name) ? null : name;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool IsScreenshotCorrelationControlTemplatePart(DependencyObject element)
+    {
+        try
+        {
+            return element is FrameworkElement { TemplatedParent: Control }
+                or FrameworkContentElement { TemplatedParent: Control };
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static ContractRect? GetScreenshotCorrelationBounds(DependencyObject element)

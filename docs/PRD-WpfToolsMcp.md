@@ -117,7 +117,7 @@ see `README.md` for the current profile split and configuration.
 
 | Tool | Description | Returns |
 |---|---|---|
-| `list_windows` | Enumerate all windows of the target process | Window titles, handles, dimensions, process info |
+| `list_windows` | Enumerate all windows of the target process | Native window captions (UI Automation name fallback), handles, dimensions, process info |
 | `list_displays` | List connected displays and virtual screen bounds (multi-monitor diagnostics) | Virtual screen bounds + per-display bounds |
 | `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`), viewport evidence (`includeViewport=true`), and diagnostics-only point/region correlation (`correlation`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload, `ViewportConditions`, and bounded WPF/UIA correlation evidence |
 | `get_visual_tree` | Return an inspection tree (UIA or WPF) for the main window or a subtree | Structured JSON. Configurable depth. `visibleOnly=true` means **in-viewport**; use `includeOffViewport=true` to include offscreen elements. |

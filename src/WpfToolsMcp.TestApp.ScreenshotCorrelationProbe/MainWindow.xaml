@@ -127,8 +127,17 @@
                     Canvas.Top="330"
                     Width="180"
                     Height="42"
-                    Click="ToggleOwnedOverlay"
+                    Click="ShowOwnedOverlay"
                     Content="Show owned overlay" />
+
+            <Button AutomationProperties.AutomationId="Correlation_HideOwnedOverlay"
+                    AutomationProperties.Name="Hide owned overlay"
+                    Canvas.Left="460"
+                    Canvas.Top="382"
+                    Width="180"
+                    Height="42"
+                    Click="HideOwnedOverlay"
+                    Content="Hide owned overlay" />
         </Canvas>
     </Grid>
 </Window>

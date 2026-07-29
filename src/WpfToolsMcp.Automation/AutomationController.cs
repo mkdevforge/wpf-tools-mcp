@@ -2118,7 +2118,7 @@ public sealed partial class AutomationController : IDisposable
             var response = new FocusWindowResponse(
                 Focused: true,
                 Handle: window.Properties.NativeWindowHandle.Value.ToInt64(),
-                Title: window.Title,
+                Title: GetWindowTitle(window),
                 Effects: effects.ToContract());
 
             trace?.SetSummary($"handle={response.Handle} title={response.Title}");
@@ -2149,7 +2149,7 @@ public sealed partial class AutomationController : IDisposable
 
         return Task.FromResult(new GetActiveWindowResponse(
             Handle: window.Properties.NativeWindowHandle.Value.ToInt64(),
-            Title: window.Title));
+            Title: GetWindowTitle(window)));
     }
 
     public async Task<ClickElementResponse> ClickElementAsync(
@@ -8053,6 +8053,12 @@ public sealed partial class AutomationController : IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool ClientToScreen(IntPtr hwnd, ref POINT lpPoint);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetWindowTextLength(IntPtr windowHandle);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetWindowText(IntPtr windowHandle, StringBuilder text, int maxCount);
+
     [StructLayout(LayoutKind.Sequential)]
     private readonly struct RECT
     {
@@ -9196,7 +9202,7 @@ public sealed partial class AutomationController : IDisposable
                     return;
                 }
 
-                if (string.IsNullOrWhiteSpace(window.Title))
+                if (string.IsNullOrWhiteSpace(GetWindowTitle(window)))
                 {
                     return;
                 }
@@ -9273,22 +9279,39 @@ public sealed partial class AutomationController : IDisposable
 
         var windows = GetAllTopLevelWindows(application, automation).ToArray();
 
-        var exact = windows
-            .Where(w => w is not null && string.Equals(w.Title, title, StringComparison.OrdinalIgnoreCase))
+        var exactNative = windows
+            .Where(w => w is not null && string.Equals(GetWindowTitle(w), title, StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
-        if (exact.Length == 1)
+        if (exactNative.Length == 1)
         {
-            return exact[0];
+            return exactNative[0];
         }
 
-        if (exact.Length > 1)
+        if (exactNative.Length > 1)
+        {
+            throw new InvalidOperationException($"Multiple windows found with title '{title}'. Provide windowHandle instead.");
+        }
+
+        var exactAutomationName = windows
+            .Where(w => w is not null &&
+                string.Equals(GetWindowAutomationName(w), title, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (exactAutomationName.Length == 1)
+        {
+            return exactAutomationName[0];
+        }
+
+        if (exactAutomationName.Length > 1)
         {
             throw new InvalidOperationException($"Multiple windows found with title '{title}'. Provide windowHandle instead.");
         }
 
         var contains = windows
-            .Where(w => w is not null && w.Title?.Contains(title, StringComparison.OrdinalIgnoreCase) == true)
+            .Where(w => w is not null &&
+                (GetWindowTitle(w).Contains(title, StringComparison.OrdinalIgnoreCase) ||
+                 GetWindowAutomationName(w).Contains(title, StringComparison.OrdinalIgnoreCase)))
             .ToArray();
 
         if (contains.Length == 1)
@@ -9308,7 +9331,7 @@ public sealed partial class AutomationController : IDisposable
     {
         var bounds = window.BoundingRectangle;
         return new WindowInfo(
-            Title: window.Title,
+            Title: GetWindowTitle(window),
             Handle: window.Properties.NativeWindowHandle.Value.ToInt64(),
             Bounds: new Rect(
                 X: bounds.Left,
@@ -9317,6 +9340,43 @@ public sealed partial class AutomationController : IDisposable
                 Height: bounds.Height),
             IsVisible: !window.IsOffscreen,
             IsEnabled: window.IsEnabled);
+    }
+
+    private static string GetWindowTitle(Window window)
+    {
+        var handle = window.Properties.NativeWindowHandle.Value;
+        if (handle != IntPtr.Zero && OperatingSystem.IsWindows())
+        {
+            try
+            {
+                var length = GetWindowTextLength(handle);
+                if (length > 0)
+                {
+                    var title = new StringBuilder(length + 1);
+                    if (GetWindowText(handle, title, title.Capacity) > 0)
+                    {
+                        return title.ToString();
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return GetWindowAutomationName(window);
+    }
+
+    private static string GetWindowAutomationName(Window window)
+    {
+        try
+        {
+            return window.Title ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private enum ActionKind

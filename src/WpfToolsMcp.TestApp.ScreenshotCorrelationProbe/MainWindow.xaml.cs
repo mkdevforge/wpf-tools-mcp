@@ -13,14 +13,8 @@ public partial class MainWindow : Window
         InitializeComponent();
     }
 
-    private void ToggleOwnedOverlay(object sender, RoutedEventArgs e)
+    private void ShowOwnedOverlay(object sender, RoutedEventArgs e)
     {
-        if (_ownedOverlay is { IsVisible: true })
-        {
-            _ownedOverlay.Close();
-            return;
-        }
-
         if (_ownedOverlay is null)
         {
             _ownedOverlay = new Window
@@ -42,7 +36,16 @@ public partial class MainWindow : Window
             _ownedOverlay.Closed += (_, _) => _ownedOverlay = null;
         }
 
-        _ownedOverlay.Show();
+        if (!_ownedOverlay.IsVisible)
+        {
+            _ownedOverlay.Show();
+        }
+
         _ownedOverlay.Activate();
+    }
+
+    private void HideOwnedOverlay(object sender, RoutedEventArgs e)
+    {
+        _ownedOverlay?.Close();
     }
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading;
 using WpfToolsMcp.Automation;
 using WpfToolsMcp.Contracts;
@@ -13,6 +14,7 @@ public sealed class ScreenshotCorrelationTests
     private McpTestContext _mcp = null!;
     private string _sessionId = string.Empty;
     private TakeScreenshotResponse _clientCapture = null!;
+    private WindowInfo _mainWindow = null!;
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -43,6 +45,11 @@ public sealed class ScreenshotCorrelationTests
         _clientCapture = await TakeScreenshotAsync(
             correlation: null,
             outputPath: CreateArtifactPath("client-baseline"));
+        var windows = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId
+        });
+        _mainWindow = windows.Windows.Single(window => window.Handle == _clientCapture.WindowHandleUsed);
     }
 
     [OneTimeTearDown]
@@ -79,6 +86,30 @@ public sealed class ScreenshotCorrelationTests
             {
             }
         }
+    }
+
+    [Test]
+    public async Task Window_titles_report_native_captions_and_accept_the_uia_name_as_an_alias()
+    {
+        var nativeTitle = await _mcp.CallToolAsync<FocusWindowResponse>("set_active_window", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["title"] = _mainWindow.Title
+        });
+        var uiaAlias = await _mcp.CallToolAsync<FocusWindowResponse>("set_active_window", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["title"] = "Screenshot correlation probe"
+        });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_mainWindow.Title, Is.EqualTo("WPF Tools MCP ScreenshotCorrelationProbe TestApp"));
+            Assert.That(nativeTitle.Handle, Is.EqualTo(_mainWindow.Handle));
+            Assert.That(nativeTitle.Title, Is.EqualTo(_mainWindow.Title));
+            Assert.That(uiaAlias.Handle, Is.EqualTo(_mainWindow.Handle));
+            Assert.That(uiaAlias.Title, Is.EqualTo(_mainWindow.Title));
+        });
     }
 
     [Test]
@@ -134,10 +165,12 @@ public sealed class ScreenshotCorrelationTests
                 Does.Contain("Correlation_FrontElement"));
             Assert.That(
                 wpf.Candidates.Select(candidate => candidate.Element.AutomationId),
-                Does.Contain("Correlation_BackElement"));
+                Does.Contain("Correlation_BackElement"),
+                DescribeCandidates(wpf.Candidates));
             Assert.That(
                 wpf.Candidates.Select(candidate => candidate.Element.AutomationId),
-                Does.Contain("Correlation_FrontElement"));
+                Does.Contain("Correlation_FrontElement"),
+                DescribeCandidates(wpf.Candidates));
             Assert.That(
                 correlation.Backends.SelectMany(result => result.Candidates)
                     .Where(candidate => candidate.Ancestors is not null)
@@ -185,7 +218,8 @@ public sealed class ScreenshotCorrelationTests
         {
             Assert.That(
                 visibleWpf.Candidates.Select(candidate => candidate.Element.AutomationId),
-                Does.Contain("Correlation_ClippedElement"));
+                Does.Contain("Correlation_ClippedElement"),
+                DescribeCandidates(visibleWpf.Candidates));
             Assert.That(
                 clippedAwayWpf.Candidates.Select(candidate => candidate.Element.AutomationId),
                 Does.Not.Contain("Correlation_ClippedElement"));
@@ -282,33 +316,22 @@ public sealed class ScreenshotCorrelationTests
     [Test]
     public async Task Screen_capture_reports_an_owned_overlay_as_potential_obscuration()
     {
-        _ = await _mcp.CallToolAsync<InvokeResponse>("invoke", new Dictionary<string, object?>
-        {
-            ["sessionId"] = _sessionId,
-            ["locator"] = new Dictionary<string, object?>
-            {
-                ["automationId"] = "Correlation_ShowOwnedOverlay"
-            }
-        });
-
+        WindowInfo? overlay = null;
         try
         {
-            WindowInfo? overlay = null;
-            for (var attempt = 0; attempt < 20 && overlay is null; attempt++)
+            _ = await _mcp.CallToolAsync<InvokeResponse>("invoke", new Dictionary<string, object?>
             {
-                var windows = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows", new Dictionary<string, object?>
+                ["sessionId"] = _sessionId,
+                ["windowHandle"] = _mainWindow.Handle,
+                ["locator"] = new Dictionary<string, object?>
                 {
-                    ["sessionId"] = _sessionId
-                });
-                overlay = windows.Windows.FirstOrDefault(window =>
-                    window.Title.Contains("Correlation Owned Overlay", StringComparison.Ordinal));
-                if (overlay is null)
-                {
-                    await Task.Delay(50);
+                    ["automationId"] = "Correlation_ShowOwnedOverlay"
                 }
-            }
+            });
 
-            Assert.That(overlay, Is.Not.Null, "The owned overlay must be visible before screen capture.");
+            overlay = await WaitForWindowAsync(
+                "WPF Tools MCP Correlation Owned Overlay",
+                TimeSpan.FromSeconds(15));
             var response = await _mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
             {
                 ["sessionId"] = _sessionId,
@@ -339,11 +362,16 @@ public sealed class ScreenshotCorrelationTests
             _ = await _mcp.CallToolAsync<InvokeResponse>("invoke", new Dictionary<string, object?>
             {
                 ["sessionId"] = _sessionId,
+                ["windowHandle"] = _mainWindow.Handle,
                 ["locator"] = new Dictionary<string, object?>
                 {
-                    ["automationId"] = "Correlation_ShowOwnedOverlay"
+                    ["automationId"] = "Correlation_HideOwnedOverlay"
                 }
             });
+            await WaitForWindowToCloseAsync(
+                overlay?.Handle,
+                "WPF Tools MCP Correlation Owned Overlay",
+                TimeSpan.FromSeconds(15));
         }
     }
 
@@ -420,6 +448,69 @@ public sealed class ScreenshotCorrelationTests
                 ["automationId"] = automationId
             }
         });
+
+    private async Task<WindowInfo> WaitForWindowAsync(string title, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        IReadOnlyList<WindowInfo> lastWindows = [];
+        while (stopwatch.Elapsed < timeout)
+        {
+            var response = await ListWindowsAsync();
+            lastWindows = response.Windows;
+            var match = lastWindows.FirstOrDefault(window =>
+                string.Equals(window.Title, title, StringComparison.Ordinal));
+            if (match is not null)
+            {
+                return match;
+            }
+
+            await Task.Delay(50);
+        }
+
+        throw new AssertionException(
+            $"Window '{title}' did not appear within {timeout}. Last windows:{Environment.NewLine}{DescribeWindows(lastWindows)}");
+    }
+
+    private async Task WaitForWindowToCloseAsync(long? handle, string title, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        TimeSpan? absentSince = null;
+        IReadOnlyList<WindowInfo> lastWindows = [];
+        while (stopwatch.Elapsed < timeout)
+        {
+            var response = await ListWindowsAsync();
+            lastWindows = response.Windows;
+            var present = lastWindows.Any(window =>
+                (handle is long expectedHandle && window.Handle == expectedHandle) ||
+                string.Equals(window.Title, title, StringComparison.Ordinal));
+            if (present)
+            {
+                absentSince = null;
+            }
+            else
+            {
+                absentSince ??= stopwatch.Elapsed;
+                if (stopwatch.Elapsed - absentSince >= TimeSpan.FromMilliseconds(250))
+                {
+                    return;
+                }
+            }
+
+            await Task.Delay(50);
+        }
+
+        throw new AssertionException(
+            $"Window '{title}' did not remain closed within {timeout}. Last windows:{Environment.NewLine}{DescribeWindows(lastWindows)}");
+    }
+
+    private Task<ListWindowsResponse> ListWindowsAsync() =>
+        _mcp.CallToolAsync<ListWindowsResponse>("list_windows", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId
+        });
+
+    private static string DescribeWindows(IReadOnlyList<WindowInfo> windows) =>
+        string.Join(Environment.NewLine, windows.Select(window => $"{window.Handle}: {window.Title}"));
 
     private Rect MapScreenRegionToClientImage(Rect screenRegion)
     {
@@ -507,13 +598,23 @@ public sealed class ScreenshotCorrelationTests
         return false;
     }
 
-    private static void AssertCaptureContext(TakeScreenshotResponse response, bool expectedWasClipped)
+    private static string DescribeCandidates(IReadOnlyList<ScreenshotCorrelationCandidate> candidates) =>
+        string.Join(
+            Environment.NewLine,
+            candidates.Select(candidate =>
+                $"{candidate.Index}: {candidate.Element.Type} id={candidate.Element.AutomationId ?? "<null>"} " +
+                $"name={candidate.Element.Name ?? "<null>"} path={candidate.Element.XPath} " +
+                $"match={candidate.MatchKind} bounds={candidate.Element.Bounds}"));
+
+    private void AssertCaptureContext(TakeScreenshotResponse response, bool expectedWasClipped)
     {
         var context = response.Correlation!.CaptureContext;
         Assert.Multiple(() =>
         {
             Assert.That(context.Window.Handle, Is.EqualTo(response.WindowHandleUsed));
-            Assert.That(context.Window.Title, Does.Contain("ScreenshotCorrelationProbe"));
+            Assert.That(response.WindowHandleUsed, Is.EqualTo(_mainWindow.Handle));
+            Assert.That(_mainWindow.Title, Is.EqualTo("WPF Tools MCP ScreenshotCorrelationProbe TestApp"));
+            Assert.That(context.Window.Title, Is.EqualTo(_mainWindow.Title));
             Assert.That(context.Window.Bounds, Is.EqualTo(context.Viewport.OuterBoundsPhysicalPixels));
             Assert.That(context.CapturedBounds, Is.EqualTo(response.CapturedBounds));
             Assert.That(context.CaptureModeRequested, Is.EqualTo(ScreenshotCaptureMode.PrintWindow));
