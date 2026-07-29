@@ -355,6 +355,21 @@ public sealed class DialogsSnapshots
 
             var nativeWindow = await WaitForWindowAsync(_sessionId, NativeDialogTitle);
             var sameNativeWindow = await WaitForWindowAsync(_sessionId, NativeDialogTitle);
+            var windowOpen = await _mcp.CallToolAsync<WaitForResponse>(
+                "wait_for",
+                new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _sessionId,
+                    ["condition"] = new Dictionary<string, object?>
+                    {
+                        ["kind"] = WaitConditionKind.WindowOpen.ToString(),
+                        ["window"] = new Dictionary<string, object?>
+                        {
+                            ["title"] = NativeDialogTitle
+                        }
+                    },
+                    ["timeoutMs"] = 0
+                });
             var activeDialog = await _mcp.CallToolAsync<GetActiveWindowResponse>(
                 "get_active_window",
                 new Dictionary<string, object?> { ["sessionId"] = _sessionId });
@@ -465,6 +480,21 @@ public sealed class DialogsSnapshots
                 NativeAcceptAutomationId,
                 controlType: "Button");
             await WaitForWindowClosedAsync(_sessionId, NativeDialogTitle);
+            var windowClosed = await _mcp.CallToolAsync<WaitForResponse>(
+                "wait_for",
+                new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _sessionId,
+                    ["condition"] = new Dictionary<string, object?>
+                    {
+                        ["kind"] = WaitConditionKind.WindowClosed.ToString(),
+                        ["window"] = new Dictionary<string, object?>
+                        {
+                            ["handle"] = nativeWindow.Handle
+                        }
+                    },
+                    ["timeoutMs"] = 0
+                });
 
             var activeOwner = await _mcp.CallToolAsync<GetActiveWindowResponse>(
                 "get_active_window",
@@ -501,6 +531,11 @@ public sealed class DialogsSnapshots
                 Assert.That(nativeWindow.OwnerHandle, Is.EqualTo(ownerWindow.Handle));
                 Assert.That(nativeWindow.IsModal, Is.True);
                 Assert.That(nativeWindow.FrameworkId, Is.EqualTo("Win32").IgnoreCase);
+                Assert.That(windowOpen.Succeeded, Is.True);
+                Assert.That(windowOpen.BackendUsed, Is.EqualTo(WaitBackend.Win32));
+                Assert.That(windowOpen.LastObservation?.WindowHandle, Is.EqualTo(nativeWindow.Handle));
+                Assert.That(windowOpen.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+                Assert.That(windowOpen.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo(NativeDialogTitle));
                 Assert.That(activeDialog.Handle, Is.EqualTo(nativeWindow.Handle));
                 Assert.That(activeDialog.Title, Is.EqualTo(NativeDialogTitle));
                 Assert.That(tree.BackendUsed, Is.EqualTo(InspectionBackend.Uia));
@@ -524,6 +559,10 @@ public sealed class DialogsSnapshots
                 Assert.That(accept.Invoked, Is.True);
                 Assert.That(accept.MethodUsed, Is.EqualTo("invoke"));
                 Assert.That(accept.Effects?.Semantic, Is.True);
+                Assert.That(windowClosed.Succeeded, Is.True);
+                Assert.That(windowClosed.BackendUsed, Is.EqualTo(WaitBackend.Win32));
+                Assert.That(windowClosed.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Unavailable));
+                Assert.That(windowClosed.LastObservedValue?.Detail, Is.EqualTo("window_closed"));
                 Assert.That(activeOwner.Handle, Is.EqualTo(ownerWindow.Handle));
                 Assert.That(activeOwner.Title, Is.EqualTo(MainWindowTitle));
                 Assert.That(status, Is.EqualTo("Native dialog: Opened native-dialog-target.txt"));

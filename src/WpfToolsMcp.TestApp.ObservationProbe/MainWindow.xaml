@@ -57,6 +57,11 @@
                     Width="120"
                     Margin="0,0,8,8"
                     Click="RemoveTarget_Click" />
+            <Button AutomationProperties.AutomationId="Observation_RemoveTargetDelayed"
+                    Content="Remove delayed"
+                    Width="120"
+                    Margin="0,0,8,8"
+                    Click="RemoveTargetDelayed_Click" />
             <Button AutomationProperties.AutomationId="Observation_OpenSecondary"
                     Content="Open secondary"
                     Width="120"

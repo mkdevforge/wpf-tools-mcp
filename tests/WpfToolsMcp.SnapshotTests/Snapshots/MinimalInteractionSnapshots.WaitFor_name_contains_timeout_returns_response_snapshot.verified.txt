@@ -3,15 +3,19 @@
   State: name_contains,
   ElapsedMs: -1,
   Attempts: -1,
-  LastObservation: {
-    Type: TextBlock,
-    Name: ClickStatus,
-    XPath: /Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/TextBlock[2],
-    Bounds: {
-      Width: 420,
-      Height: 16
-    },
-    IsEnabled: true
+  Observation: {
+    Type: Text,
+    AutomationId: ClickStatus,
+    Name: Clicks: 0,
+    IsEnabled: true,
+    IsOffscreen: false
   },
-  FailureReason: name_mismatch
+  FailureReason: name_mismatch,
+  BackendUsed: Uia,
+  ReasonCode: wait_timeout,
+  LastObservedValue: {
+    State: Value,
+    Value: Clicks: 0,
+    ValueType: System.String
+  }
 }
