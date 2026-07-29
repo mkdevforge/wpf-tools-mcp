@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Threading;
+using ModelContextProtocol.Protocol;
 using NUnit.Framework;
 using VerifyNUnit;
 using WpfToolsMcp.Contracts;
@@ -571,6 +573,321 @@ public sealed class ControllerStateRecoverySnapshots
         });
     }
 
+    [Test]
+    public async Task Attach_by_ambiguous_process_name_returns_structured_candidates()
+    {
+        var processName = Path.GetFileNameWithoutExtension(TestAppPaths.FindLifecycleProbeTestAppExecutable());
+        var firstMarkerPath = CreateLifecycleMarkerPath();
+        var secondMarkerPath = CreateLifecycleMarkerPath();
+        Process? first = null;
+        Process? second = null;
+        try
+        {
+            KillProcessesByName(processName);
+            first = StartLifecycleProbe(firstMarkerPath);
+            second = StartLifecycleProbe(secondMarkerPath);
+            await WaitForLifecycleMarkerAsync(firstMarkerPath, "started");
+            await WaitForLifecycleMarkerAsync(secondMarkerPath, "started");
+
+            var result = await _mcp.CallToolResultAsync("attach_to_app", new Dictionary<string, object?>
+            {
+                ["processName"] = processName
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.IsError, Is.True);
+                Assert.That(result.StructuredContent, Is.Not.Null);
+                Assert.That(
+                    result.Content.OfType<TextContentBlock>().Single().Text,
+                    Does.Contain("ambiguous_process"));
+            });
+
+            var ambiguity = JsonSerializer.Deserialize<ProcessSelectionAmbiguity>(
+                result.StructuredContent!.ToJsonString(),
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+            Assert.That(ambiguity, Is.Not.Null);
+            Assert.Multiple(() =>
+            {
+                Assert.That(ambiguity!.Code, Is.EqualTo("ambiguous_process"));
+                Assert.That(ambiguity.RequestedProcessName, Is.EqualTo(processName));
+                Assert.That(ambiguity.DiscoveredCandidates, Is.EqualTo(2));
+                Assert.That(ambiguity.ReturnedCandidates, Is.EqualTo(2));
+                Assert.That(ambiguity.Truncated, Is.False);
+                Assert.That(ambiguity.Candidates.Select(candidate => candidate.Pid),
+                    Is.EquivalentTo(new[] { first.Id, second.Id }));
+                Assert.That(ambiguity.Candidates.Select(candidate => candidate.Index), Is.EqualTo(new[] { 0, 1 }));
+                Assert.That(ambiguity.Candidates.All(candidate => candidate.ProcessInstanceId.Length > 0), Is.True);
+                Assert.That(ambiguity.Candidates.All(candidate => candidate.ProcessName == processName), Is.True);
+                Assert.That(ambiguity.Candidates.All(candidate => candidate.StartTimeUtc.Length > 0), Is.True);
+                Assert.That(ambiguity.Candidates.All(candidate => candidate.MainWindowHandle != 0), Is.True);
+                Assert.That(ambiguity.Candidates.All(candidate => candidate.MainWindowTitle.Length > 0), Is.True);
+            });
+
+            var staleCandidate = ambiguity!.Candidates.Single(candidate => candidate.Pid == first.Id);
+            var liveCandidate = ambiguity.Candidates.Single(candidate => candidate.Pid == second.Id);
+            KillProcessIfRunning(first.Id);
+
+            var staleSelection = await CaptureToolFailureAsync(() =>
+                _mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+                {
+                    ["processInstanceId"] = staleCandidate.ProcessInstanceId
+                }));
+            Assert.That(staleSelection.Message, Does.Contain("stale_process_candidate"));
+
+            var selected = await _mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+            {
+                ["processInstanceId"] = liveCandidate.ProcessInstanceId
+            });
+            Assert.That(selected.Pid, Is.EqualTo(second.Id));
+            _ = await CloseSessionAsync(selected.SessionId);
+        }
+        finally
+        {
+            KillProcessIfRunning(first?.Id ?? 0);
+            KillProcessIfRunning(second?.Id ?? 0);
+            first?.Dispose();
+            second?.Dispose();
+            DeleteFileBestEffort(firstMarkerPath);
+            DeleteFileBestEffort(secondMarkerPath);
+        }
+    }
+
+    [Test]
+    public async Task Reattach_replaces_exited_target_and_invalidates_previous_identities()
+    {
+        var firstMarkerPath = CreateLifecycleMarkerPath();
+        var replacementMarkerPath = CreateLifecycleMarkerPath();
+        Process? first = null;
+        Process? replacement = null;
+        AttachToAppResponse? attached = null;
+        string? successorSessionId = null;
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+        try
+        {
+            first = StartLifecycleProbe(firstMarkerPath);
+            await WaitForLifecycleMarkerAsync(firstMarkerPath, "started");
+            attached = await mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+            {
+                ["pid"] = first.Id,
+                ["interactionPolicy"] = new InteractionPolicy(
+                    AllowForegroundActivation: false,
+                    AllowPhysicalInput: false)
+            });
+
+            var oldElement = await mcp.CallToolAsync<ResolveElementResponse>("resolve_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = attached.SessionId,
+                ["backend"] = InspectionBackend.Uia,
+                ["locator"] = new ElementLocator(AutomationId: "LifecycleProbe_Status")
+            });
+            var oldWindow = (await mcp.CallToolAsync<ListWindowsResponse>("list_windows", new Dictionary<string, object?>
+            {
+                ["sessionId"] = attached.SessionId
+            })).Windows.Single(window => window.Title == "WPF Tools MCP LifecycleProbe TestApp");
+
+            KillProcessIfRunning(first.Id);
+            replacement = StartLifecycleProbe(replacementMarkerPath);
+            await WaitForLifecycleMarkerAsync(replacementMarkerPath, "started");
+
+            var reattached = await mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+            {
+                ["sessionId"] = attached.SessionId
+            });
+            successorSessionId = reattached.SessionId;
+            var replacementWindows = await mcp.CallToolAsync<ListWindowsResponse>("list_windows", new Dictionary<string, object?>
+            {
+                ["sessionId"] = successorSessionId
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(reattached.SessionId, Is.Not.EqualTo(attached.SessionId));
+                Assert.That(reattached.Pid, Is.EqualTo(replacement.Id));
+                Assert.That(reattached.ProcessInstanceId, Is.Not.Null.And.Not.Empty);
+                Assert.That(reattached.InteractionPolicy, Is.EqualTo(attached.InteractionPolicy));
+                Assert.That(reattached.Recovery, Is.Not.Null);
+                Assert.That(reattached.Recovery!.PreviousSessionId, Is.EqualTo(attached.SessionId));
+                Assert.That(reattached.Recovery.SuccessorSessionId, Is.EqualTo(reattached.SessionId));
+                Assert.That(reattached.Recovery!.PreviousPid, Is.EqualTo(first.Id));
+                Assert.That(reattached.Recovery.WindowHandlesInvalidated, Is.True);
+                Assert.That(reattached.Recovery.ElementIdsInvalidated, Is.True);
+                Assert.That(reattached.ActiveWindow, Is.Not.Null);
+                Assert.That(reattached.ActiveWindow!.Handle, Is.Not.Zero);
+                Assert.That(reattached.ActiveWindow.Title, Is.EqualTo("WPF Tools MCP LifecycleProbe TestApp"));
+                Assert.That(replacementWindows.ProcessId, Is.EqualTo(replacement.Id));
+                Assert.That(replacementWindows.Windows.Select(window => window.Handle),
+                    Does.Contain(reattached.ActiveWindow.Handle));
+            });
+
+            var staleElement = await CaptureToolFailureAsync(() =>
+                mcp.CallToolAsync<GetElementPropertiesResponse>("get_element_properties", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = attached.SessionId,
+                    ["elementId"] = oldElement.Element.ElementId
+                }));
+            var staleWindow = await CaptureToolFailureAsync(() =>
+                mcp.CallToolAsync<GetUiaTreeResponse>("get_uia_tree", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = attached.SessionId,
+                    ["windowHandle"] = oldWindow.Handle
+                }));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(staleElement.Message, Does.Contain("stale_session: process_replaced"));
+                Assert.That(staleElement.Message, Does.Contain(successorSessionId));
+                Assert.That(staleWindow.Message, Does.Contain("stale_session: process_replaced"));
+                Assert.That(staleWindow.Message, Does.Contain(successorSessionId));
+            });
+
+            var replacementElement = await mcp.CallToolAsync<ResolveElementResponse>("resolve_element", new Dictionary<string, object?>
+            {
+                ["sessionId"] = successorSessionId,
+                ["backend"] = InspectionBackend.Uia,
+                ["locator"] = new ElementLocator(AutomationId: "LifecycleProbe_Status")
+            });
+            Assert.That(replacementElement.Element.ElementId, Is.Not.EqualTo(oldElement.Element.ElementId));
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(successorSessionId))
+            {
+                try
+                {
+                    _ = await mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
+                    {
+                        ["sessionId"] = successorSessionId,
+                        ["force"] = true,
+                        ["timeoutMs"] = 2000
+                    });
+                }
+                catch
+                {
+                }
+            }
+
+            KillProcessIfRunning(first?.Id ?? 0);
+            KillProcessIfRunning(replacement?.Id ?? 0);
+            first?.Dispose();
+            replacement?.Dispose();
+            DeleteFileBestEffort(firstMarkerPath);
+            DeleteFileBestEffort(replacementMarkerPath);
+        }
+    }
+
+    [Test]
+    public async Task Reattach_by_ambiguous_process_name_does_not_change_the_session_target()
+    {
+        var processName = Path.GetFileNameWithoutExtension(TestAppPaths.FindLifecycleProbeTestAppExecutable());
+        var firstMarkerPath = CreateLifecycleMarkerPath();
+        var replacementOneMarkerPath = CreateLifecycleMarkerPath();
+        var replacementTwoMarkerPath = CreateLifecycleMarkerPath();
+        Process? first = null;
+        Process? replacementOne = null;
+        Process? replacementTwo = null;
+        AttachToAppResponse? attached = null;
+        try
+        {
+            KillProcessesByName(processName);
+            first = StartLifecycleProbe(firstMarkerPath);
+            await WaitForLifecycleMarkerAsync(firstMarkerPath, "started");
+            attached = await _mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+            {
+                ["pid"] = first.Id
+            });
+            KillProcessIfRunning(first.Id);
+
+            replacementOne = StartLifecycleProbe(replacementOneMarkerPath);
+            replacementTwo = StartLifecycleProbe(replacementTwoMarkerPath);
+            await WaitForLifecycleMarkerAsync(replacementOneMarkerPath, "started");
+            await WaitForLifecycleMarkerAsync(replacementTwoMarkerPath, "started");
+
+            var result = await _mcp.CallToolResultAsync("attach_to_app", new Dictionary<string, object?>
+            {
+                ["sessionId"] = attached.SessionId
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.IsError, Is.True);
+                Assert.That(result.StructuredContent, Is.Not.Null);
+            });
+
+            var explicitlyReattached = await _mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+            {
+                ["sessionId"] = attached.SessionId,
+                ["pid"] = replacementOne.Id
+            });
+            Assert.That(explicitlyReattached.Pid, Is.EqualTo(replacementOne.Id));
+            attached = explicitlyReattached;
+        }
+        finally
+        {
+            if (attached is not null)
+            {
+                _ = await CloseSessionAsync(attached.SessionId);
+            }
+
+            KillProcessIfRunning(first?.Id ?? 0);
+            KillProcessIfRunning(replacementOne?.Id ?? 0);
+            KillProcessIfRunning(replacementTwo?.Id ?? 0);
+            first?.Dispose();
+            replacementOne?.Dispose();
+            replacementTwo?.Dispose();
+            DeleteFileBestEffort(firstMarkerPath);
+            DeleteFileBestEffort(replacementOneMarkerPath);
+            DeleteFileBestEffort(replacementTwoMarkerPath);
+        }
+    }
+
+    [Test]
+    public async Task Reattach_rejects_a_still_running_target_without_changing_its_session()
+    {
+        var markerPath = CreateLifecycleMarkerPath();
+        Process? process = null;
+        AttachToAppResponse? attached = null;
+        try
+        {
+            process = StartLifecycleProbe(markerPath);
+            await WaitForLifecycleMarkerAsync(markerPath, "started");
+            attached = await _mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+            {
+                ["pid"] = process.Id
+            });
+
+            var failure = await CaptureToolFailureAsync(() =>
+                _mcp.CallToolAsync<AttachToAppResponse>("attach_to_app", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = attached.SessionId
+                }));
+            var windows = await _mcp.CallToolAsync<ListWindowsResponse>("list_windows", new Dictionary<string, object?>
+            {
+                ["sessionId"] = attached.SessionId
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(failure.Message, Does.Contain("target_process_still_running"));
+                Assert.That(windows.ProcessId, Is.EqualTo(process.Id));
+                Assert.That(windows.Windows, Is.Not.Empty);
+            });
+        }
+        finally
+        {
+            if (attached is not null)
+            {
+                _ = await CloseSessionAsync(attached.SessionId);
+            }
+
+            KillProcessIfRunning(process?.Id ?? 0);
+            process?.Dispose();
+            DeleteFileBestEffort(markerPath);
+        }
+    }
+
     private async Task<LaunchAppResponse> LaunchTestAppAsync()
     {
         var exePath = TestAppPaths.FindTestAppExecutable();
@@ -734,6 +1051,20 @@ public sealed class ControllerStateRecoverySnapshots
         catch
         {
         }
+    }
+
+    private static async Task<InvalidOperationException> CaptureToolFailureAsync(Func<Task> call)
+    {
+        try
+        {
+            await call();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex;
+        }
+
+        throw new AssertionException("Expected the tool call to fail.");
     }
 
     private async Task<string> CaptureAttachFailureToCurrentProcessAsync()

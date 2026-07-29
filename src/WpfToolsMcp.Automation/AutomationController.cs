@@ -222,6 +222,11 @@ public sealed partial class AutomationController : IDisposable
                     $"Launch strategy '{launchStrategy.Name}' failed to resolve a main window and fallback attach to an existing instance was unsuccessful.",
                     attachError ?? launchInitError);
             }
+            catch (ProcessSelectionAmbiguityException)
+            {
+                Cleanup();
+                throw;
+            }
             catch (Exception ex)
             {
                 lastLaunchError = ex;
@@ -382,43 +387,51 @@ public sealed partial class AutomationController : IDisposable
 
         while (DateTime.UtcNow <= deadline)
         {
-            var candidates = Process.GetProcessesByName(processName)
-                .OrderByDescending(p => p.Id)
-                .ToArray();
-
-            foreach (var process in candidates)
+            ResolvedProcessTarget target;
+            try
             {
-                try
-                {
-                    if (process.HasExited)
-                    {
-                        continue;
-                    }
+                target = ProcessTargetResolver.ResolveByName(processName);
+            }
+            catch (ProcessSelectionAmbiguityException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+                Thread.Sleep(200);
+                continue;
+            }
 
-                    Application? attached = null;
-                    try
-                    {
-                        attached = Application.Attach(process.Id);
-                        if (!TryInitializeApplication(attached, perAttemptTimeout, out var initError))
-                        {
-                            error = initError;
-                            attached.Dispose();
-                            continue;
-                        }
-
-                        _application = attached;
-                        return true;
-                    }
-                    catch (Exception ex)
-                    {
-                        error = ex;
-                        attached?.Dispose();
-                    }
-                }
-                finally
+            Application? attached = null;
+            try
+            {
+                attached = Application.Attach(target.Identity.Pid);
+                if (!TryInitializeApplication(attached, perAttemptTimeout, out var initError))
                 {
-                    process.Dispose();
+                    error = initError;
+                    attached.Dispose();
+                    Thread.Sleep(200);
+                    continue;
                 }
+
+                if (!ProcessTargetResolver.IsCurrent(target.Identity))
+                {
+                    error = new InvalidOperationException(
+                        $"stale_process_candidate: process {target.Identity.Pid} changed during fallback attachment.");
+                    attached.Dispose();
+                    Cleanup();
+                    Thread.Sleep(200);
+                    continue;
+                }
+
+                _application = attached;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+                attached?.Dispose();
             }
 
             Thread.Sleep(200);
@@ -430,34 +443,24 @@ public sealed partial class AutomationController : IDisposable
     public Task<AttachToAppResponse> AttachAsync(AttachToAppRequest request, CancellationToken cancellationToken = default)
     {
         EnsureNotAttached();
-
-        if (request.Pid is not null && !string.IsNullOrWhiteSpace(request.ProcessName))
-        {
-            throw new ArgumentException("Provide either pid or processName, not both.");
-        }
+        cancellationToken.ThrowIfCancellationRequested();
 
         try
         {
-            if (request.Pid is int pid)
+            var target = ProcessTargetResolver.Resolve(request);
+            (_application, _automation) = CreateAttachment(target.Identity.Pid);
+
+            if (!ProcessTargetResolver.IsCurrent(target.Identity))
             {
-                _application = Application.Attach(pid);
-            }
-            else if (!string.IsNullOrWhiteSpace(request.ProcessName))
-            {
-                var resolvedPid = ResolveProcessIdByName(request.ProcessName);
-                _application = Application.Attach(resolvedPid);
-            }
-            else
-            {
-                throw new ArgumentException("Either pid or processName must be provided.");
+                throw new InvalidOperationException(
+                    $"stale_process_candidate: process {target.Identity.Pid} changed while attachment was initializing. " +
+                    "Discover candidates again; no fallback target was selected.");
             }
 
-            _application.WaitWhileMainHandleIsMissing(TimeSpan.FromSeconds(10));
-            _application.WaitWhileBusy(TimeSpan.FromSeconds(10));
-            _automation = new UIA3Automation();
-            _ = FindMainWindow(_application, _automation);
-
-            var response = new AttachToAppResponse(SessionId: "", _application.ProcessId, _application.Name);
+            var response = new AttachToAppResponse(SessionId: "", _application.ProcessId, _application.Name)
+            {
+                ProcessInstanceId = target.Identity.Value
+            };
             return Task.FromResult(response);
         }
         catch
@@ -467,99 +470,23 @@ public sealed partial class AutomationController : IDisposable
         }
     }
 
-    private static int ResolveProcessIdByName(string processName)
+    private static (Application Application, UIA3Automation Automation) CreateAttachment(int pid)
     {
-        var candidateNames = BuildProcessNameCandidates(processName);
-        var candidates = new List<(int Pid, DateTime StartTimeUtc)>();
-        var seenPids = new HashSet<int>();
-
-        foreach (var candidateName in candidateNames)
-        {
-            Process[] processes;
-            try
-            {
-                processes = Process.GetProcessesByName(candidateName);
-            }
-            catch
-            {
-                continue;
-            }
-
-            foreach (var process in processes)
-            {
-                try
-                {
-                    if (process.HasExited || !seenPids.Add(process.Id))
-                    {
-                        continue;
-                    }
-
-                    candidates.Add((process.Id, SafeGetStartTimeUtc(process)));
-                }
-                catch
-                {
-                }
-                finally
-                {
-                    process.Dispose();
-                }
-            }
-        }
-
-        if (candidates.Count == 0)
-        {
-            throw new InvalidOperationException(
-                $"Unable to find process with name: {processName}. Tried: {string.Join(", ", candidateNames)}");
-        }
-
-        return candidates
-            .OrderByDescending(c => c.StartTimeUtc)
-            .ThenByDescending(c => c.Pid)
-            .First()
-            .Pid;
-    }
-
-    private static IReadOnlyList<string> BuildProcessNameCandidates(string processName)
-    {
-        var trimmed = processName.Trim();
-        if (trimmed.Length == 0)
-        {
-            return Array.Empty<string>();
-        }
-
-        var fileName = Path.GetFileName(trimmed);
-        var withoutExtension = Path.GetFileNameWithoutExtension(fileName);
-
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        AddCandidateName(fileName);
-        AddCandidateName(withoutExtension);
-
-        if (!fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-        {
-            AddCandidateName(Path.GetFileNameWithoutExtension($"{fileName}.exe"));
-        }
-
-        return names.ToArray();
-
-        void AddCandidateName(string? value)
-        {
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                names.Add(value.Trim());
-            }
-        }
-    }
-
-    private static DateTime SafeGetStartTimeUtc(Process process)
-    {
+        var application = Application.Attach(pid);
+        UIA3Automation? automation = null;
         try
         {
-            return process.StartTime.ToUniversalTime();
+            application.WaitWhileMainHandleIsMissing(TimeSpan.FromSeconds(10));
+            application.WaitWhileBusy(TimeSpan.FromSeconds(10));
+            automation = new UIA3Automation();
+            _ = FindMainWindow(application, automation);
+            return (application, automation);
         }
         catch
         {
-            return DateTime.MinValue;
+            automation?.Dispose();
+            application.Dispose();
+            throw;
         }
     }
 

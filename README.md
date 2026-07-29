@@ -471,6 +471,31 @@ dispatched. For `close_app` and `terminate_app`, `Closed` mirrors
 `ProcessWasRunningObserved` and `ProcessStillRunningObserved`; a false running
 value is not authoritative when its matching observation field is false.
 
+Each session is bound to one process instance, identified by PID and process
+start time. `attach_to_app` never guesses between multiple live processes with
+the same name. Instead it returns an `ambiguous_process` error with bounded,
+deterministically ordered candidates containing `processInstanceId`, PID, name,
+start time, and main-window identity. Retry with the opaque
+`processInstanceId` (preferred) or an explicit PID. Dotted process names are
+preserved; only a terminal `.exe` suffix is removed.
+
+After the target exits, call `attach_to_app` with its old `sessionId`. With no
+other selector, the server searches for the same process name; an explicit
+`pid`, `processName`, or `processInstanceId` may be supplied instead. Recovery
+fully initializes a successor session and pins its main window before retiring
+the predecessor. It returns a new `sessionId`, the selected active window, and
+an identity-invalidation record. The prior interaction policy is preserved
+unless the call overrides it. A still-running target cannot be replaced, and
+an ambiguous or failed replacement leaves the old session untouched.
+
+Window handles and element IDs are scoped to their originating session and
+process instance. Calls through a replaced session fail with
+`stale_session: process_replaced`, name the successor session, and require
+window and element identities to be reacquired. Existing subscriptions are
+stopped during the successful replacement commit. Restarting only the MCP
+server while the target stays alive remains a separate agent-reconnect path and
+does not require process replacement.
+
 ### Deterministic Viewports
 
 The diagnostics-only `set_window_viewport` tool sets the client area, rather
@@ -657,6 +682,12 @@ common-workflow rationale plus inventory and compact-schema contract coverage.
    result.
 6. Call `detach_session` when inspection is finished. Use `close_app` or
    `terminate_app` only when stopping the target application is intended.
+
+If the target is rebuilt or restarted between steps, call `attach_to_app` with
+the exited session's `sessionId`. If candidate discovery is ambiguous, choose a
+returned `processInstanceId` explicitly. Continue with the successor
+`sessionId`, call `list_windows`, and resolve fresh element IDs before further
+inspection or interaction.
 
 In the core profile, inspection tools that support both backends prefer the WPF
 agent and fall back when a UIA equivalent exists. Tree and search responses

@@ -577,6 +577,26 @@ public sealed class ToolProfileTests
         });
     }
 
+    [TestCase(null)]
+    [TestCase("diagnostics")]
+    public async Task Attach_schema_exposes_deterministic_selection_and_recovery(string? toolProfile)
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: toolProfile);
+        var tool = (await mcp.ListToolsAsync()).Single(candidate => candidate.Name == "attach_to_app");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                GetInputPropertyNames(tool),
+                Is.EqualTo(new[] { "interactionPolicy", "pid", "processInstanceId", "processName", "sessionId" }));
+            Assert.That(
+                tool.ProtocolTool.OutputSchema,
+                Is.Null,
+                "attach_to_app returns protocol CallToolResult so ambiguity can carry structured candidates.");
+        });
+    }
+
     [Test]
     public async Task Core_profile_exposes_interaction_policy_on_session_and_action_tools()
     {
