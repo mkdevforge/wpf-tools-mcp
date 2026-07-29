@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -658,8 +659,92 @@ public sealed class SessionManager : IDisposable
         }
     }
 
-    private static SessionWindowSelection ReconcileActiveWindow(SessionState session) =>
-        session.ReconcileActiveWindow(handle => IsWindowHandleValid(handle, session.Pid));
+    private static SessionWindowSelection ReconcileActiveWindow(SessionState session)
+    {
+        var active = session.ReconcileActiveWindow(handle => IsWindowHandleValid(handle, session.Pid));
+        if (!TryGetOwnedModalPopup(active.Handle, session.Pid, out var modalPopup))
+        {
+            return active;
+        }
+
+        session.RecordWindowSelection(modalPopup.Handle, modalPopup.Title);
+        return modalPopup;
+    }
+
+    private static bool TryGetOwnedModalPopup(
+        long ownerHandle,
+        int expectedPid,
+        out SessionWindowSelection modalPopup)
+    {
+        modalPopup = default;
+        if (!OperatingSystem.IsWindows() || ownerHandle == 0 || expectedPid <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var owner = new IntPtr(ownerHandle);
+            var popup = GetLastActivePopup(owner);
+            if (popup == IntPtr.Zero || popup == owner || !IsWindow(popup) || !IsWindowVisible(popup))
+            {
+                return false;
+            }
+
+            _ = GetWindowThreadProcessId(popup, out var popupPid);
+            if (popupPid != (uint)expectedPid || !IsOwnedBy(popup, owner))
+            {
+                return false;
+            }
+
+            var immediateOwner = GetWindow(popup, GW_OWNER);
+            if (immediateOwner == IntPtr.Zero || IsWindowEnabled(immediateOwner))
+            {
+                return false;
+            }
+
+            modalPopup = new SessionWindowSelection(popup.ToInt64(), GetNativeWindowTitle(popup));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsOwnedBy(IntPtr candidate, IntPtr expectedOwner)
+    {
+        var current = candidate;
+        for (var depth = 0; depth < 16; depth++)
+        {
+            current = GetWindow(current, GW_OWNER);
+            if (current == expectedOwner)
+            {
+                return true;
+            }
+
+            if (current == IntPtr.Zero)
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private static string GetNativeWindowTitle(IntPtr hwnd)
+    {
+        var length = GetWindowTextLength(hwnd);
+        if (length <= 0)
+        {
+            return string.Empty;
+        }
+
+        var title = new StringBuilder(length + 1);
+        return GetWindowText(hwnd, title, title.Capacity) > 0
+            ? title.ToString()
+            : string.Empty;
+    }
 
     private static bool IsWindowHandleValid(long handle, int expectedPid)
     {
@@ -735,4 +820,24 @@ public sealed class SessionManager : IDisposable
 
     [DllImport("user32.dll", SetLastError = false)]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll", SetLastError = false)]
+    private static extern IntPtr GetLastActivePopup(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = false)]
+    private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    [DllImport("user32.dll", SetLastError = false)]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = false)]
+    private static extern bool IsWindowEnabled(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = false)]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = false)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    private const uint GW_OWNER = 4;
 }
