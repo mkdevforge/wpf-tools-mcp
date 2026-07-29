@@ -4746,15 +4746,30 @@ public sealed partial class AutomationController : IDisposable
         }
     }
 
-    public async Task<WaitForResponse> WaitForAsync(
+    public Task<WaitForResponse> WaitForAsync(
         WaitForRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        WaitForAsync(request, cancellationToken, structuredElementDeadline: null);
+
+    private async Task<WaitForResponse> WaitForAsync(
+        WaitForRequest request,
+        CancellationToken cancellationToken,
+        StructuredElementWaitDeadline? structuredElementDeadline)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var trace = BeginTraceSpan("wait_for");
         try
         {
+            if (request.Condition is not null)
+            {
+                var structuredResponse = await WaitForConditionAsync(request, cancellationToken).ConfigureAwait(false);
+                trace?.SetSummary(
+                    $"{structuredResponse.State} succeeded={structuredResponse.Succeeded} " +
+                    $"attempts={structuredResponse.Attempts} backend={structuredResponse.BackendUsed}");
+                return structuredResponse;
+            }
+
         var hasLocator = request.Locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
         if (hasLocator == hasElementId)
@@ -4827,6 +4842,7 @@ public sealed partial class AutomationController : IDisposable
                     expectedValue: request.ExpectedValue,
                     expectedText: request.ExpectedText,
                     throwOnTimeout: request.ThrowOnTimeout,
+                    structuredElementDeadline,
                     cancellationToken).ConfigureAwait(false);
 
                 trace?.SetSummary($"{request.State} succeeded={response.Succeeded} attempts={response.Attempts}");
@@ -4856,6 +4872,7 @@ public sealed partial class AutomationController : IDisposable
                     expectedValue: request.ExpectedValue,
                     expectedText: request.ExpectedText,
                     throwOnTimeout: request.ThrowOnTimeout,
+                    structuredElementDeadline,
                     cancellationToken).ConfigureAwait(false);
 
                 trace?.SetSummary($"{request.State} succeeded={response.Succeeded} attempts={response.Attempts}");
@@ -4897,16 +4914,39 @@ public sealed partial class AutomationController : IDisposable
             xpathHint = request.Locator?.XPath;
         }
 
-        var start = Stopwatch.GetTimestamp();
+        var start = structuredElementDeadline?.StartTimestamp ?? Stopwatch.GetTimestamp();
         var attempts = 0;
         WaitForObservation? lastObservation = null;
+        WaitObservedValue? lastObservedValue = CreateUnavailableObservedValue("condition_not_observed");
+        var lastFailureReason = "not_attached";
 
         Rectangle? lastBounds = null;
         long? stableStartTimestamp = null;
 
-        while (true)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+            if ((timeoutMs > 0 || attempts > 0) &&
+                Stopwatch.GetElapsedTime(start).TotalMilliseconds >= timeoutMs)
+            {
+                var timeoutResponse = CreateLegacyWaitTimeoutResponse(
+                    request.State,
+                    WaitBackend.Uia,
+                    timeoutMs,
+                    start,
+                    attempts,
+                    lastObservation,
+                    lastObservedValue,
+                    lastFailureReason,
+                    request.ThrowOnTimeout);
+                trace?.SetSummary(
+                    $"{request.State} succeeded=false attempts={attempts} reason={lastFailureReason}");
+                return timeoutResponse;
+            }
+
             attempts++;
 
             AutomationElement? element;
@@ -4931,6 +4971,7 @@ public sealed partial class AutomationController : IDisposable
 
             if (element is null)
             {
+                lastObservedValue = CreateUnavailableObservedValue("not_attached");
                 if (state == WaitForState.Attached)
                 {
                     failureReason = "not_attached";
@@ -4951,42 +4992,85 @@ public sealed partial class AutomationController : IDisposable
                     stableMs: stableMs,
                     ref lastBounds,
                     ref stableStartTimestamp);
+                lastObservedValue = ObserveLegacyUiaWaitValue(element, state);
             }
 
-            if (satisfied)
+            lastFailureReason = failureReason ?? lastFailureReason;
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (satisfied && (timeoutMs == 0 || elapsed.TotalMilliseconds < timeoutMs))
             {
-                var elapsedMs = (int)Math.Round(Stopwatch.GetElapsedTime(start).TotalMilliseconds, MidpointRounding.AwayFromZero);
+                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
                 trace?.SetSummary($"{request.State} succeeded=true attempts={attempts}");
                 return new WaitForResponse(
                     Succeeded: true,
                     State: request.State,
                     ElapsedMs: elapsedMs,
                     Attempts: attempts,
-                    LastObservation: lastObservation);
+                    LastObservation: lastObservation)
+                {
+                    BackendUsed = WaitBackend.Uia,
+                    LastObservedValue = lastObservedValue
+                };
             }
 
-            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (satisfied)
+            {
+                lastFailureReason = "condition_met_after_timeout";
+            }
+
             if (elapsed.TotalMilliseconds >= timeoutMs)
             {
-                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
-                var response = new WaitForResponse(
-                    Succeeded: false,
-                    State: request.State,
-                    ElapsedMs: elapsedMs,
-                    Attempts: attempts,
-                    LastObservation: lastObservation,
-                    FailureReason: failureReason ?? "timeout");
-
-                if (request.ThrowOnTimeout)
-                {
-                    throw new InvalidOperationException($"timeout: wait_for state='{request.State}' after {timeoutMs}ms ({failureReason ?? "timeout"}).");
-                }
-
-                trace?.SetSummary($"{request.State} succeeded=false attempts={attempts} reason={failureReason ?? "timeout"}");
-                return response;
+                var timeoutResponse = CreateLegacyWaitTimeoutResponse(
+                    request.State,
+                    WaitBackend.Uia,
+                    timeoutMs,
+                    start,
+                    attempts,
+                    lastObservation,
+                    lastObservedValue,
+                    lastFailureReason,
+                    request.ThrowOnTimeout);
+                trace?.SetSummary(
+                    $"{request.State} succeeded=false attempts={attempts} reason={lastFailureReason}");
+                return timeoutResponse;
             }
 
-            await Task.Delay(pollIntervalMs, cancellationToken);
+            var remainingMs = Math.Max(1, timeoutMs - (int)elapsed.TotalMilliseconds);
+            await Task.Delay(Math.Min(pollIntervalMs, remainingMs), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (
+            IsStructuredElementDeadlineCancellation(structuredElementDeadline))
+        {
+            var timeoutResponse = CreateLegacyWaitTimeoutResponse(
+                request.State,
+                WaitBackend.Uia,
+                timeoutMs,
+                start,
+                attempts,
+                lastObservation,
+                lastObservedValue,
+                lastFailureReason,
+                request.ThrowOnTimeout);
+            trace?.SetSummary(
+                $"{request.State} succeeded=false attempts={attempts} reason={lastFailureReason}");
+            return timeoutResponse;
+        }
+        catch (Exception ex) when (
+            structuredElementDeadline is not null &&
+            ex is not OperationCanceledException &&
+            !IsApplicationRunning(_application))
+        {
+            var targetExitedResponse = CreateTargetProcessExitedResponse(
+                request.State,
+                WaitBackend.Uia,
+                GetElapsedMilliseconds(start),
+                attempts,
+                lastObservation,
+                lastObservedValue);
+            trace?.SetSummary(
+                $"{request.State} succeeded=false attempts={attempts} reason=target_process_exited");
+            return targetExitedResponse;
         }
     }
         catch (Exception ex)
@@ -5012,6 +5096,7 @@ public sealed partial class AutomationController : IDisposable
         double? expectedValue,
         string? expectedText,
         bool throwOnTimeout,
+        StructuredElementWaitDeadline? structuredElementDeadline,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(xpath) && locator is null)
@@ -5019,20 +5104,40 @@ public sealed partial class AutomationController : IDisposable
             throw new ArgumentException("wait_for requires either an elementId (WPF handle) or a locator for backend=wpf.");
         }
 
-        var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
-
-        var start = Stopwatch.GetTimestamp();
+        var start = structuredElementDeadline?.StartTimestamp ?? Stopwatch.GetTimestamp();
         var attempts = 0;
         WaitForObservation? lastObservation = null;
+        WaitObservedValue? lastObservedValue = CreateUnavailableObservedValue("condition_not_observed");
+        var lastFailureReason = "not_attached";
 
         Rect? lastBounds = null;
         long? stableStartTimestamp = null;
 
-        string? currentXPath = string.IsNullOrWhiteSpace(xpath) ? null : NormalizeWpfXPath(xpath);
-
-        while (true)
+        AgentClient? client = null;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+            string? currentXPath = string.IsNullOrWhiteSpace(xpath) ? null : NormalizeWpfXPath(xpath);
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if ((timeoutMs > 0 || attempts > 0) &&
+                    Stopwatch.GetElapsedTime(start).TotalMilliseconds >= timeoutMs)
+                {
+                    return CreateLegacyWaitTimeoutResponse(
+                        stateText,
+                        WaitBackend.Wpf,
+                        timeoutMs,
+                        start,
+                        attempts,
+                        lastObservation,
+                        lastObservedValue,
+                        lastFailureReason,
+                        throwOnTimeout);
+                }
+
             attempts++;
 
             var satisfied = false;
@@ -5092,11 +5197,13 @@ public sealed partial class AutomationController : IDisposable
                             IsOffscreen: null);
 
                         (satisfied, failureReason) = CheckWpfComputedValueEquals(computed.Properties, expectedValue.Value);
+                        lastObservedValue = ObserveWpfComputedValue(computed.Properties);
                     }
                     catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
                     {
                         currentXPath = null;
                         lastObservation = null;
+                        lastObservedValue = CreateUnavailableObservedValue("not_attached");
                         failureReason = "not_attached";
                     }
                 }
@@ -5128,12 +5235,14 @@ public sealed partial class AutomationController : IDisposable
                                 Bounds: resolved.Bounds,
                                 IsEnabled: null,
                                 IsOffscreen: null);
+                            lastObservedValue = BooleanObservedValue(true);
 
                             satisfied = true;
                         }
                     }
                     catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
                     {
+                        lastObservedValue = CreateUnavailableObservedValue("not_attached");
                         failureReason = "not_attached";
                     }
                 }
@@ -5163,6 +5272,7 @@ public sealed partial class AutomationController : IDisposable
                     {
                         currentXPath = null;
                         lastObservation = null;
+                        lastObservedValue = CreateUnavailableObservedValue("not_attached");
                         failureReason = "not_attached";
                     }
 
@@ -5196,6 +5306,7 @@ public sealed partial class AutomationController : IDisposable
                                 node,
                                 computed.Properties,
                                 expectedText);
+                            lastObservedValue = ObserveWpfNameValue(node, computed.Properties, expectedText);
                         }
                         else
                         {
@@ -5206,43 +5317,96 @@ public sealed partial class AutomationController : IDisposable
                                 expectedText,
                                 ref lastBounds,
                                 ref stableStartTimestamp);
+                            lastObservedValue = ObserveLegacyWpfWaitValue(node, state);
                         }
                     }
                 }
             }
 
-            if (satisfied)
+            lastFailureReason = failureReason ?? lastFailureReason;
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (satisfied && (timeoutMs == 0 || elapsed.TotalMilliseconds < timeoutMs))
             {
-                var elapsedMs = (int)Math.Round(Stopwatch.GetElapsedTime(start).TotalMilliseconds, MidpointRounding.AwayFromZero);
+                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
                 return new WaitForResponse(
                     Succeeded: true,
                     State: stateText,
                     ElapsedMs: elapsedMs,
                     Attempts: attempts,
-                    LastObservation: lastObservation);
+                    LastObservation: lastObservation)
+                {
+                    BackendUsed = WaitBackend.Wpf,
+                    LastObservedValue = lastObservedValue
+                };
             }
 
-            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (satisfied)
+            {
+                lastFailureReason = "condition_met_after_timeout";
+            }
+
             if (elapsed.TotalMilliseconds >= timeoutMs)
             {
-                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
-                var response = new WaitForResponse(
-                    Succeeded: false,
-                    State: stateText,
-                    ElapsedMs: elapsedMs,
-                    Attempts: attempts,
-                    LastObservation: lastObservation,
-                    FailureReason: failureReason ?? "timeout");
-
-                if (throwOnTimeout)
-                {
-                    throw new InvalidOperationException($"timeout: wait_for state='{stateText}' after {timeoutMs}ms ({failureReason ?? "timeout"}).");
-                }
-
-                return response;
+                return CreateLegacyWaitTimeoutResponse(
+                    stateText,
+                    WaitBackend.Wpf,
+                    timeoutMs,
+                    start,
+                    attempts,
+                    lastObservation,
+                    lastObservedValue,
+                    lastFailureReason,
+                    throwOnTimeout);
             }
 
-            await Task.Delay(pollIntervalMs, cancellationToken);
+            var remainingMs = Math.Max(1, timeoutMs - (int)elapsed.TotalMilliseconds);
+            await Task.Delay(Math.Min(pollIntervalMs, remainingMs), cancellationToken);
+        }
+        }
+        catch (OperationCanceledException) when (
+            IsStructuredElementDeadlineCancellation(structuredElementDeadline))
+        {
+            return CreateLegacyWaitTimeoutResponse(
+                stateText,
+                WaitBackend.Wpf,
+                timeoutMs,
+                start,
+                attempts,
+                lastObservation,
+                lastObservedValue,
+                lastFailureReason,
+                throwOnTimeout);
+        }
+        catch (Exception ex) when (
+            structuredElementDeadline is not null &&
+            ex is not OperationCanceledException &&
+            !IsApplicationRunning(_application))
+        {
+            return CreateTargetProcessExitedResponse(
+                stateText,
+                WaitBackend.Wpf,
+                GetElapsedMilliseconds(start),
+                attempts,
+                lastObservation,
+                lastObservedValue);
+        }
+        catch (Exception ex) when (
+            structuredElementDeadline is not null &&
+            ex is not OperationCanceledException &&
+            (ex is TimeoutException || client?.IsConnected == false))
+        {
+            var reasonCode = IsApplicationRunning(_application)
+                ? "agent_connection_lost"
+                : "target_process_exited";
+            return CreateStructuredFailureResponse(
+                stateText,
+                WaitBackend.Wpf,
+                start,
+                attempts,
+                lastObservation,
+                lastObservedValue,
+                reasonCode,
+                reasonCode);
         }
     }
 

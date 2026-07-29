@@ -506,6 +506,107 @@ public sealed class StateObservationTests
     }
 
     [Test]
+    public async Task Structured_wpf_value_conditions_follow_dependency_property_and_data_context_changes()
+    {
+        await InvokeAsync("Observation_RunOrdered");
+
+        var dependencyProperty = await WaitForWpfStringConditionAsync(
+            WaitConditionKind.DependencyPropertyValue,
+            pathName: "propertyName",
+            path: "Text",
+            expected: "ready",
+            timeoutMs: 5_000);
+        var dataContext = await WaitForWpfStringConditionAsync(
+            WaitConditionKind.DataContextValue,
+            pathName: "dataContextPath",
+            path: "Nested.Mode",
+            expected: "stable",
+            timeoutMs: 5_000);
+        await WaitForMarkerAsync("ordered-complete", TimeSpan.FromSeconds(5), _testCts.Token);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(dependencyProperty.Succeeded, Is.True);
+            Assert.That(dependencyProperty.BackendUsed, Is.EqualTo(WaitBackend.Wpf));
+            Assert.That(dependencyProperty.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+            Assert.That(dependencyProperty.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("ready"));
+
+            Assert.That(dataContext.Succeeded, Is.True);
+            Assert.That(dataContext.BackendUsed, Is.EqualTo(WaitBackend.Wpf));
+            Assert.That(dataContext.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+            Assert.That(dataContext.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("stable"));
+        });
+    }
+
+    [Test]
+    public async Task Structured_wpf_value_wait_captures_short_transition_between_poll_intervals()
+    {
+        await InvokeAsync("Observation_RunOrdered");
+
+        var result = await WaitForWpfStringConditionAsync(
+            WaitConditionKind.DependencyPropertyValue,
+            pathName: "propertyName",
+            path: "Text",
+            expected: "degraded",
+            timeoutMs: 5_000,
+            pollIntervalMs: 2_000);
+        await WaitForMarkerAsync("ordered-complete", TimeSpan.FromSeconds(5), _testCts.Token);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Succeeded, Is.True);
+            Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Wpf));
+            Assert.That(result.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+            Assert.That(result.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("degraded"));
+        });
+    }
+
+    [Test]
+    public async Task Structured_wpf_value_timeout_returns_backend_reason_and_actual_scalar()
+    {
+        var result = await WaitForWpfStringConditionAsync(
+            WaitConditionKind.DependencyPropertyValue,
+            pathName: "propertyName",
+            path: "Text",
+            expected: "never-ready",
+            timeoutMs: 0);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Succeeded, Is.False);
+            Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Wpf));
+            Assert.That(result.ReasonCode, Is.EqualTo("wait_timeout"));
+            Assert.That(result.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+            Assert.That(result.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("idle"));
+        });
+    }
+
+    [Test]
+    public async Task Structured_wpf_value_wait_reports_when_target_unloads()
+    {
+        await InvokeAsync("Observation_RemoveTargetDelayed");
+        await WaitForMarkerAsync("target-remove-scheduled", TimeSpan.FromSeconds(5), _testCts.Token);
+
+        var result = await WaitForWpfStringConditionAsync(
+            WaitConditionKind.DependencyPropertyValue,
+            pathName: "propertyName",
+            path: "Text",
+            expected: "never-ready",
+            timeoutMs: 5_000);
+        await WaitForMarkerAsync("target-removed-delayed", TimeSpan.FromSeconds(5), _testCts.Token);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Succeeded, Is.False);
+            Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Wpf));
+            Assert.That(result.FailureReason, Is.EqualTo("target_element_unloaded"));
+            Assert.That(result.ReasonCode, Is.EqualTo("target_element_unloaded"));
+            Assert.That(result.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+            Assert.That(result.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("idle"));
+        });
+    }
+
+    [Test]
     public async Task Secondary_dispatcher_window_is_observed_and_released_on_its_owner()
     {
         await InvokeAsync("Observation_OpenSecondary");
@@ -700,6 +801,43 @@ public sealed class StateObservationTests
             },
             _testCts.Token);
         Assert.That(response.Invoked, Is.True, $"Expected {automationId} to be invoked.");
+    }
+
+    private Task<WaitForResponse> WaitForWpfStringConditionAsync(
+        WaitConditionKind kind,
+        string pathName,
+        string path,
+        string expected,
+        int timeoutMs,
+        int pollIntervalMs = 25)
+    {
+        var condition = new Dictionary<string, object?>
+        {
+            ["kind"] = kind.ToString(),
+            [pathName] = path,
+            ["comparison"] = WaitComparison.Equals.ToString(),
+            ["expected"] = new Dictionary<string, object?>
+            {
+                ["kind"] = WaitScalarKind.String.ToString(),
+                ["stringValue"] = expected
+            }
+        };
+
+        return _mcp.CallToolAsync<WaitForResponse>(
+            "wait_for",
+            new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["backend"] = "wpf",
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Observation_Target"
+                },
+                ["condition"] = condition,
+                ["timeoutMs"] = timeoutMs,
+                ["pollIntervalMs"] = pollIntervalMs
+            },
+            _testCts.Token);
     }
 
     private async Task<PollCapture> PollUntilAsync(

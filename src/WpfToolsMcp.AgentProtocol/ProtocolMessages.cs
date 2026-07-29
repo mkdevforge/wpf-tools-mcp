@@ -23,6 +23,7 @@ public static class AgentProtocolCapabilities
     public const string CorrelateScreenshotRegion = "wpf/correlate_screenshot_region:v1";
     public const string SetValueTextModes = "wpf/set_value:text-modes-v1";
     public const string FocusElement = "wpf/focus_element:v1";
+    public const string ObserveState = "wpf/observe_state:v1";
 
     public static IReadOnlyList<string> Current { get; } = Array.AsReadOnly<string>(
     [
@@ -32,6 +33,7 @@ public static class AgentProtocolCapabilities
         GetComputedPropertyProvenance,
         CorrelateScreenshotRegion,
         SetValueTextModes,
-        FocusElement
+        FocusElement,
+        ObserveState
     ]);
 }

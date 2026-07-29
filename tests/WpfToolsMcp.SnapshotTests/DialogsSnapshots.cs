@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using NUnit.Framework;
 using VerifyNUnit;
@@ -31,6 +32,7 @@ public sealed class DialogsSnapshots
     private const string NativeFileNameControlType = "Edit";
     private const string NativeAcceptAutomationId = "1";
     private const string NativeCancelAutomationId = "2";
+    private const uint WmClose = 0x0010;
 
     private McpTestContext _mcp = null!;
     private string _sessionId = "";
@@ -274,6 +276,25 @@ public sealed class DialogsSnapshots
         Assert.Fail($"Window '{title}' did not close within timeout.");
     }
 
+    private Task<WaitForResponse> WaitForWindowConditionAsync(
+        WaitConditionKind kind,
+        Dictionary<string, object?> window,
+        int timeoutMs,
+        int pollIntervalMs) =>
+        _mcp.CallToolAsync<WaitForResponse>(
+            "wait_for",
+            new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["condition"] = new Dictionary<string, object?>
+                {
+                    ["kind"] = kind.ToString(),
+                    ["window"] = window
+                },
+                ["timeoutMs"] = timeoutMs,
+                ["pollIntervalMs"] = pollIntervalMs
+            });
+
     [Test]
     public async Task Modal_dialog_can_be_focused_and_clicked_by_window_handle_snapshot()
     {
@@ -355,6 +376,21 @@ public sealed class DialogsSnapshots
 
             var nativeWindow = await WaitForWindowAsync(_sessionId, NativeDialogTitle);
             var sameNativeWindow = await WaitForWindowAsync(_sessionId, NativeDialogTitle);
+            var windowOpen = await _mcp.CallToolAsync<WaitForResponse>(
+                "wait_for",
+                new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _sessionId,
+                    ["condition"] = new Dictionary<string, object?>
+                    {
+                        ["kind"] = WaitConditionKind.WindowOpen.ToString(),
+                        ["window"] = new Dictionary<string, object?>
+                        {
+                            ["title"] = NativeDialogTitle
+                        }
+                    },
+                    ["timeoutMs"] = 0
+                });
             var activeDialog = await _mcp.CallToolAsync<GetActiveWindowResponse>(
                 "get_active_window",
                 new Dictionary<string, object?> { ["sessionId"] = _sessionId });
@@ -430,6 +466,24 @@ public sealed class DialogsSnapshots
             });
 
             foreignSessionId = await LaunchDialogsAppSessionAsync(initialFilePath, strictPolicy: true);
+            var foreignWaitError = await CaptureToolErrorAsync(async () =>
+            {
+                _ = await _mcp.CallToolAsync<WaitForResponse>(
+                    "wait_for",
+                    new Dictionary<string, object?>
+                    {
+                        ["sessionId"] = foreignSessionId,
+                        ["condition"] = new Dictionary<string, object?>
+                        {
+                            ["kind"] = WaitConditionKind.WindowOpen.ToString(),
+                            ["window"] = new Dictionary<string, object?>
+                            {
+                                ["handle"] = nativeWindow.Handle
+                            }
+                        },
+                        ["timeoutMs"] = 0
+                    });
+            });
             var foreignWindowError = await CaptureToolErrorAsync(async () =>
             {
                 _ = await _mcp.CallToolAsync<ResolveElementResponse>(
@@ -465,6 +519,21 @@ public sealed class DialogsSnapshots
                 NativeAcceptAutomationId,
                 controlType: "Button");
             await WaitForWindowClosedAsync(_sessionId, NativeDialogTitle);
+            var windowClosed = await _mcp.CallToolAsync<WaitForResponse>(
+                "wait_for",
+                new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _sessionId,
+                    ["condition"] = new Dictionary<string, object?>
+                    {
+                        ["kind"] = WaitConditionKind.WindowClosed.ToString(),
+                        ["window"] = new Dictionary<string, object?>
+                        {
+                            ["handle"] = nativeWindow.Handle
+                        }
+                    },
+                    ["timeoutMs"] = 0
+                });
 
             var activeOwner = await _mcp.CallToolAsync<GetActiveWindowResponse>(
                 "get_active_window",
@@ -501,6 +570,11 @@ public sealed class DialogsSnapshots
                 Assert.That(nativeWindow.OwnerHandle, Is.EqualTo(ownerWindow.Handle));
                 Assert.That(nativeWindow.IsModal, Is.True);
                 Assert.That(nativeWindow.FrameworkId, Is.EqualTo("Win32").IgnoreCase);
+                Assert.That(windowOpen.Succeeded, Is.True);
+                Assert.That(windowOpen.BackendUsed, Is.EqualTo(WaitBackend.Win32));
+                Assert.That(windowOpen.LastObservation?.WindowHandle, Is.EqualTo(nativeWindow.Handle));
+                Assert.That(windowOpen.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+                Assert.That(windowOpen.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo(NativeDialogTitle));
                 Assert.That(activeDialog.Handle, Is.EqualTo(nativeWindow.Handle));
                 Assert.That(activeDialog.Title, Is.EqualTo(NativeDialogTitle));
                 Assert.That(tree.BackendUsed, Is.EqualTo(InspectionBackend.Uia));
@@ -520,10 +594,15 @@ public sealed class DialogsSnapshots
                 Assert.That(typed.Effects?.KeyboardInput, Is.False);
                 Assert.That(typed.ForegroundFocusRequired, Is.False);
                 Assert.That(typed.PhysicalInputRequired, Is.False);
+                Assert.That(foreignWaitError, Does.Contain("window_outside_session"));
                 Assert.That(foreignWindowError, Does.Contain("window_outside_session"));
                 Assert.That(accept.Invoked, Is.True);
                 Assert.That(accept.MethodUsed, Is.EqualTo("invoke"));
                 Assert.That(accept.Effects?.Semantic, Is.True);
+                Assert.That(windowClosed.Succeeded, Is.True);
+                Assert.That(windowClosed.BackendUsed, Is.EqualTo(WaitBackend.Win32));
+                Assert.That(windowClosed.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Unavailable));
+                Assert.That(windowClosed.LastObservedValue?.Detail, Is.EqualTo("window_closed"));
                 Assert.That(activeOwner.Handle, Is.EqualTo(ownerWindow.Handle));
                 Assert.That(activeOwner.Title, Is.EqualTo(MainWindowTitle));
                 Assert.That(status, Is.EqualTo("Native dialog: Opened native-dialog-target.txt"));
@@ -534,6 +613,78 @@ public sealed class DialogsSnapshots
         {
             await RunCleanupStepsAsync(
                 ("foreign session", () => CloseAppAsync(foreignSessionId)),
+                ("main session", CloseAppAsync),
+                ("fixture directory", () =>
+                {
+                    DeleteFixtureDirectory(fixtureDirectory);
+                    return Task.CompletedTask;
+                }));
+        }
+    }
+
+    [Test]
+    public async Task Structured_window_waits_observe_open_close_and_timeout_transitions()
+    {
+        var fixtureDirectory = CreateFixtureDirectory(out var initialFilePath, out _);
+
+        try
+        {
+            await LaunchDialogsAppAsync(initialFilePath, strictPolicy: true);
+            var ownerWindow = await WaitForWindowAsync(_sessionId, MainWindowTitle);
+
+            var timeout = await WaitForWindowConditionAsync(
+                WaitConditionKind.WindowOpen,
+                new Dictionary<string, object?> { ["title"] = "Window that never opens" },
+                timeoutMs: 75,
+                pollIntervalMs: 25);
+
+            _ = await InvokeAsync(
+                _sessionId,
+                ownerWindow.Handle,
+                "Dialogs_OpenNativeFileDialogDelayed");
+            var opened = await WaitForWindowConditionAsync(
+                WaitConditionKind.WindowOpen,
+                new Dictionary<string, object?> { ["title"] = NativeDialogTitle },
+                timeoutMs: 5_000,
+                pollIntervalMs: 25);
+            var nativeHandle = opened.LastObservation?.WindowHandle
+                ?? throw new AssertionException("The open wait did not return the native HWND.");
+
+            var closeDispatch = Task.Run(async () =>
+            {
+                await Task.Delay(350);
+                return PostMessage(new IntPtr(nativeHandle), WmClose, IntPtr.Zero, IntPtr.Zero);
+            });
+            var closed = await WaitForWindowConditionAsync(
+                WaitConditionKind.WindowClosed,
+                new Dictionary<string, object?> { ["handle"] = nativeHandle },
+                timeoutMs: 5_000,
+                pollIntervalMs: 25);
+            var closePosted = await closeDispatch;
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(timeout.Succeeded, Is.False);
+                Assert.That(timeout.BackendUsed, Is.EqualTo(WaitBackend.Win32));
+                Assert.That(timeout.ReasonCode, Is.EqualTo("wait_timeout"));
+                Assert.That(timeout.FailureReason, Is.EqualTo("window_not_open"));
+                Assert.That(timeout.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Unavailable));
+
+                Assert.That(opened.Succeeded, Is.True);
+                Assert.That(opened.Attempts, Is.GreaterThan(1));
+                Assert.That(opened.BackendUsed, Is.EqualTo(WaitBackend.Win32));
+                Assert.That(opened.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo(NativeDialogTitle));
+
+                Assert.That(closePosted, Is.True);
+                Assert.That(closed.Succeeded, Is.True);
+                Assert.That(closed.Attempts, Is.GreaterThan(1));
+                Assert.That(closed.BackendUsed, Is.EqualTo(WaitBackend.Win32));
+                Assert.That(closed.LastObservedValue?.Detail, Is.EqualTo("window_closed"));
+            });
+        }
+        finally
+        {
+            await RunCleanupStepsAsync(
                 ("main session", CloseAppAsync),
                 ("fixture directory", () =>
                 {
@@ -912,4 +1063,12 @@ public sealed class DialogsSnapshots
             throw new AggregateException("One or more dialogs test cleanup steps failed.", failures);
         }
     }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessage(
+        IntPtr hwnd,
+        uint message,
+        IntPtr wParam,
+        IntPtr lParam);
 }

@@ -13,6 +13,9 @@ namespace WpfToolsMcp.TestApp.ObservationProbe;
 
 public partial class MainWindow : Window
 {
+    private static readonly TimeSpan OrderedStartDelay = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan OrderedTransitionInterval = TimeSpan.FromMilliseconds(30);
+
     private static readonly ObservationState[] OrderedStates =
     [
         new("queued", 1, "warming"),
@@ -23,6 +26,7 @@ public partial class MainWindow : Window
     private readonly ObservationProbeOptions _options;
     private readonly ObservationViewModel _viewModel;
     private readonly DispatcherTimer _orderedTimer;
+    private readonly DispatcherTimer _delayedRemoveTimer;
     private readonly object _markerSync = new();
     private Thread? _secondaryThread;
     private Dispatcher? _secondaryDispatcher;
@@ -34,11 +38,17 @@ public partial class MainWindow : Window
         _options = options;
         _viewModel = new ObservationViewModel(Dispatcher);
         _orderedTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(30),
+            OrderedTransitionInterval,
             DispatcherPriority.Normal,
             ApplyNextOrderedState,
             Dispatcher);
         _orderedTimer.Stop();
+        _delayedRemoveTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(500),
+            DispatcherPriority.Normal,
+            RemoveTargetAfterDelay,
+            Dispatcher);
+        _delayedRemoveTimer.Stop();
 
         InitializeComponent();
         DataContext = _viewModel;
@@ -63,6 +73,7 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _orderedTimer.Stop();
+        _delayedRemoveTimer.Stop();
         var secondaryDispatcher = Volatile.Read(ref _secondaryDispatcher);
         if (secondaryDispatcher is not null &&
             !secondaryDispatcher.HasShutdownStarted &&
@@ -82,6 +93,7 @@ public partial class MainWindow : Window
         }
 
         _orderedStateIndex = 0;
+        _orderedTimer.Interval = OrderedStartDelay;
         RunOrderedButton.IsEnabled = false;
         _orderedTimer.Start();
     }
@@ -90,6 +102,11 @@ public partial class MainWindow : Window
     {
         var state = OrderedStates[_orderedStateIndex++];
         _viewModel.Apply(state.Phase, state.Count, state.NestedMode);
+
+        if (_orderedStateIndex == 1)
+        {
+            _orderedTimer.Interval = OrderedTransitionInterval;
+        }
 
         if (_orderedStateIndex < OrderedStates.Length)
         {
@@ -137,8 +154,34 @@ public partial class MainWindow : Window
 
     private void RemoveTarget_Click(object sender, RoutedEventArgs e)
     {
-        RootPanel.Children.Remove(ObservationTarget);
-        AppendMarker("target-removed");
+        RemoveTarget("target-removed");
+    }
+
+    private void RemoveTargetDelayed_Click(object sender, RoutedEventArgs e)
+    {
+        if (_delayedRemoveTimer.IsEnabled || !RootPanel.Children.Contains(ObservationTarget))
+        {
+            return;
+        }
+
+        AppendMarker("target-remove-scheduled");
+        _delayedRemoveTimer.Start();
+    }
+
+    private void RemoveTargetAfterDelay(object? sender, EventArgs e)
+    {
+        _delayedRemoveTimer.Stop();
+        RemoveTarget("target-removed-delayed");
+    }
+
+    private void RemoveTarget(string marker)
+    {
+        if (RootPanel.Children.Contains(ObservationTarget))
+        {
+            RootPanel.Children.Remove(ObservationTarget);
+        }
+
+        AppendMarker(marker);
     }
 
     private void OpenSecondary_Click(object sender, RoutedEventArgs e)

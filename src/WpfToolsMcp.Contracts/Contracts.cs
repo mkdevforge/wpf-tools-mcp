@@ -855,6 +855,92 @@ public sealed record DragRequest(
     int StableMs = 150,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum WaitConditionKind
+{
+    Attached,
+    Visible,
+    Enabled,
+    Actionable,
+    BoundsStable,
+    NumericValueEquals,
+    NameContains,
+    DependencyPropertyValue,
+    DataContextValue,
+    WindowOpen,
+    WindowClosed
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum WaitComparison
+{
+    Equals,
+    NotEquals,
+    Contains,
+    GreaterThan,
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum WaitScalarKind
+{
+    String,
+    Number,
+    Boolean,
+    Null
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record WaitScalar(
+    WaitScalarKind Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StringValue = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? NumberValue = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? BooleanValue = null);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record WaitWindowSelector(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Handle = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TitleContains = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? OwnerHandle = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FrameworkId = null);
+
+public sealed record WaitCondition(
+    WaitConditionKind Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PropertyName = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DataContextPath = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WaitComparison? Comparison = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WaitScalar? Expected = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WaitWindowSelector? Window = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? HoldForMs = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum WaitBackend
+{
+    Uia,
+    Wpf,
+    Win32
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum WaitObservedValueState
+{
+    Value,
+    Null,
+    Unset,
+    Unavailable,
+    Error
+}
+
+public sealed record WaitObservedValue(
+    WaitObservedValueState State,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonNode? Value = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ValueType = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Truncated = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Detail = null);
+
 public sealed record WaitForRequest(
     ElementLocator? Locator = null,
     [property: JsonPropertyName("elementId")] string? ElementId = null,
@@ -866,7 +952,11 @@ public sealed record WaitForRequest(
     int StableMs = 250,
     double? ExpectedValue = null,
     string? ExpectedText = null,
-    bool ThrowOnTimeout = true);
+    bool ThrowOnTimeout = true)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WaitCondition? Condition { get; init; }
+}
 
 public sealed record WaitForObservation(
     string Type,
@@ -875,7 +965,17 @@ public sealed record WaitForObservation(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? XPath = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Rect? Bounds = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsEnabled = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsOffscreen = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsOffscreen = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? WindowHandle { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? OwnerHandle { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FrameworkId { get; init; }
+}
 
 public sealed record WaitForResponse(
     bool Succeeded,
@@ -883,7 +983,17 @@ public sealed record WaitForResponse(
     int ElapsedMs,
     int Attempts,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WaitForObservation? LastObservation = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FailureReason = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FailureReason = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WaitBackend? BackendUsed { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ReasonCode { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WaitObservedValue? LastObservedValue { get; init; }
+}
 
 public sealed record DragResponse(
     bool Dragged,

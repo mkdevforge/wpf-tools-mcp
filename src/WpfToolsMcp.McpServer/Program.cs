@@ -1,8 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol;
 using ModelContextProtocol.Server;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using WpfToolsMcp.Automation;
 using WpfToolsMcp.McpServer;
 using WpfToolsMcp.McpServer.Tools;
@@ -21,16 +23,21 @@ builder.Services.AddSingleton<SessionManager>();
 builder.Services.AddSingleton<SubscriptionManager>();
 
 var mcpBuilder = builder.Services
-    .AddMcpServer()
+    .AddMcpServer(options =>
+        options.Filters.ListToolsFilters.Add(WaitToolSchema.CreateListToolsFilter()))
     .WithStdioServerTransport();
+var toolSerializerOptions = new JsonSerializerOptions(McpJsonUtilities.DefaultOptions)
+{
+    AllowOutOfOrderMetadataProperties = true
+};
 
 if (profile == ToolProfile.Diagnostics)
 {
-    mcpBuilder.WithToolsFromAssembly();
+    mcpBuilder.WithToolsFromAssembly(serializerOptions: toolSerializerOptions);
 }
 else
 {
-    mcpBuilder.WithTools((IEnumerable<Type>)CoreToolRegistry.ToolTypes);
+    mcpBuilder.WithTools((IEnumerable<Type>)CoreToolRegistry.ToolTypes, toolSerializerOptions);
 }
 
 await builder.Build().RunAsync();

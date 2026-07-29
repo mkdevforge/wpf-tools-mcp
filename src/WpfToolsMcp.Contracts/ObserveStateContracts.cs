@@ -45,7 +45,8 @@ public sealed record ObserveStateStartRequest(
     int DurationMs = 30_000,
     int MaxEvents = 256,
     int MaxValueLength = 512,
-    bool IncludeVisualMetadata = false);
+    bool IncludeVisualMetadata = false,
+    bool VisibleOnly = true);
 
 public sealed record ObserveStateWatch(
     ObserveStateSource Source,

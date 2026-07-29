@@ -190,21 +190,15 @@ public sealed class MinimalInteractionSnapshots
                 ["timeoutMs"] = 0,
             });
 
-            var stable = result with
+            Assert.Multiple(() =>
             {
-                ElapsedMs = -1,
-                Attempts = -1,
-                LastObservation = result.LastObservation is null
-                    ? null
-                    : result.LastObservation with
-                    {
-                        Bounds = result.LastObservation.Bounds is null
-                            ? null
-                            : result.LastObservation.Bounds with { X = 0, Y = 0 }
-                    }
-            };
+                Assert.That(result.Succeeded, Is.True);
+                Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Wpf));
+                Assert.That(result.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+                Assert.That(result.LastObservedValue?.Value?.GetValue<bool>(), Is.True);
+            });
 
-            await Verifier.Verify(stable);
+            await Verifier.Verify(ToStableStructuredWait(result));
         }
         finally
         {
@@ -231,27 +225,135 @@ public sealed class MinimalInteractionSnapshots
                 ["throwOnTimeout"] = false,
             });
 
-            var stable = result with
+            Assert.Multiple(() =>
             {
-                ElapsedMs = -1,
-                Attempts = -1,
-                LastObservation = result.LastObservation is null
-                    ? null
-                    : result.LastObservation with
-                    {
-                        Bounds = result.LastObservation.Bounds is null
-                            ? null
-                            : result.LastObservation.Bounds with { X = 0, Y = 0 }
-                    }
-            };
+                Assert.That(result.Succeeded, Is.False);
+                Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Wpf));
+                Assert.That(result.ReasonCode, Is.EqualTo("wait_timeout"));
+                Assert.That(result.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+                Assert.That(result.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("Clicks: 0"));
+            });
 
-            await Verifier.Verify(stable);
+            var defaultTimeout = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            {
+                _ = await _mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _sessionId,
+                    ["locator"] = new Dictionary<string, object?>
+                    {
+                        ["nameContains"] = "Clicks:"
+                    },
+                    ["state"] = "name_contains",
+                    ["expectedText"] = "Clicks: 999",
+                    ["timeoutMs"] = 0
+                });
+            });
+            Assert.That(defaultTimeout!.Message, Does.Contain("timeout"));
+
+            await Verifier.Verify(ToStableStructuredWait(result));
         }
         finally
         {
             await CloseAppAsync();
         }
     }
+
+    [Test]
+    public async Task Structured_wait_for_visible_reports_uia_evidence()
+    {
+        await LaunchMinimalAppAsync();
+        try
+        {
+            var result = await CallStructuredUiaWaitAsync(
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = WaitConditionKind.Visible.ToString()
+                },
+                timeoutMs: 0);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Succeeded, Is.True);
+                Assert.That(result.State, Is.EqualTo("visible"));
+                Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Uia));
+                Assert.That(result.LastObservedValue?.Value?.GetValue<bool>(), Is.True);
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task Structured_wait_for_name_timeout_returns_actual_uia_value()
+    {
+        await LaunchMinimalAppAsync();
+        try
+        {
+            var result = await CallStructuredUiaWaitAsync(
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = WaitConditionKind.NameContains.ToString(),
+                    ["comparison"] = WaitComparison.Contains.ToString(),
+                    ["expected"] = new Dictionary<string, object?>
+                    {
+                        ["kind"] = WaitScalarKind.String.ToString(),
+                        ["stringValue"] = "Clicks: 999"
+                    }
+                },
+                timeoutMs: 0);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Succeeded, Is.False);
+                Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Uia));
+                Assert.That(result.ReasonCode, Is.EqualTo("wait_timeout"));
+                Assert.That(result.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("Clicks: 0"));
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    private Task<WaitForResponse> CallStructuredUiaWaitAsync(
+        Dictionary<string, object?> condition,
+        int timeoutMs) =>
+        _mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["backend"] = "uia",
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "ClickStatus"
+            },
+            ["condition"] = condition,
+            ["timeoutMs"] = timeoutMs
+        });
+
+    private static object ToStableStructuredWait(WaitForResponse response) => new
+    {
+        response.Succeeded,
+        response.State,
+        ElapsedMs = -1,
+        Attempts = -1,
+        Observation = response.LastObservation is null
+            ? null
+            : new
+            {
+                response.LastObservation.Type,
+                response.LastObservation.AutomationId,
+                response.LastObservation.Name,
+                response.LastObservation.IsEnabled,
+                response.LastObservation.IsOffscreen
+            },
+        response.FailureReason,
+        response.BackendUsed,
+        response.ReasonCode,
+        response.LastObservedValue
+    };
 
     [Test]
     public async Task SelectItem_listbox_by_text_updates_status_snapshot()
