@@ -800,8 +800,10 @@ public sealed class NonIntrusiveInteractionTests
             var before = CaptureDesktopState(probes.Target.WindowHandle);
             AssertSentinelIsForeground(before, probes);
 
-            var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
-                await _mcp.CallToolAsync<SendKeysResponse>("send_keys", new Dictionary<string, object?>
+            InvalidOperationException? exception = null;
+            try
+            {
+                _ = await _mcp.CallToolAsync<SendKeysResponse>("send_keys", new Dictionary<string, object?>
                 {
                     ["sessionId"] = probes.TargetSessionId,
                     ["locator"] = new Dictionary<string, object?>
@@ -812,7 +814,13 @@ public sealed class NonIntrusiveInteractionTests
                     {
                         new Dictionary<string, object?> { ["key"] = "Enter" }
                     }
-                }));
+                });
+                Assert.Fail("Expected strict policy to block physical keyboard input.");
+            }
+            catch (InvalidOperationException caught)
+            {
+                exception = caught;
+            }
 
             var status = await ReadElementNameAsync(
                 probes.TargetSessionId!,
@@ -821,6 +829,7 @@ public sealed class NonIntrusiveInteractionTests
 
             Assert.Multiple(() =>
             {
+                Assert.That(exception, Is.Not.Null);
                 Assert.That(exception!.Message, Does.Contain("interaction_policy_blocked"));
                 Assert.That(exception.Message, Does.Contain("allowPhysicalInput=false"));
                 Assert.That(status, Is.EqualTo("Keys: (none)"));
