@@ -6,11 +6,123 @@ using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
 
+internal readonly record struct SessionWindowSelection(long Handle, string Title);
+
+internal sealed class SessionWindowSelectionHistory
+{
+    private sealed record Entry(long Handle, string Title, bool PreserveAsFallback);
+
+    private const int DefaultCapacity = 16;
+    private readonly object _sync = new();
+    private readonly int _capacity;
+    private readonly List<Entry> _entries = [];
+    private SessionWindowSelection _active = new(0, "");
+    private long _revision;
+
+    internal SessionWindowSelectionHistory(int capacity = DefaultCapacity)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
+        _capacity = capacity;
+    }
+
+    internal void RecordSelection(long handle, string? title, bool preserveAsFallback = false)
+    {
+        if (handle == 0)
+        {
+            return;
+        }
+
+        lock (_sync)
+        {
+            var existingIndex = _entries.FindIndex(entry => entry.Handle == handle);
+            var wasPreserved = existingIndex >= 0 && _entries[existingIndex].PreserveAsFallback;
+            if (existingIndex >= 0)
+            {
+                _entries.RemoveAt(existingIndex);
+            }
+
+            var entry = new Entry(handle, title ?? "", preserveAsFallback || wasPreserved);
+            _entries.Add(entry);
+
+            while (_entries.Count > _capacity)
+            {
+                var evictionIndex = _entries.FindIndex(
+                    startIndex: 0,
+                    count: _entries.Count - 1,
+                    match: candidate => !candidate.PreserveAsFallback);
+                _entries.RemoveAt(evictionIndex >= 0 ? evictionIndex : 0);
+            }
+
+            _active = new SessionWindowSelection(entry.Handle, entry.Title);
+            _revision++;
+        }
+    }
+
+    internal SessionWindowSelection GetActive()
+    {
+        lock (_sync)
+        {
+            return _active;
+        }
+    }
+
+    internal SessionWindowSelection Reconcile(Func<long, bool> isWindowValid)
+    {
+        ArgumentNullException.ThrowIfNull(isWindowValid);
+
+        while (true)
+        {
+            Entry[] snapshot;
+            long observedRevision;
+            lock (_sync)
+            {
+                snapshot = [.. _entries];
+                observedRevision = _revision;
+            }
+
+            var invalidHandles = new HashSet<long>();
+            Entry? mostRecentLive = null;
+            for (var index = snapshot.Length - 1; index >= 0; index--)
+            {
+                var entry = snapshot[index];
+                if (isWindowValid(entry.Handle))
+                {
+                    mostRecentLive ??= entry;
+                }
+                else
+                {
+                    invalidHandles.Add(entry.Handle);
+                }
+            }
+
+            lock (_sync)
+            {
+                if (observedRevision != _revision)
+                {
+                    continue;
+                }
+
+                if (invalidHandles.Count > 0)
+                {
+                    _entries.RemoveAll(entry => invalidHandles.Contains(entry.Handle));
+                }
+
+                _active = mostRecentLive is null
+                    ? new SessionWindowSelection(0, "")
+                    : new SessionWindowSelection(mostRecentLive.Handle, mostRecentLive.Title);
+                _revision++;
+                return _active;
+            }
+        }
+    }
+}
+
 public sealed class SessionManager : IDisposable
 {
     private sealed class SessionState
     {
         private readonly object _sync = new();
+        private readonly SessionWindowSelectionHistory _windowSelections = new();
         private bool _ending;
 
         public SessionState(
@@ -35,25 +147,13 @@ public sealed class SessionManager : IDisposable
         public EffectiveInteractionPolicy InteractionPolicy { get; }
         public string CreatedAtUtc { get; }
 
-        public long ActiveWindowHandle { get; private set; }
-        public string ActiveWindowTitle { get; private set; } = "";
+        public void RecordWindowSelection(long handle, string title, bool preserveAsFallback = false) =>
+            _windowSelections.RecordSelection(handle, title, preserveAsFallback);
 
-        public void SetActiveWindow(long handle, string title)
-        {
-            lock (_sync)
-            {
-                ActiveWindowHandle = handle;
-                ActiveWindowTitle = title ?? "";
-            }
-        }
+        public SessionWindowSelection GetActiveWindow() => _windowSelections.GetActive();
 
-        public (long Handle, string Title) GetActiveWindow()
-        {
-            lock (_sync)
-            {
-                return (ActiveWindowHandle, ActiveWindowTitle);
-            }
-        }
+        public SessionWindowSelection ReconcileActiveWindow(Func<long, bool> isWindowValid) =>
+            _windowSelections.Reconcile(isWindowValid);
 
         public bool IsEnding
         {
@@ -137,6 +237,7 @@ public sealed class SessionManager : IDisposable
         foreach (var session in sessions)
         {
             await RefreshBackendCapabilitiesAsync(session, cancellationToken).ConfigureAwait(false);
+            _ = ReconcileActiveWindow(session);
         }
 
         var activeSessions = sessions
@@ -349,7 +450,7 @@ public sealed class SessionManager : IDisposable
 
         var session = GetSession(sessionId);
         var response = await session.Controller.RunExclusiveAsync(() => session.Controller.FocusWindowAsync(request, cancellationToken), cancellationToken);
-        session.SetActiveWindow(response.Handle, response.Title);
+        session.RecordWindowSelection(response.Handle, response.Title);
         return response;
     }
 
@@ -363,22 +464,17 @@ public sealed class SessionManager : IDisposable
             var trace = session.Controller.BeginToolTrace("get_active_window");
             try
             {
-                var (handle, title) = session.GetActiveWindow();
+                var (handle, title) = ReconcileActiveWindow(session);
 
-                if (handle != 0 && IsWindowHandleValid(handle, session.Pid))
+                if (handle != 0)
                 {
                     var response = new GetActiveWindowResponse(handle, title);
                     trace?.SetSummary($"handle={response.Handle} title={response.Title}");
                     return response;
                 }
 
-                if (handle != 0 && !IsWindowHandleValid(handle, session.Pid))
-                {
-                    session.SetActiveWindow(0, "");
-                }
-
                 var window = await session.Controller.GetWindowMetadataAsync(cancellationToken: cancellationToken);
-                session.SetActiveWindow(window.Handle, window.Title);
+                session.RecordWindowSelection(window.Handle, window.Title, preserveAsFallback: true);
 
                 var result = new GetActiveWindowResponse(window.Handle, window.Title);
                 trace?.SetSummary($"handle={result.Handle} title={result.Title}");
@@ -401,19 +497,13 @@ public sealed class SessionManager : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
 
         var session = GetSession(sessionId);
-        var (activeHandle, _) = session.GetActiveWindow();
-
-        long? effectiveHandle = windowHandleOverride ?? (activeHandle != 0 ? activeHandle : null);
-
-        if (windowHandleOverride is null &&
-            effectiveHandle is long handle &&
-            handle != 0 &&
-            !IsWindowHandleValid(handle, session.Pid))
+        if (windowHandleOverride is long requestedHandle)
         {
-            session.SetActiveWindow(0, "");
-            effectiveHandle = null;
+            return (session.Controller, requestedHandle);
         }
 
+        var (activeHandle, _) = ReconcileActiveWindow(session);
+        long? effectiveHandle = activeHandle != 0 ? activeHandle : null;
         return (session.Controller, effectiveHandle);
     }
 
@@ -561,13 +651,15 @@ public sealed class SessionManager : IDisposable
             var window = await session.Controller.RunExclusiveAsync(
                 () => session.Controller.GetWindowMetadataAsync(cancellationToken: cancellationToken),
                 cancellationToken);
-            session.SetActiveWindow(window.Handle, window.Title);
+            session.RecordWindowSelection(window.Handle, window.Title, preserveAsFallback: true);
         }
         catch
         {
-            session.SetActiveWindow(0, "");
         }
     }
+
+    private static SessionWindowSelection ReconcileActiveWindow(SessionState session) =>
+        session.ReconcileActiveWindow(handle => IsWindowHandleValid(handle, session.Pid));
 
     private static bool IsWindowHandleValid(long handle, int expectedPid)
     {
@@ -592,7 +684,7 @@ public sealed class SessionManager : IDisposable
             if (expectedPid > 0)
             {
                 _ = GetWindowThreadProcessId(hwnd, out var actualPid);
-                if (actualPid != 0 && actualPid != (uint)expectedPid)
+                if (actualPid != (uint)expectedPid)
                 {
                     return false;
                 }
