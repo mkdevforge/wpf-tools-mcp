@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading;
 using NUnit.Framework;
 using VerifyNUnit;
@@ -22,6 +23,7 @@ public sealed class DialogsSnapshots
 
     private McpTestContext _mcp = null!;
     private string _sessionId = "";
+    private readonly Dictionary<string, int> _launchedProcesses = new(StringComparer.Ordinal);
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -38,7 +40,17 @@ public sealed class DialogsSnapshots
             return;
         }
 
-        await _mcp.DisposeAsync();
+        try
+        {
+            foreach (var sessionId in _launchedProcesses.Keys.ToArray())
+            {
+                await CloseAppAsync(sessionId);
+            }
+        }
+        finally
+        {
+            await _mcp.DisposeAsync();
+        }
     }
 
     private async Task LaunchDialogsAppAsync(string? nativeDialogFilePath = null, bool strictPolicy = false)
@@ -71,6 +83,7 @@ public sealed class DialogsSnapshots
         }
 
         var launch = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", arguments);
+        _launchedProcesses[launch.SessionId] = launch.Pid;
 
         return launch.SessionId;
     }
@@ -78,28 +91,48 @@ public sealed class DialogsSnapshots
     private async Task CloseAppAsync()
     {
         var sessionId = _sessionId;
-        _sessionId = "";
-        await CloseAppAsync(sessionId);
+        try
+        {
+            await CloseAppAsync(sessionId);
+        }
+        finally
+        {
+            if (string.Equals(_sessionId, sessionId, StringComparison.Ordinal))
+            {
+                _sessionId = "";
+            }
+        }
     }
 
     private async Task CloseAppAsync(string? sessionId)
     {
-        if (string.IsNullOrWhiteSpace(sessionId))
+        if (string.IsNullOrWhiteSpace(sessionId) || !_launchedProcesses.TryGetValue(sessionId, out var pid))
         {
             return;
         }
 
+        var processExited = false;
         try
         {
-            _ = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
+            var response = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
             {
                 ["sessionId"] = sessionId,
                 ["force"] = true,
                 ["timeoutMs"] = 2000
             });
+            processExited = response.ProcessExited;
         }
         catch
         {
+        }
+        finally
+        {
+            if (!processExited && !KillProcessIfRunning(pid))
+            {
+                throw new AssertionException($"Failed to terminate dialogs test process {pid} for session '{sessionId}'.");
+            }
+
+            _launchedProcesses.Remove(sessionId);
         }
     }
 
@@ -573,12 +606,53 @@ public sealed class DialogsSnapshots
 
     private static void DeleteFixtureDirectory(string directory)
     {
+        Exception? lastError = null;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                if (!Directory.Exists(directory))
+                {
+                    return;
+                }
+
+                Directory.Delete(directory, recursive: true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                lastError = ex;
+                if (attempt < 2)
+                {
+                    Thread.Sleep(100);
+                }
+            }
+        }
+
+        throw new AssertionException(
+            $"Failed to delete native-dialog fixture directory '{directory}': {lastError?.Message}");
+    }
+
+    private static bool KillProcessIfRunning(int pid)
+    {
         try
         {
-            Directory.Delete(directory, recursive: true);
+            using var process = Process.GetProcessById(pid);
+            if (process.HasExited)
+            {
+                return true;
+            }
+
+            process.Kill(entireProcessTree: true);
+            return process.WaitForExit(5000);
+        }
+        catch (ArgumentException)
+        {
+            return true;
         }
         catch
         {
+            return false;
         }
     }
 }

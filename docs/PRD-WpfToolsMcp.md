@@ -209,7 +209,7 @@ depending on localized captions. For a known native target, `Auto` inspection,
 locator-based screenshot targeting, and interaction targeting use UIA directly.
 Explicit WPF selection remains WPF-only.
 
-Active-window reconciliation follows a live owned/modal dialog and restores the
+Active-window reconciliation follows a live owned modal dialog and restores the
 most recent live owner or main HWND after the dialog closes. A window handle is
 stable only for that live-window interval. A previously observed destroyed
 handle reports `window_closed`; an HWND from another process reports

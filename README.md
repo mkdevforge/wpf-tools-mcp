@@ -255,7 +255,7 @@ For a known native window, `backend=Auto` routes backend-neutral inspection,
 locator-based screenshot targeting, and interaction targeting through UIA
 instead of trying the WPF agent first. Prefer stable AutomationIds and control
 types for common-dialog controls rather than localized captions. Session
-active-window selection follows a newly opened owned/modal window and returns
+active-window selection follows a newly opened owned modal dialog and returns
 to the most recent live owner or main window after it closes.
 
 Explicit handles fail with scoped errors: `window_closed` for a window that was

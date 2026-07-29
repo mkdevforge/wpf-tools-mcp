@@ -8310,14 +8310,23 @@ public sealed partial class AutomationController : IDisposable
                         Preset: preset,
                         Fields: fields);
 
-                    var wpf = await TryGetVisualTreeWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                    GetVisualTreeResponse? wpf = null;
+                    try
+                    {
+                        wpf = await TryGetVisualTreeWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (IsPerWindowAutoWpfMiss(ex))
+                    {
+                        warnings = [GetPerWindowAutoRoutingWarning()];
+                    }
+
                     if (wpf is not null)
                     {
                         trace?.SetSummary($"{wpf.BackendUsed} returned={wpf.ReturnedNodes} truncated={wpf.Truncated}");
                         return wpf;
                     }
 
-                    warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                    warnings ??= [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
                 }
             }
 
@@ -8487,7 +8496,16 @@ public sealed partial class AutomationController : IDisposable
                         ReturnFields: returnFields,
                         IncludeElementIds: includeElementIds);
 
-                    var wpf = await TryFindElementsWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                    FindElementsResponse? wpf = null;
+                    try
+                    {
+                        wpf = await TryFindElementsWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (IsPerWindowAutoWpfMiss(ex))
+                    {
+                        warnings = [GetPerWindowAutoRoutingWarning()];
+                    }
+
                     if (wpf is not null)
                     {
                         var responseWpf = includeElementIds
@@ -8506,7 +8524,7 @@ public sealed partial class AutomationController : IDisposable
                         return responseWpf;
                     }
 
-                    warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                    warnings ??= [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
                 }
             }
 
@@ -9578,6 +9596,9 @@ public sealed partial class AutomationController : IDisposable
 
     private static string GetNativeAutoRoutingWarning(Window window) =>
         $"backend=auto: target framework {TryGetFrameworkId(window) ?? "native"} is not WPF; used UIA.";
+
+    private static string GetPerWindowAutoRoutingWarning() =>
+        "backend=auto: target window is not backed by a WPF HwndSource; used UIA.";
 
     private static string GetWindowTitle(Window window)
     {
