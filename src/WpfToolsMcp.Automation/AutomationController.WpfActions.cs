@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Linq;
 using FlaUI.Core.AutomationElements;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -64,7 +65,8 @@ public sealed partial class AutomationController
         string publicElementId,
         ElementHandle handle,
         SetValueRequest valueRequest,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TextEntryMode textMode = TextEntryMode.Replace)
     {
         var request = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
             ? new SetWpfValueRequest(
@@ -72,13 +74,15 @@ public sealed partial class AutomationController
                 ElementId: handle.WpfAgentElementId,
                 Text: valueRequest.Text,
                 Value: valueRequest.Value,
-                MaxNodes: 8000)
+                MaxNodes: 8000,
+                TextMode: textMode)
             : new SetWpfValueRequest(
                 WindowHandle: handle.WindowHandle,
                 Locator: CreateWpfHandleRecoveryLocator(handle),
                 Text: valueRequest.Text,
                 Value: valueRequest.Value,
-                MaxNodes: 8000);
+                MaxNodes: 8000,
+                TextMode: textMode);
 
         var fallbackRequest = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
             ? request with { Locator = CreateWpfHandleRecoveryLocator(handle), ElementId = null }
@@ -92,6 +96,12 @@ public sealed partial class AutomationController
             handle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+        if (textMode != TextEntryMode.Replace &&
+            !AgentSupportsCapability(client, AgentProtocolCapabilities.SetValueTextModes))
+        {
+            return null;
+        }
+
         try
         {
             return await CallWpfAgentTargetAsync<SetValueResponse>(
@@ -106,6 +116,56 @@ public sealed partial class AutomationController
         {
             return null;
         }
+    }
+
+    private async Task<FocusWpfElementResponse> FocusWpfHandleForKeyboardInputAsync(
+        string publicElementId,
+        ElementHandle handle,
+        CancellationToken cancellationToken)
+    {
+        var request = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
+            ? new FocusWpfElementRequest(
+                WindowHandle: handle.WindowHandle,
+                ElementId: handle.WpfAgentElementId,
+                MaxNodes: 8000)
+            : new FocusWpfElementRequest(
+                WindowHandle: handle.WindowHandle,
+                Locator: CreateWpfHandleRecoveryLocator(handle),
+                MaxNodes: 8000);
+
+        var fallbackRequest = !string.IsNullOrWhiteSpace(handle.WpfAgentElementId)
+            ? request with { Locator = CreateWpfHandleRecoveryLocator(handle), ElementId = null }
+            : null;
+        var target = new WpfAgentTarget(
+            handle.WindowHandle,
+            request.Locator,
+            handle.WpfAgentElementId,
+            publicElementId,
+            fallbackRequest?.Locator,
+            handle);
+
+        var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+        if (!AgentSupportsCapability(client, AgentProtocolCapabilities.FocusElement))
+        {
+            throw new InvalidOperationException(
+                "wpf_focus_capability_unavailable: the connected WPF agent cannot focus an element without mouse input. " +
+                "Restart the target application and reconnect so the current agent can be injected.");
+        }
+
+        var response = await CallWpfAgentTargetAsync<FocusWpfElementResponse>(
+            client,
+            AgentProtocolCapabilities.FocusElement,
+            request,
+            fallbackRequest,
+            target,
+            cancellationToken).ConfigureAwait(false);
+        if (!response.Focused)
+        {
+            throw new InvalidOperationException(
+                $"focus_failed_wpf_target: WPF element '{publicElementId}' did not receive keyboard focus.");
+        }
+
+        return response;
     }
 
     private static bool IsWpfSetValueUnsupported(Exception ex)

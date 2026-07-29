@@ -6,10 +6,12 @@ namespace WpfToolsMcp.TestApp.FocusProbe;
 
 public partial class MainWindow : Window
 {
+    private const int MaximumReportedKeyboardEvents = 12;
     private int _activationCount;
     private int _buttonClickCount;
     private int _deactivationCount;
     private int _physicalClickCount;
+    private readonly List<string> _keyboardEvents = [];
     private string _keyboardText = string.Empty;
     private bool _selectAllKeyboardText;
 
@@ -25,6 +27,7 @@ public partial class MainWindow : Window
 
         UpdateActivationStatus();
         UpdateButtonStatus();
+        UpdateKeyboardEventStatus();
         UpdateKeyboardFallbackStatus();
         UpdatePhysicalFallbackStatus();
         UpdateSelectionStatus();
@@ -60,14 +63,23 @@ public partial class MainWindow : Window
 
     private void KeyboardFallbackTarget_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.A && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        _keyboardEvents.Add(FormatKeyStroke(key, Keyboard.Modifiers));
+        if (_keyboardEvents.Count > MaximumReportedKeyboardEvents)
+        {
+            _keyboardEvents.RemoveAt(0);
+        }
+
+        UpdateKeyboardEventStatus();
+
+        if (key == Key.A && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
             _selectAllKeyboardText = true;
             e.Handled = true;
             return;
         }
 
-        if (e.Key is Key.Delete or Key.Back)
+        if (key is Key.Delete or Key.Back)
         {
             if (_selectAllKeyboardText || _keyboardText.Length > 0)
             {
@@ -113,6 +125,47 @@ public partial class MainWindow : Window
         KeyboardFallbackStatus.Text = _keyboardText.Length == 0
             ? "Keyboard text: (empty)"
             : $"Keyboard text: {_keyboardText}";
+
+    private void UpdateKeyboardEventStatus() =>
+        KeyboardEventStatus.Text = _keyboardEvents.Count == 0
+            ? "Keys: (none)"
+            : $"Keys: {string.Join(",", _keyboardEvents)}";
+
+    private static string FormatKeyStroke(Key key, ModifierKeys modifiers)
+    {
+        var names = new List<string>(5);
+        if (modifiers.HasFlag(ModifierKeys.Control))
+        {
+            names.Add("Control");
+        }
+
+        if (modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            names.Add("Shift");
+        }
+
+        if (modifiers.HasFlag(ModifierKeys.Alt))
+        {
+            names.Add("Alt");
+        }
+
+        if (modifiers.HasFlag(ModifierKeys.Windows))
+        {
+            names.Add("Windows");
+        }
+
+        names.Add(key switch
+        {
+            Key.Return => "Enter",
+            Key.Escape => "Escape",
+            Key.Left => "ArrowLeft",
+            Key.Up => "ArrowUp",
+            Key.Right => "ArrowRight",
+            Key.Down => "ArrowDown",
+            _ => key.ToString()
+        });
+        return string.Join("+", names);
+    }
 
     private void UpdatePhysicalFallbackStatus() => PhysicalFallbackStatus.Text = $"Physical clicks: {_physicalClickCount}";
 

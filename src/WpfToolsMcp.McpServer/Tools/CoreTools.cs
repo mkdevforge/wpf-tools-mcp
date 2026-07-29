@@ -575,6 +575,7 @@ public static class CoreInteractionTools
         [Description("Text to enter")] string text,
         [Description("Element locator")] CoreElementLocator? locator = null,
         [Description("Element ID")] string? elementId = null,
+        [Description("Text entry mode: Replace, Append, or AtSelection. Omit to preserve legacy target-dependent behavior.")] TextEntryMode? mode = null,
         [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
@@ -586,6 +587,32 @@ public static class CoreInteractionTools
                     new TypeTextRequest(
                         Locator: locator?.ToElementLocator(),
                         Text: text,
+                        ElementId: elementId,
+                        WindowHandle: hasElementId ? null : effectiveWindowHandle,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy),
+                        Mode: mode),
+                    cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "send_keys"), Description("Send an ordered sequence of physical keyboard keys or modifier chords to the focused element, or to a specified locator/elementId.")]
+    public static Task<SendKeysResponse> SendKeys(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Ordered key and modifier sequence (1-100 strokes)")] IReadOnlyList<KeyStroke> sequence,
+        [Description("Element locator")] CoreElementLocator? locator = null,
+        [Description("Element ID")] string? elementId = null,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.SendKeysAsync(
+                    new SendKeysRequest(
+                        Sequence: sequence,
+                        Locator: locator?.ToElementLocator(),
                         ElementId: elementId,
                         WindowHandle: hasElementId ? null : effectiveWindowHandle,
                         InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy)),

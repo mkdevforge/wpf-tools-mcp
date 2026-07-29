@@ -235,6 +235,18 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case AgentProtocolCapabilities.FocusElement:
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<FocusWpfElementRequest>(JsonOptions)
+                            ?? new FocusWpfElementRequest();
+
+                        var response = WpfVisualTreeInspector.FocusElement(ownerId, typedRequest, cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
                 case "wpf/invoke":
                     return await RunOnUiAsync(() =>
                     {

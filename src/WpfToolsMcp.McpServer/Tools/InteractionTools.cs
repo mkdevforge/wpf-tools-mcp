@@ -229,6 +229,7 @@ public static class InteractionTools
         [Description("Element locator")] ElementLocator? locator = null,
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Text entry mode: Replace, Append, or AtSelection. Omit to preserve legacy target-dependent behavior.")] TextEntryMode? mode = null,
         [Description("Timeout (ms)")] int timeoutMs = 5000,
         [Description("Auto-wait for actionability")] bool autoWait = true,
         [Description("Polling interval (ms)")] int pollIntervalMs = 100,
@@ -244,6 +245,41 @@ public static class InteractionTools
                     new TypeTextRequest(
                         Locator: locator,
                         Text: text,
+                        ElementId: elementId,
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        TimeoutMs: timeoutMs,
+                        AutoWait: autoWait,
+                        PollIntervalMs: pollIntervalMs,
+                        StableMs: stableMs,
+                        InteractionPolicy: sessions.ResolveInteractionPolicy(sessionId, interactionPolicy),
+                        Mode: mode),
+                    cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "send_keys"), Description("Send an ordered sequence of physical keyboard keys or modifier chords to the focused element, or to a specified locator/elementId.")]
+    public static Task<SendKeysResponse> SendKeys(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Ordered key and modifier sequence (1-100 strokes)")] IReadOnlyList<KeyStroke> sequence,
+        [Description("Element locator")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Timeout (ms)")] int timeoutMs = 5000,
+        [Description("Auto-wait for actionability")] bool autoWait = true,
+        [Description("Polling interval (ms)")] int pollIntervalMs = 100,
+        [Description("Stable duration (ms)")] int stableMs = 150,
+        [Description("Interaction policy override")] InteractionPolicy? interactionPolicy = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.SendKeysAsync(
+                    new SendKeysRequest(
+                        Sequence: sequence,
+                        Locator: locator,
                         ElementId: elementId,
                         WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
                         TimeoutMs: timeoutMs,

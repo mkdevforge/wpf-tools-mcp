@@ -110,6 +110,10 @@
                        AutomationProperties.AutomationId="FocusProbe_KeyboardFallbackStatus"
                        Text="Keyboard text: (empty)"
                        Margin="0,6,0,0" />
+            <TextBlock x:Name="KeyboardEventStatus"
+                       AutomationProperties.AutomationId="FocusProbe_KeyboardEventStatus"
+                       Text="Keys: (none)"
+                       Margin="0,4,0,0" />
         </StackPanel>
 
         <StackPanel Grid.Row="5"

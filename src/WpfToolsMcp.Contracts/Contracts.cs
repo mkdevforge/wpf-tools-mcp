@@ -38,7 +38,8 @@ public sealed record InteractionEffects(
     bool WindowRestored = false,
     bool MouseInput = false,
     bool KeyboardInput = false,
-    bool CursorMoved = false);
+    bool CursorMoved = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool KeyboardFocusChanged = false);
 
 public sealed record CloseAppRequest(bool Force = false, int TimeoutMs = 5000);
 
@@ -636,6 +637,107 @@ public sealed record InvokeResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MethodUsed = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TextEntryMode
+{
+    Replace,
+    Append,
+    AtSelection
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum KeyboardKey
+{
+    Backspace,
+    Tab,
+    Enter,
+    Escape,
+    Space,
+    PageUp,
+    PageDown,
+    End,
+    Home,
+    ArrowLeft,
+    ArrowUp,
+    ArrowRight,
+    ArrowDown,
+    Insert,
+    Delete,
+    Digit0,
+    Digit1,
+    Digit2,
+    Digit3,
+    Digit4,
+    Digit5,
+    Digit6,
+    Digit7,
+    Digit8,
+    Digit9,
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum KeyboardModifier
+{
+    Shift,
+    Control,
+    Alt,
+    Windows
+}
+
+public sealed record KeyStroke(
+    [property: JsonRequired] KeyboardKey Key,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<KeyboardModifier>? Modifiers = null);
+
 public sealed record TypeTextRequest(
     ElementLocator? Locator = null,
     string Text = "",
@@ -645,12 +747,34 @@ public sealed record TypeTextRequest(
     bool AutoWait = true,
     int PollIntervalMs = 100,
     int StableMs = 150,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TextEntryMode? Mode = null);
 
 public sealed record TypeTextResponse(
     bool Typed,
     string MethodUsed,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null,
+    TextEntryMode ModeUsed = TextEntryMode.Replace,
+    bool ForegroundFocusRequired = false,
+    bool PhysicalInputRequired = false);
+
+public sealed record SendKeysRequest(
+    IReadOnlyList<KeyStroke> Sequence,
+    ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    long? WindowHandle = null,
+    int TimeoutMs = 5000,
+    bool AutoWait = true,
+    int PollIntervalMs = 100,
+    int StableMs = 150,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
+
+public sealed record SendKeysResponse(
+    bool Sent,
+    string MethodUsed,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionEffects? Effects = null,
+    bool ForegroundFocusRequired = false,
+    bool PhysicalInputRequired = false);
 
 public sealed record SetValueRequest(
     ElementLocator? Locator = null,
@@ -899,7 +1023,21 @@ public sealed record SetWpfValueRequest(
     double? Value = null,
     bool VisibleOnly = true,
     bool IncludeOffViewport = true,
+    int MaxNodes = 2000,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] TextEntryMode TextMode = TextEntryMode.Replace);
+
+public sealed record FocusWpfElementRequest(
+    long? WindowHandle = null,
+    ElementLocator? Locator = null,
+    [property: JsonPropertyName("elementId")] string? ElementId = null,
+    bool VisibleOnly = true,
+    bool IncludeOffViewport = true,
     int MaxNodes = 2000);
+
+public sealed record FocusWpfElementResponse(
+    bool Focused,
+    bool KeyboardFocusChanged,
+    string MethodUsed);
 
 public sealed record InvokeWpfRequest(
     long? WindowHandle = null,

@@ -2931,6 +2931,10 @@ public sealed partial class AutomationController : IDisposable
                 throw new ArgumentException("text cannot be null.");
             }
 
+            var mode = KeyboardInputEngine.ResolveTextEntryMode(
+                request.Mode,
+                hasTarget: hasLocator || hasElementId);
+
             var application = EnsureAttached();
             var automation = EnsureAutomation();
             var timeoutMs = Math.Clamp(request.TimeoutMs, 0, 60_000);
@@ -2948,6 +2952,7 @@ public sealed partial class AutomationController : IDisposable
                     ? FindWindowByHandle(application, automation, requestedHandle)
                     : FindMainWindow(application, automation);
 
+                var focusedBeforeOperation = TryGetFocusedElement(automation);
                 await PrepareWindowForPhysicalInputAsync(
                     window,
                     operation: "type_text",
@@ -3003,15 +3008,22 @@ public sealed partial class AutomationController : IDisposable
                         cancellationToken);
                 }
 
-                Keyboard.Type(request.Text);
+                KeyboardInputEngine.TypeText(request.Text, mode);
                 effects.MarkKeyboardInput();
+                MarkKeyboardFocusChangeIfDifferent(focusedBeforeOperation, automation, effects);
                 if (UiDelayMs > 0)
                 {
                     await Task.Delay(UiDelayMs, cancellationToken);
                 }
 
                 trace?.SetSummary("method=keyboard_focused");
-                return new TypeTextResponse(true, "keyboard_focused", effects.ToContract());
+                return new TypeTextResponse(
+                    Typed: true,
+                    MethodUsed: "keyboard_focused",
+                    Effects: effects.ToContract(),
+                    ModeUsed: mode,
+                    ForegroundFocusRequired: true,
+                    PhysicalInputRequired: true);
             }
 
             if (hasElementId)
@@ -3039,12 +3051,17 @@ public sealed partial class AutomationController : IDisposable
                         elementId,
                         handle,
                         new SetValueRequest(ElementId: elementId, Text: request.Text),
-                        cancellationToken).ConfigureAwait(false);
+                        cancellationToken,
+                        mode).ConfigureAwait(false);
                     if (wpfSet is not null)
                     {
                         effects.MarkSemantic();
                         trace?.SetSummary($"method={wpfSet.MethodUsed}");
-                        return new TypeTextResponse(true, wpfSet.MethodUsed, effects.ToContract());
+                        return new TypeTextResponse(
+                            Typed: true,
+                            MethodUsed: wpfSet.MethodUsed,
+                            Effects: effects.ToContract(),
+                            ModeUsed: mode);
                     }
 
                     try
@@ -3061,8 +3078,10 @@ public sealed partial class AutomationController : IDisposable
                     {
                         return await TypeTextWithWpfPhysicalFallbackAsync(
                             window,
+                            elementId,
                             handle,
                             request,
+                            mode,
                             policy,
                             effects,
                             cancellationToken).ConfigureAwait(false);
@@ -3102,12 +3121,17 @@ public sealed partial class AutomationController : IDisposable
                         wpfTarget.ElementId,
                         wpfTarget.Handle,
                         new SetValueRequest(Locator: request.Locator, Text: request.Text),
-                        cancellationToken).ConfigureAwait(false);
+                        cancellationToken,
+                        mode).ConfigureAwait(false);
                     if (wpfSet is not null)
                     {
                         effects.MarkSemantic();
                         trace?.SetSummary($"method={wpfSet.MethodUsed}");
-                        return new TypeTextResponse(true, wpfSet.MethodUsed, effects.ToContract());
+                        return new TypeTextResponse(
+                            Typed: true,
+                            MethodUsed: wpfSet.MethodUsed,
+                            Effects: effects.ToContract(),
+                            ModeUsed: mode);
                     }
 
                     try
@@ -3124,8 +3148,10 @@ public sealed partial class AutomationController : IDisposable
                     {
                         return await TypeTextWithWpfPhysicalFallbackAsync(
                             window,
+                            wpfTarget.ElementId,
                             wpfTarget.Handle,
                             request,
+                            mode,
                             policy,
                             effects,
                             cancellationToken).ConfigureAwait(false);
@@ -3147,8 +3173,73 @@ public sealed partial class AutomationController : IDisposable
                 }
             }
 
-            TryScrollIntoView(element);
             EnsureEnabledOrThrow(element, "type_text");
+            var valuePattern = element.Patterns.Value.PatternOrDefault;
+            var isPassword = element.Properties.IsPassword.ValueOrDefault;
+            if (KeyboardInputEngine.CanUseSemanticValuePattern(
+                    mode,
+                    isPassword) &&
+                valuePattern is not null &&
+                valuePattern.IsReadOnly == false)
+            {
+                string semanticText;
+                try
+                {
+                    semanticText = mode == TextEntryMode.Append
+                        ? (valuePattern.Value ?? string.Empty) + request.Text
+                        : request.Text;
+                    valuePattern.SetValue(semanticText);
+                }
+                catch (COMException ex)
+                {
+                    throw (InvalidOperationException)WrapUiaActionException(ex, "type_text", element);
+                }
+
+                if (request.AutoWait && KeyboardInputEngine.CanReadValuePatternText(isPassword))
+                {
+                    await WaitForValuePatternTextAsync(
+                        valuePattern,
+                        expected: semanticText,
+                        timeoutMs,
+                        pollIntervalMs,
+                        cancellationToken);
+                }
+                else if (UiDelayMs > 0)
+                {
+                    await Task.Delay(UiDelayMs, cancellationToken);
+                }
+
+                effects.MarkSemantic();
+                var methodUsed = mode == TextEntryMode.Append
+                    ? "valuePattern_append"
+                    : "valuePattern";
+                trace?.SetSummary($"method={methodUsed}");
+                return new TypeTextResponse(
+                    Typed: true,
+                    MethodUsed: methodUsed,
+                    Effects: effects.ToContract(),
+                    ModeUsed: mode);
+            }
+
+            var physicalAlternative = mode switch
+            {
+                TextEntryMode.AtSelection =>
+                    "AtSelection requires keyboard input for this UI Automation target.",
+                TextEntryMode.Append when isPassword =>
+                    "Append requires keyboard input because UI Automation does not expose the current password value.",
+                _ => "The target has no writable ValuePattern."
+            };
+            EnsurePhysicalInputAllowed("type_text", policy, physicalAlternative);
+            var focusedBeforePhysicalInput = TryGetFocusedElement(automation);
+            await PrepareWindowForPhysicalInputAsync(
+                window,
+                operation: "type_text",
+                policy,
+                effects,
+                semanticAlternative: physicalAlternative,
+                cancellationToken,
+                focusWindow: false).ConfigureAwait(false);
+            TryScrollIntoView(element);
             if (request.AutoWait)
             {
                 if (stableMs > 0)
@@ -3175,59 +3266,23 @@ public sealed partial class AutomationController : IDisposable
                     cancellationToken);
             }
 
-            var valuePattern = element.Patterns.Value.PatternOrDefault;
-            if (valuePattern is not null && valuePattern.IsReadOnly == false)
-            {
-                try
-                {
-                    valuePattern.SetValue(request.Text);
-                }
-                catch (COMException ex)
-                {
-                    throw (InvalidOperationException)WrapUiaActionException(ex, "type_text", element);
-                }
-
-                if (request.AutoWait)
-                {
-                    await WaitForValuePatternTextAsync(
-                        valuePattern,
-                        expected: request.Text,
-                        timeoutMs,
-                        pollIntervalMs,
-                        cancellationToken);
-                }
-                else if (UiDelayMs > 0)
-                {
-                    await Task.Delay(UiDelayMs, cancellationToken);
-                }
-
-                effects.MarkSemantic();
-                trace?.SetSummary("method=valuePattern");
-                return new TypeTextResponse(true, "valuePattern", effects.ToContract());
-            }
-
-            await PrepareWindowForPhysicalInputAsync(
-                window,
-                operation: "type_text",
-                policy,
-                effects,
-                semanticAlternative: "The target has no writable ValuePattern.",
-                cancellationToken).ConfigureAwait(false);
-            element.Focus();
+            FocusUiaElementForKeyboardInput(element, automation, rawWalker, effects);
             if (UiDelayMs > 0)
             {
                 await Task.Delay(UiDelayMs, cancellationToken);
             }
 
-            Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
-            Keyboard.Type(VirtualKeyShort.DELETE);
-            Keyboard.Type(request.Text);
+            KeyboardInputEngine.TypeText(request.Text, mode);
             effects.MarkKeyboardInput();
+            MarkKeyboardFocusChangeIfDifferent(focusedBeforePhysicalInput, automation, effects);
 
             if (request.AutoWait)
             {
                 var afterValuePattern = element.Patterns.Value.PatternOrDefault;
-                if (afterValuePattern is not null && afterValuePattern.IsReadOnly == false)
+                if (mode == TextEntryMode.Replace &&
+                    KeyboardInputEngine.CanReadValuePatternText(isPassword) &&
+                    afterValuePattern is not null &&
+                    afterValuePattern.IsReadOnly == false)
                 {
                     await WaitForValuePatternTextAsync(
                         afterValuePattern,
@@ -3242,8 +3297,17 @@ public sealed partial class AutomationController : IDisposable
                 await Task.Delay(UiDelayMs, cancellationToken);
             }
 
-            trace?.SetSummary("method=keyboard");
-            return new TypeTextResponse(true, "keyboard", effects.ToContract());
+            var physicalMethodUsed = request.Mode is null
+                ? "keyboard"
+                : "keyboard_uia_focus";
+            trace?.SetSummary($"method={physicalMethodUsed}");
+            return new TypeTextResponse(
+                Typed: true,
+                MethodUsed: physicalMethodUsed,
+                Effects: effects.ToContract(),
+                ModeUsed: mode,
+                ForegroundFocusRequired: true,
+                PhysicalInputRequired: true);
         }
         catch (Exception ex)
         {
@@ -3258,8 +3322,10 @@ public sealed partial class AutomationController : IDisposable
 
     private async Task<TypeTextResponse> TypeTextWithWpfPhysicalFallbackAsync(
         Window window,
+        string wpfElementId,
         ElementHandle handle,
         TypeTextRequest request,
+        TextEntryMode mode,
         EffectiveInteractionPolicy policy,
         InteractionEffectTracker effects,
         CancellationToken cancellationToken)
@@ -3268,13 +3334,8 @@ public sealed partial class AutomationController : IDisposable
             operation: "type_text",
             policy,
             semanticAlternative: "The WPF target does not support direct value assignment.");
-
-        var bounds = await ResolveWpfBoundsForHandleAsync(
-            window,
-            handle,
-            autoScroll: request.AutoWait,
-            cancellationToken,
-            throwIfScrollFailed: request.AutoWait).ConfigureAwait(false);
+        var automation = EnsureAutomation();
+        var focusedBeforeInput = TryGetFocusedElement(automation);
 
         await PrepareWindowForPhysicalInputAsync(
             window,
@@ -3282,25 +3343,41 @@ public sealed partial class AutomationController : IDisposable
             policy,
             effects,
             semanticAlternative: "The WPF target does not support direct value assignment.",
+            cancellationToken,
+            focusWindow: false).ConfigureAwait(false);
+
+        var focused = await FocusWpfHandleForKeyboardInputAsync(
+            wpfElementId,
+            handle,
             cancellationToken).ConfigureAwait(false);
+        if (focused.KeyboardFocusChanged)
+        {
+            effects.MarkKeyboardFocusChanged();
+        }
 
-        Mouse.LeftClick(GetRectCenterPoint(bounds));
-        effects.MarkMouseInput();
         if (UiDelayMs > 0)
         {
             await Task.Delay(UiDelayMs, cancellationToken);
         }
 
-        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
-        Keyboard.Type(VirtualKeyShort.DELETE);
-        Keyboard.Type(request.Text);
+        KeyboardInputEngine.TypeText(request.Text, mode);
         effects.MarkKeyboardInput();
+        MarkKeyboardFocusChangeIfDifferent(focusedBeforeInput, automation, effects);
         if (UiDelayMs > 0)
         {
             await Task.Delay(UiDelayMs, cancellationToken);
         }
 
-        return new TypeTextResponse(true, "keyboard", effects.ToContract());
+        var physicalMethodUsed = request.Mode is null
+            ? "keyboard"
+            : "keyboard_wpf_focus";
+        return new TypeTextResponse(
+            Typed: true,
+            MethodUsed: physicalMethodUsed,
+            Effects: effects.ToContract(),
+            ModeUsed: mode,
+            ForegroundFocusRequired: true,
+            PhysicalInputRequired: true);
     }
 
     public async Task<SetValueResponse> SetValueAsync(

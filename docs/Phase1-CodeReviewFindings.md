@@ -59,11 +59,11 @@ At the time, the main "return later" items were about:
 
 ### `type_text` fallback is destructive (Ctrl+A/Delete)
 
-- **Current:** If ValuePattern isn’t available, typing focuses the element and clears via Ctrl+A/Delete before typing.
-- **Risk:** In real apps (custom editors, masked inputs, incremental search boxes), unconditional clearing may be undesirable.
-- **Follow-ups:**
-  - Add parameters such as `clearFirst` (default true/false), `append`, or `sendKeys` to control behavior.
-  - Consider a “best effort” heuristic (e.g., only clear if the element supports text pattern / has selection) if we want smart defaults.
+- **Resolved:** `type_text` exposes explicit `Replace`, `Append`, and
+  `AtSelection` modes while preserving its legacy omitted-mode behavior.
+  `send_keys` separately exposes structured keys, modifier chords, and ordered
+  sequences. Physical paths are policy-gated and report their focus/input
+  requirements and actual effects.
 
 ### Concurrency/thread-safety
 

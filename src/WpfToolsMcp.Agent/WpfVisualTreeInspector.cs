@@ -13,6 +13,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Interop;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using System.Windows.Threading;
@@ -2304,6 +2305,11 @@ internal static partial class WpfVisualTreeInspector
             throw new ArgumentException("invalid_request: set_value requires exactly one of text OR value.");
         }
 
+        if (hasNumericValue && request.TextMode != TextEntryMode.Replace)
+        {
+            throw new ArgumentException("invalid_request: set_value textMode is only valid with text input.");
+        }
+
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
 
@@ -2333,17 +2339,13 @@ internal static partial class WpfVisualTreeInspector
             ? request.Text!
             : request.Value!.Value.ToString(CultureInfo.InvariantCulture);
 
+        if (TrySetWpfTextTargetValue(element, textValue, hasText, request.TextMode) is { } textResponse)
+        {
+            return textResponse;
+        }
+
         switch (element)
         {
-            case TextBox textBox:
-                textBox.Text = textValue;
-                return new SetValueResponse(Set: true, MethodUsed: "wpf_textBoxText");
-            case PasswordBox passwordBox:
-                passwordBox.Password = textValue;
-                return new SetValueResponse(Set: true, MethodUsed: "wpf_passwordBoxPassword");
-            case ComboBox { IsEditable: true } comboBox:
-                comboBox.Text = textValue;
-                return new SetValueResponse(Set: true, MethodUsed: "wpf_comboBoxText");
             case RangeBase rangeBase when hasNumericValue:
                 var value = request.Value!.Value;
                 if (value < rangeBase.Minimum || value > rangeBase.Maximum)
@@ -2360,9 +2362,198 @@ internal static partial class WpfVisualTreeInspector
         var supported = hasText
             ? "TextBox.Text, PasswordBox.Password, or editable ComboBox.Text"
             : "TextBox.Text, PasswordBox.Password, editable ComboBox.Text, or RangeBase.Value";
+        var modeDescription = hasText && request.TextMode != TextEntryMode.Replace
+            ? $" for text mode '{request.TextMode}'"
+            : string.Empty;
         throw new InvalidOperationException(
-            $"set_value_unsupported_wpf_target: WPF type '{element.GetType().Name}' does not expose a supported value target for this input. Supported WPF targets: {supported}.");
+            $"set_value_unsupported_wpf_target: WPF type '{element.GetType().Name}' does not expose a supported value target for this input{modeDescription}. Supported WPF targets: {supported}.");
     }
+
+    internal static SetValueResponse? TrySetWpfTextValue(
+        DependencyObject element,
+        string textValue,
+        TextEntryMode textMode)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        ArgumentNullException.ThrowIfNull(textValue);
+
+        return element switch
+        {
+            TextBox textBox => SetTextBoxValue(textBox, textValue, textMode),
+            PasswordBox passwordBox => SetPasswordBoxValue(passwordBox, textValue, textMode),
+            ComboBox { IsEditable: true } comboBox => SetEditableComboBoxValue(comboBox, textValue, textMode),
+            _ => null
+        };
+    }
+
+    internal static SetValueResponse? TrySetWpfTextTargetValue(
+        DependencyObject element,
+        string textValue,
+        bool isTextInput,
+        TextEntryMode requestedTextMode) =>
+        TrySetWpfTextValue(
+            element,
+            textValue,
+            isTextInput ? requestedTextMode : TextEntryMode.Replace);
+
+    private static SetValueResponse SetTextBoxValue(
+        TextBox textBox,
+        string textValue,
+        TextEntryMode textMode)
+    {
+        switch (textMode)
+        {
+            case TextEntryMode.Replace:
+                textBox.Text = textValue;
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_textBoxText");
+            case TextEntryMode.Append:
+                textBox.AppendText(textValue);
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_textBoxAppendText");
+            case TextEntryMode.AtSelection:
+                ReplaceTextBoxSelection(textBox, textValue);
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_textBoxSelectedText");
+            default:
+                throw new ArgumentOutOfRangeException(nameof(textMode), textMode, "Unknown text entry mode.");
+        }
+    }
+
+    private static SetValueResponse? SetPasswordBoxValue(
+        PasswordBox passwordBox,
+        string textValue,
+        TextEntryMode textMode)
+    {
+        switch (textMode)
+        {
+            case TextEntryMode.Replace:
+                passwordBox.Password = textValue;
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_passwordBoxPassword");
+            case TextEntryMode.Append:
+                passwordBox.Password += textValue;
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_passwordBoxPasswordAppend");
+            case TextEntryMode.AtSelection:
+                return null;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(textMode), textMode, "Unknown text entry mode.");
+        }
+    }
+
+    private static SetValueResponse? SetEditableComboBoxValue(
+        ComboBox comboBox,
+        string textValue,
+        TextEntryMode textMode)
+    {
+        switch (textMode)
+        {
+            case TextEntryMode.Replace:
+                comboBox.Text = textValue;
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_comboBoxText");
+            case TextEntryMode.Append:
+                comboBox.Text += textValue;
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_comboBoxTextAppend");
+            case TextEntryMode.AtSelection:
+                _ = comboBox.ApplyTemplate();
+                if (comboBox.Template?.FindName("PART_EditableTextBox", comboBox) is not TextBox editableTextBox)
+                {
+                    return null;
+                }
+
+                ReplaceTextBoxSelection(editableTextBox, textValue);
+                return new SetValueResponse(Set: true, MethodUsed: "wpf_comboBoxSelectedText");
+            default:
+                throw new ArgumentOutOfRangeException(nameof(textMode), textMode, "Unknown text entry mode.");
+        }
+    }
+
+    private static void ReplaceTextBoxSelection(TextBox textBox, string textValue)
+    {
+        var selectionStart = textBox.SelectionStart;
+        textBox.SelectedText = textValue;
+        textBox.Select(selectionStart + textValue.Length, 0);
+    }
+
+    public static FocusWpfElementResponse FocusElement(
+        string ownerId,
+        FocusWpfElementRequest request,
+        CancellationToken cancellationToken)
+    {
+        var maxNodes = Math.Clamp(request.MaxNodes, 1, 200_000);
+        var window = ResolveWindow(request.WindowHandle);
+        using var treeService = new VisualTreeService();
+
+        var resolved = ResolveTargetElement(
+            ownerId,
+            window,
+            treeService,
+            rootObject: window,
+            rootXPath: "/Window",
+            request.Locator,
+            request.ElementId,
+            request.WindowHandle,
+            request.VisibleOnly,
+            request.IncludeOffViewport,
+            interactiveOnly: false,
+            interactiveMode: InteractiveMode.Heuristic,
+            maxNodes,
+            cancellationToken);
+
+        var element = resolved.Element;
+        if (GetIsEnabledWpf(element) is false)
+        {
+            throw new InvalidOperationException($"element_disabled: focus target WPF type '{element.GetType().Name}' is disabled.");
+        }
+
+        return FocusWpfElement(element);
+    }
+
+    internal static FocusWpfElementResponse FocusWpfElement(DependencyObject element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        if (element is not IInputElement inputElement || !IsKeyboardFocusableWpf(element))
+        {
+            throw new InvalidOperationException(
+                $"focus_unsupported_wpf_target: WPF type '{element.GetType().Name}' is not keyboard focusable.");
+        }
+
+        var focusedBefore = Keyboard.FocusedElement;
+        try
+        {
+            _ = Keyboard.Focus(inputElement);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"focus_failed_wpf_target: WPF type '{element.GetType().Name}' rejected keyboard focus.",
+                ex);
+        }
+
+        var focusedAfter = Keyboard.FocusedElement;
+        if (!ReferenceEquals(focusedAfter, inputElement) && !HasKeyboardFocusWithinWpf(element))
+        {
+            throw new InvalidOperationException(
+                $"focus_failed_wpf_target: WPF type '{element.GetType().Name}' did not receive keyboard focus.");
+        }
+
+        return new FocusWpfElementResponse(
+            Focused: true,
+            KeyboardFocusChanged: !ReferenceEquals(focusedBefore, focusedAfter),
+            MethodUsed: "wpf_keyboardFocus");
+    }
+
+    private static bool IsKeyboardFocusableWpf(DependencyObject element) => element switch
+    {
+        UIElement uiElement => uiElement.Focusable,
+        ContentElement contentElement => contentElement.Focusable,
+        UIElement3D uiElement3D => uiElement3D.Focusable,
+        _ => false
+    };
+
+    private static bool HasKeyboardFocusWithinWpf(DependencyObject element) => element switch
+    {
+        UIElement uiElement => uiElement.IsKeyboardFocusWithin,
+        ContentElement contentElement => contentElement.IsKeyboardFocusWithin,
+        UIElement3D uiElement3D => uiElement3D.IsKeyboardFocusWithin,
+        _ => false
+    };
 
     public static InvokeResponse Invoke(
         string ownerId,
