@@ -64,6 +64,12 @@ public partial class MainWindow : Window
     private void KeyboardFallbackTarget_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift or
+            Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin)
+        {
+            return;
+        }
+
         _keyboardEvents.Add(FormatKeyStroke(key, Keyboard.Modifiers));
         if (_keyboardEvents.Count > MaximumReportedKeyboardEvents)
         {
