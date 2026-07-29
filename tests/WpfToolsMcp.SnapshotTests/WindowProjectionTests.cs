@@ -5,38 +5,30 @@ namespace WpfToolsMcp.SnapshotTests;
 [TestFixture]
 public sealed class WindowProjectionTests
 {
-    [TestCase(true)]
-    [TestCase(false)]
-    public void ResolveWindowVisibility_prefers_native_window_state(bool nativeIsVisible)
-    {
-        var providerWasRead = false;
-
-        var result = AutomationController.ResolveWindowVisibility(
-            nativeIsVisible,
-            () =>
-            {
-                providerWasRead = true;
-                throw new InvalidOperationException("UIA property is unavailable.");
-            });
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(result, Is.EqualTo(nativeIsVisible));
-            Assert.That(providerWasRead, Is.False);
-        });
-    }
-
-    [TestCase(false, true)]
-    [TestCase(true, false)]
-    public void ResolveWindowVisibility_falls_back_to_provider_state(
+    [TestCase(true, true, false)]
+    [TestCase(false, false, true)]
+    public void ResolveWindowVisibility_prefers_supported_provider_state(
+        bool nativeIsVisible,
         bool providerIsOffscreen,
         bool expectedIsVisible)
     {
         var result = AutomationController.ResolveWindowVisibility(
-            nativeIsVisible: null,
+            nativeIsVisible,
             () => providerIsOffscreen);
 
         Assert.That(result, Is.EqualTo(expectedIsVisible));
+    }
+
+    [TestCase(true)]
+    [TestCase(false)]
+    public void ResolveWindowVisibility_falls_back_to_native_state_when_provider_throws(
+        bool nativeIsVisible)
+    {
+        var result = AutomationController.ResolveWindowVisibility(
+            nativeIsVisible,
+            () => throw new InvalidOperationException("UIA property is unavailable."));
+
+        Assert.That(result, Is.EqualTo(nativeIsVisible));
     }
 
     [Test]
@@ -49,36 +41,29 @@ public sealed class WindowProjectionTests
         Assert.That(result, Is.True);
     }
 
-    [TestCase(true)]
-    [TestCase(false)]
-    public void ResolveWindowEnabled_prefers_native_window_state(bool nativeIsEnabled)
+    [TestCase(true, false)]
+    [TestCase(false, true)]
+    public void ResolveWindowEnabled_prefers_supported_provider_state(
+        bool nativeIsEnabled,
+        bool providerIsEnabled)
     {
-        var providerWasRead = false;
-
         var result = AutomationController.ResolveWindowEnabled(
             nativeIsEnabled,
-            () =>
-            {
-                providerWasRead = true;
-                throw new InvalidOperationException("UIA property is unavailable.");
-            });
+            () => providerIsEnabled);
 
-        Assert.Multiple(() =>
-        {
-            Assert.That(result, Is.EqualTo(nativeIsEnabled));
-            Assert.That(providerWasRead, Is.False);
-        });
+        Assert.That(result, Is.EqualTo(providerIsEnabled));
     }
 
     [TestCase(true)]
     [TestCase(false)]
-    public void ResolveWindowEnabled_falls_back_to_provider_state(bool providerIsEnabled)
+    public void ResolveWindowEnabled_falls_back_to_native_state_when_provider_throws(
+        bool nativeIsEnabled)
     {
         var result = AutomationController.ResolveWindowEnabled(
-            nativeIsEnabled: null,
-            () => providerIsEnabled);
+            nativeIsEnabled,
+            () => throw new InvalidOperationException("UIA property is unavailable."));
 
-        Assert.That(result, Is.EqualTo(providerIsEnabled));
+        Assert.That(result, Is.EqualTo(nativeIsEnabled));
     }
 
     [Test]

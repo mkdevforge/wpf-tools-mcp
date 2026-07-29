@@ -9588,14 +9588,13 @@ public sealed partial class AutomationController : IDisposable
     {
         ArgumentNullException.ThrowIfNull(getProviderIsOffscreen);
 
-        if (nativeIsVisible is bool isVisible)
+        var providerIsOffscreen = SafeGetBool(getProviderIsOffscreen);
+        if (providerIsOffscreen is bool isOffscreen)
         {
-            return isVisible;
+            return !isOffscreen;
         }
 
-        // Top-level discovery already filters to visible HWNDs. If a provider omits
-        // IsOffscreen, retain that evidence instead of failing the whole projection.
-        return SafeGetBool(getProviderIsOffscreen) is not true;
+        return nativeIsVisible ?? true;
     }
 
     internal static bool ResolveWindowEnabled(
@@ -9604,12 +9603,7 @@ public sealed partial class AutomationController : IDisposable
     {
         ArgumentNullException.ThrowIfNull(getProviderIsEnabled);
 
-        if (nativeIsEnabled is bool isEnabled)
-        {
-            return isEnabled;
-        }
-
-        return SafeGetBool(getProviderIsEnabled) ?? false;
+        return SafeGetBool(getProviderIsEnabled) ?? nativeIsEnabled ?? false;
     }
 
     private static long? TryGetOwnerHandle(IntPtr handle)
