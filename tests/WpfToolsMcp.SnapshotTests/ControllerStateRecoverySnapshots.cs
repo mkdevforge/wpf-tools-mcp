@@ -478,14 +478,27 @@ public sealed class ControllerStateRecoverySnapshots
             var sessions = await _mcp.CallToolAsync<ListSessionsResponse>("list_sessions");
             var session = sessions.Sessions.Single(s => s.SessionId == launch.SessionId);
             var close = await CloseSessionAsync(launch.SessionId);
+            var uiaCapability = session.BackendCapabilityStates.Single(s => s.Backend == "uia");
+            var wpfCapability = session.BackendCapabilityStates.Single(s => s.Backend == "wpf");
 
-            Assert.That(session.BackendCapabilities, Does.Not.Contain("uia"));
-            Assert.That(session.BackendCapabilities, Does.Not.Contain("wpf"));
-            Assert.That(session.BackendCapabilityStates.Single(s => s.Backend == "uia").State, Is.EqualTo("unavailable"));
-            Assert.That(session.BackendCapabilityStates.Single(s => s.Backend == "wpf").State, Is.EqualTo("unavailable"));
-            Assert.That(session.ActiveWindowHandle, Is.Zero);
-            Assert.That(session.ActiveWindowTitle, Is.Empty);
-            Assert.That(close, Is.Not.Null);
+            Assert.Multiple(() =>
+            {
+                Assert.That(session.BackendCapabilities, Does.Not.Contain("uia"));
+                Assert.That(session.BackendCapabilities, Does.Not.Contain("wpf"));
+                Assert.That(uiaCapability.State, Is.EqualTo("unavailable"));
+                Assert.That(wpfCapability.State, Is.EqualTo("unavailable"));
+                Assert.That(uiaCapability.Failure?.Code, Is.EqualTo("target_exited"));
+                Assert.That(wpfCapability.Failure?.Code, Is.EqualTo("target_exited"));
+                Assert.That(wpfCapability.Failure?.Stage, Is.EqualTo("target_shutdown"));
+                Assert.That(uiaCapability.Failure?.Stage, Is.EqualTo("target_shutdown"));
+                Assert.That(uiaCapability.Failure?.Retryable, Is.False);
+                Assert.That(
+                    uiaCapability.Failure?.RecoveryActions,
+                    Is.EqualTo(new[] { "restart_target", "reattach" }));
+                Assert.That(session.ActiveWindowHandle, Is.Zero);
+                Assert.That(session.ActiveWindowTitle, Is.Empty);
+                Assert.That(close, Is.Not.Null);
+            });
 
             await Verifier.Verify(new
             {
@@ -530,17 +543,24 @@ public sealed class ControllerStateRecoverySnapshots
     }
 
     [Test]
-    public async Task ListSessions_reports_wpf_backend_immediately_after_launch_snapshot()
+    public async Task ListSessions_reports_wpf_backend_as_not_initialized_without_injecting_snapshot()
     {
         var launch = await LaunchTestAppAsync();
         try
         {
             var sessions = await _mcp.CallToolAsync<ListSessionsResponse>("list_sessions");
             var session = sessions.Sessions.Single(s => s.SessionId == launch.SessionId);
+            var uiaCapability = session.BackendCapabilityStates.Single(s => s.Backend == "uia");
+            var wpfCapability = session.BackendCapabilityStates.Single(s => s.Backend == "wpf");
 
-            Assert.That(session.BackendCapabilities, Does.Contain("uia"));
-            Assert.That(session.BackendCapabilities, Does.Contain("wpf"));
-            Assert.That(session.BackendCapabilityStates.Single(s => s.Backend == "wpf").State, Is.EqualTo("ready"));
+            Assert.Multiple(() =>
+            {
+                Assert.That(session.BackendCapabilities, Is.EqualTo(new[] { "uia" }));
+                Assert.That(uiaCapability.State, Is.EqualTo("ready"));
+                Assert.That(uiaCapability.Failure, Is.Null);
+                Assert.That(wpfCapability.State, Is.EqualTo("not_initialized"));
+                Assert.That(wpfCapability.Failure, Is.Null);
+            });
 
             await Verifier.Verify(new
             {

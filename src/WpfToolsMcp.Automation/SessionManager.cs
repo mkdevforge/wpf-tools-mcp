@@ -609,26 +609,48 @@ public sealed class SessionManager : IDisposable
 
     public async Task<ListSessionsResponse> ListSessionsAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var sessions = _sessions.Values
             .Where(s => !s.IsEnding)
             .OrderBy(s => s.CreatedAtUtc, StringComparer.Ordinal)
             .ToArray();
 
+        var observedSessions = new List<(
+            SessionState Session,
+            ProcessInstanceState ProcessState,
+            bool ControllerAttached)>(sessions.Length);
+
         foreach (var session in sessions)
         {
-            await RefreshBackendCapabilitiesAsync(session, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var processState = ProcessTargetResolver.Observe(session.ProcessIdentity);
+            var controllerAttached =
+                processState == ProcessInstanceState.Current &&
+                session.Controller.IsAttached;
+            if (controllerAttached)
+            {
+                await RefreshBackendCapabilitiesAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+
             var activeWindow = ReconcileActiveWindow(session);
             session.Controller.TrackOrRejectExternalWindowHandle(activeWindow.Handle);
+            observedSessions.Add((session, processState, controllerAttached));
         }
 
-        var activeSessions = sessions
-            .Where(session =>
-                !session.IsEnding &&
-                _sessions.TryGetValue(session.SessionId, out var current) &&
-                ReferenceEquals(session, current))
+        var activeSessions = observedSessions
+            .Where(observed =>
+                !observed.Session.IsEnding &&
+                _sessions.TryGetValue(observed.Session.SessionId, out var current) &&
+                ReferenceEquals(observed.Session, current))
             .ToArray();
 
-        return new ListSessionsResponse(activeSessions.Select(ToSessionInfo).ToArray());
+        return new ListSessionsResponse(activeSessions
+            .Select(observed => ToSessionInfo(
+                observed.Session,
+                observed.ProcessState,
+                observed.ControllerAttached))
+            .ToArray());
     }
 
     public async Task<LaunchAppResponse> LaunchAppAsync(LaunchAppRequest request, CancellationToken cancellationToken)
@@ -1280,31 +1302,23 @@ public sealed class SessionManager : IDisposable
         throw new InvalidOperationException($"Unknown sessionId '{sessionId}'.");
     }
 
-    private static SessionInfo ToSessionInfo(SessionState session)
+    private static SessionInfo ToSessionInfo(
+        SessionState session,
+        ProcessInstanceState processState,
+        bool controllerAttached)
     {
         var (handle, title) = session.GetActiveWindow();
-
-        var uiaState = session.Controller.IsAttached ? "ready" : "unavailable";
-        var wpfState = session.Controller.IsAttached
-            ? session.Controller.WpfBackendCapabilityState
-            : "unavailable";
-
-        var capabilities = new List<string>();
-        if (session.Controller.IsAttached)
-        {
-            capabilities.Add("uia");
-        }
-
-        if (session.Controller.IsAttached && session.Controller.IsAgentConnected)
-        {
-            capabilities.Add("wpf");
-        }
-
-        var capabilityStates = new[]
-        {
-            new BackendCapabilityState("uia", uiaState),
-            new BackendCapabilityState("wpf", wpfState)
-        };
+        var wpfCapability = processState == ProcessInstanceState.Current && controllerAttached
+            ? session.Controller.GetWpfBackendCapabilityState()
+            : null;
+        var capabilityStates = ProjectBackendCapabilityStates(
+            processState,
+            controllerAttached,
+            wpfCapability);
+        var capabilities = capabilityStates
+            .Where(capability => string.Equals(capability.State, "ready", StringComparison.Ordinal))
+            .Select(capability => capability.Backend)
+            .ToArray();
 
         return new SessionInfo(
             SessionId: session.SessionId,
@@ -1318,6 +1332,40 @@ public sealed class SessionManager : IDisposable
             InteractionPolicy: session.InteractionPolicy.ToContract());
     }
 
+    internal static IReadOnlyList<BackendCapabilityState> ProjectBackendCapabilityStates(
+        ProcessInstanceState processState,
+        bool controllerAttached,
+        BackendCapabilityState? currentWpfCapability = null)
+    {
+        if (processState == ProcessInstanceState.Current && controllerAttached)
+        {
+            return
+            [
+                new BackendCapabilityState("uia", "ready"),
+                currentWpfCapability ?? throw new ArgumentNullException(nameof(currentWpfCapability))
+            ];
+        }
+
+        var failure = processState switch
+        {
+            ProcessInstanceState.Current => FailureDiagnostics.AttachmentFailure(),
+            ProcessInstanceState.ExitedOrReused => FailureDiagnostics.TargetExited(),
+            ProcessInstanceState.Unavailable => FailureDiagnostics.Create(
+                code: "process_state_unavailable",
+                stage: FailureDiagnostics.Stages.TargetShutdown,
+                detail: "The target process state could not be observed.",
+                retryable: true,
+                recoveryActions: [FailureDiagnostics.Recovery.Retry]),
+            _ => throw new ArgumentOutOfRangeException(nameof(processState), processState, null)
+        };
+
+        return
+        [
+            new BackendCapabilityState("uia", "unavailable") { Failure = failure },
+            new BackendCapabilityState("wpf", "unavailable") { Failure = failure }
+        ];
+    }
+
     private static async Task RefreshBackendCapabilitiesAsync(SessionState session, CancellationToken cancellationToken)
     {
         try
@@ -1325,6 +1373,9 @@ public sealed class SessionManager : IDisposable
             _ = await session.Controller.RunExclusiveAsync(
                 () => session.Controller.RefreshWpfBackendCapabilityAsync(cancellationToken),
                 cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
         }
         catch (OperationCanceledException)
         {

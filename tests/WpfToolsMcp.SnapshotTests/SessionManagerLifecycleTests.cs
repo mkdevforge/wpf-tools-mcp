@@ -11,6 +11,38 @@ namespace WpfToolsMcp.SnapshotTests;
 public sealed class SessionManagerLifecycleTests
 {
     [Test]
+    public void Backend_capability_projection_reports_unavailable_process_state_for_both_backends()
+    {
+        var capabilities = SessionManager.ProjectBackendCapabilityStates(
+            ProcessInstanceState.Unavailable,
+            controllerAttached: true);
+
+        Assert.That(capabilities, Has.Count.EqualTo(2));
+        Assert.Multiple(() =>
+        {
+            foreach (var capability in capabilities)
+            {
+                Assert.That(capability.State, Is.EqualTo("unavailable"));
+                Assert.That(capability.Failure?.Code, Is.EqualTo("process_state_unavailable"));
+                Assert.That(capability.Failure?.Stage, Is.EqualTo("target_shutdown"));
+                Assert.That(capability.Failure?.Retryable, Is.True);
+                Assert.That(capability.Failure?.RecoveryActions, Is.EqualTo(new[] { "retry" }));
+            }
+        });
+    }
+
+    [Test]
+    public void PreCanceled_list_sessions_preserves_cancellation()
+    {
+        using var sessions = new SessionManager();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            _ = await sessions.ListSessionsAsync(cancellation.Token));
+    }
+
+    [Test]
     public async Task Detach_retires_session_before_releasing_resources()
     {
         using var sessions = new SessionManager();
