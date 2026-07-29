@@ -72,6 +72,10 @@ internal static class McpToolErrors
                     McpJsonUtilities.DefaultOptions)
             };
         }
+        catch (ActionableFailureException ex)
+        {
+            return CreateActionableFailureResult(ex, toolName);
+        }
         catch (Exception ex)
         {
             throw CreateMcpException(ex, toolName);
@@ -130,14 +134,48 @@ internal static class McpToolErrors
                     McpJsonUtilities.DefaultOptions)
             };
         }
+        catch (ActionableFailureException ex)
+        {
+            return CreateActionableFailureResult(ex, toolName);
+        }
         catch (Exception ex)
         {
             throw CreateMcpException(ex, toolName);
         }
     }
 
+    private static CallToolResult CreateActionableFailureResult(
+        ActionableFailureException exception,
+        string toolName)
+    {
+        var structuredContent = JsonSerializer.SerializeToNode(
+            exception.Failure,
+            McpJsonUtilities.DefaultOptions);
+        return new CallToolResult
+        {
+            IsError = true,
+            Content =
+            [
+                new TextContentBlock
+                {
+                    Text = CreateActionableFailureText(exception.Failure, toolName)
+                }
+            ],
+            StructuredContent = structuredContent
+        };
+    }
+
     private static McpException CreateMcpException(Exception ex, string toolName)
     {
+        var actionable = ex as ActionableFailureException ??
+                         ex.GetBaseException() as ActionableFailureException;
+        if (actionable is not null)
+        {
+            return new McpException(
+                CreateActionableFailureText(actionable.Failure, toolName),
+                actionable);
+        }
+
         var baseException = ex.GetBaseException();
         var message = string.IsNullOrWhiteSpace(baseException.Message)
             ? baseException.GetType().Name
@@ -154,6 +192,12 @@ internal static class McpToolErrors
         var tool = string.IsNullOrWhiteSpace(toolName) ? "unknown" : toolName;
 
         return new McpException($"tool={tool}: {prefix}{message}{detail}", baseException);
+    }
+
+    private static string CreateActionableFailureText(FailureInfo failure, string toolName)
+    {
+        var tool = string.IsNullOrWhiteSpace(toolName) ? "unknown" : toolName;
+        return $"tool={tool}: {failure.Code}: {failure.Detail}";
     }
 
     private static string? GetKnownErrorCode(string message)

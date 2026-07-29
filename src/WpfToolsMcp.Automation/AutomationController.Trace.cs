@@ -148,6 +148,16 @@ public sealed partial class AutomationController
 
         public void SetError(Exception ex)
         {
+            ArgumentNullException.ThrowIfNull(ex);
+
+            var actionable = ex as ActionableFailureException ??
+                             ex.GetBaseException() as ActionableFailureException;
+            if (actionable is not null)
+            {
+                _error = $"{actionable.Failure.Code}: {actionable.Failure.Detail}";
+                return;
+            }
+
             var message = ex.GetBaseException().Message;
             if (!string.IsNullOrWhiteSpace(message))
             {
