@@ -149,6 +149,63 @@ public sealed class AgentClientLifecycleTests
     }
 
     [Test]
+    public async Task Remote_error_hides_diagnostics_but_retains_them_for_internal_handling()
+    {
+        const string method = "wpf/private_operation";
+        const string remoteMessage = @"Backend failed at C:\work\secret-project with api-key=message-secret.";
+        const string remoteDetails = @"stderr: token=details-secret; source=C:\Users\operator\private.log";
+        var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+
+        AgentClient? client = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var acceptTask = server.WaitForConnectionAsync(timeout.Token);
+            var clientTask = AgentClient.ConnectAsync(pipeName, TimeSpan.FromSeconds(2), timeout.Token);
+            await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
+            client = await clientTask;
+
+            var callTask = client.CallAsync<string>(method, null, timeout.Token);
+            var request = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(request.Method, Is.EqualTo(method));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    request.Id,
+                    Ok: false,
+                    Error: new AgentError(remoteMessage, remoteDetails)),
+                timeout.Token);
+
+            var exception = Assert.ThrowsAsync<AgentRemoteException>(async () =>
+                _ = await callTask.WaitAsync(TimeSpan.FromSeconds(2)));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exception!.Message, Is.EqualTo("Agent call failed."));
+                Assert.That(exception.Message, Does.Not.Contain("message-secret"));
+                Assert.That(exception.Message, Does.Not.Contain("details-secret"));
+                Assert.That(exception.Message, Does.Not.Contain(@"C:\work\secret-project"));
+                Assert.That(exception.Method, Is.EqualTo(method));
+                Assert.That(exception.RemoteMessage, Is.EqualTo(remoteMessage));
+                Assert.That(exception.RemoteDetails, Is.EqualTo(remoteDetails));
+            });
+        }
+        finally
+        {
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+        }
+    }
+
+    [Test]
     public async Task Cancel_after_request_write_disconnects_and_rejects_reuse_before_a_late_response()
     {
         var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";

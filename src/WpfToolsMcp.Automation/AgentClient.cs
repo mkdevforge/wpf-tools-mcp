@@ -5,6 +5,33 @@ using WpfToolsMcp.AgentProtocol;
 
 namespace WpfToolsMcp.Automation;
 
+internal sealed class AgentRemoteException : InvalidOperationException
+{
+    private const string SafeMessage = "Agent call failed.";
+
+    internal AgentRemoteException(string method, string? remoteMessage, string? remoteDetails)
+        : base(GetPublicMessage(method, remoteMessage))
+    {
+        Method = method;
+        RemoteMessage = remoteMessage;
+        RemoteDetails = remoteDetails;
+    }
+
+    internal string Method { get; }
+
+    internal string? RemoteMessage { get; }
+
+    internal string? RemoteDetails { get; }
+
+    private static string GetPublicMessage(string method, string? remoteMessage)
+    {
+        var unknownMethodMessage = $"Unknown method '{method}'.";
+        return string.Equals(remoteMessage, unknownMethodMessage, StringComparison.Ordinal)
+            ? unknownMethodMessage
+            : SafeMessage;
+    }
+}
+
 internal sealed class AgentClient : IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -132,14 +159,10 @@ internal sealed class AgentClient : IAsyncDisposable
 
             if (!response.Ok)
             {
-                var message = response.Error?.Message ?? "Agent call failed.";
-                var details = response.Error?.Details;
-                if (!string.IsNullOrWhiteSpace(details))
-                {
-                    message += $"{Environment.NewLine}{details}";
-                }
-
-                throw new InvalidOperationException(message);
+                throw new AgentRemoteException(
+                    method,
+                    response.Error?.Message,
+                    response.Error?.Details);
             }
 
             return response.Result;
