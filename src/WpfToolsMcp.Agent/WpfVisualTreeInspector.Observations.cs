@@ -74,7 +74,7 @@ internal static partial class WpfVisualTreeInspector
             request.Locator,
             request.ElementId,
             request.WindowHandle,
-            visibleOnly: true,
+            visibleOnly: request.VisibleOnly,
             includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,

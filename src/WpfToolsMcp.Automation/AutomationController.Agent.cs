@@ -1320,6 +1320,26 @@ public sealed partial class AutomationController
             "agent_capability_unavailable: get_computed_properties with includeProvenance=true requires the current WPF agent. " +
             "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
 
+    internal static InvalidOperationException CreateObserveStateCapabilityException() =>
+        new(
+            "agent_capability_unavailable: typed WPF waits require the current WPF agent. " +
+            "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
+
+    internal void EnsureObserveStateCapability(AgentClient client)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        EnsureObserveStateCapability(GetAgentCapabilities(client));
+    }
+
+    internal static void EnsureObserveStateCapability(AgentCapabilitiesResponse? capabilities)
+    {
+        if (capabilities is null ||
+            !capabilities.Capabilities.Contains(AgentProtocolCapabilities.ObserveState, StringComparer.Ordinal))
+        {
+            throw CreateObserveStateCapabilityException();
+        }
+    }
+
     internal static Task<T> CallGetComputedPropertiesWhenSupportedAsync<T>(
         bool includeProvenance,
         AgentCapabilitiesResponse? capabilities,
