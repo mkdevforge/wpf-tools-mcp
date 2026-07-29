@@ -10,8 +10,8 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class AppTools
 {
-    [McpServerTool(Name = "launch_app"), Description("Start a WPF application.")]
-    public static Task<LaunchAppResponse> LaunchApp(
+    [McpServerTool(Name = "launch_app"), Description("Start a WPF application. Existing-instance fallback returns structured candidates when ambiguous.")]
+    public static Task<CallToolResult> LaunchApp(
         SessionManager sessions,
         [Description("Executable path")] string exePath,
         [Description("Optional arguments")] string[]? args = null,
@@ -20,7 +20,7 @@ public static class AppTools
         [Description("If launch cannot resolve a main window, try attaching to an existing instance")] bool reuseExistingInstance = true,
         [Description("Session interaction policy")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() =>
+        McpToolErrors.RunLaunchAppAsync(() =>
             sessions.LaunchAppAsync(
                 new LaunchAppRequest(
                     exePath,
@@ -42,6 +42,7 @@ public static class AppTools
         [Description("Session interaction policy")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default)
     {
+        sessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId.Trim();
         var selectors = (pid is not null ? 1 : 0) +
                         (!string.IsNullOrWhiteSpace(processName) ? 1 : 0) +
                         (!string.IsNullOrWhiteSpace(processInstanceId) ? 1 : 0);

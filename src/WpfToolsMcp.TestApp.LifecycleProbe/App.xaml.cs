@@ -12,6 +12,12 @@ public partial class App : Application
         base.OnStartup(e);
 
         var options = LifecycleProbeOptions.Parse(e.Args);
+        if (options.ExitImmediately)
+        {
+            Shutdown();
+            return;
+        }
+
         if (options.IsChildProcess)
         {
             WriteChildPid(options.ChildPidPath!);
@@ -69,7 +75,8 @@ internal sealed record LifecycleProbeOptions(
     string MarkerPath,
     bool VetoClose,
     string? ChildPidPath,
-    bool IsChildProcess)
+    bool IsChildProcess,
+    bool ExitImmediately)
 {
     public static LifecycleProbeOptions Parse(IReadOnlyList<string> args)
     {
@@ -77,6 +84,7 @@ internal sealed record LifecycleProbeOptions(
         string? childPidPath = null;
         var vetoClose = false;
         var isChildProcess = false;
+        var exitImmediately = false;
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -94,6 +102,9 @@ internal sealed record LifecycleProbeOptions(
                 case "--child-process":
                     isChildProcess = true;
                     break;
+                case "--exit-immediately":
+                    exitImmediately = true;
+                    break;
                 default:
                     throw new ArgumentException($"Unknown lifecycle probe argument '{args[index]}'.");
             }
@@ -110,7 +121,8 @@ internal sealed record LifecycleProbeOptions(
                 MarkerPath: "",
                 VetoClose: false,
                 ChildPidPath: Path.GetFullPath(childPidPath),
-                IsChildProcess: true);
+                IsChildProcess: true,
+                ExitImmediately: false);
         }
 
         if (string.IsNullOrWhiteSpace(markerPath))
@@ -122,6 +134,7 @@ internal sealed record LifecycleProbeOptions(
             Path.GetFullPath(markerPath),
             vetoClose,
             string.IsNullOrWhiteSpace(childPidPath) ? null : Path.GetFullPath(childPidPath),
-            IsChildProcess: false);
+            IsChildProcess: false,
+            ExitImmediately: exitImmediately);
     }
 }

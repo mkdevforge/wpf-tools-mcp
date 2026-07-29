@@ -49,15 +49,15 @@ public sealed record CoreFindQuery(
 
 public static class CoreAppTools
 {
-    [McpServerTool(Name = "launch_app"), Description("Start a WPF application.")]
-    public static Task<LaunchAppResponse> LaunchApp(
+    [McpServerTool(Name = "launch_app"), Description("Start a WPF application. Existing-instance fallback returns structured candidates when ambiguous.")]
+    public static Task<CallToolResult> LaunchApp(
         SessionManager sessions,
         [Description("Executable path")] string exePath,
         [Description("Optional arguments")] string[]? args = null,
         [Description("Optional working directory")] string? workingDirectory = null,
         [Description("Session interaction policy")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() =>
+        McpToolErrors.RunLaunchAppAsync(() =>
             sessions.LaunchAppAsync(
                 new LaunchAppRequest(
                     ExePath: exePath,
@@ -77,6 +77,7 @@ public static class CoreAppTools
         [Description("Session interaction policy")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default)
     {
+        sessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId.Trim();
         var selectors = (pid is not null ? 1 : 0) +
                         (!string.IsNullOrWhiteSpace(processName) ? 1 : 0) +
                         (!string.IsNullOrWhiteSpace(processInstanceId) ? 1 : 0);
@@ -545,7 +546,10 @@ public static class CoreInteractionTools
                 throw new ArgumentException("wait_for accepts either state or condition, not both.");
             }
 
-            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId);
+            var (automation, effectiveWindowHandle) = sessions.GetController(
+                sessionId,
+                condition?.WindowHandle,
+                condition?.ExternalWindowHandles);
             var hasElementId = !string.IsNullOrWhiteSpace(elementId);
             var request = new WaitForRequest(
                 Locator: locator?.ToElementLocator(),

@@ -479,6 +479,11 @@ start time, and main-window identity. Retry with the opaque
 `processInstanceId` (preferred) or an explicit PID. Dotted process names are
 preserved; only a terminal `.exe` suffix is removed.
 
+When `launch_app` uses its existing-instance fallback (for example, a
+single-instance launcher exits without owning a window), it applies the same
+rule and returns structured `ambiguous_process` candidates rather than choosing
+among multiple existing instances.
+
 After the target exits, call `attach_to_app` with its old `sessionId`. With no
 other selector, the server searches for the same process name; an explicit
 `pid`, `processName`, or `processInstanceId` may be supplied instead. Recovery
@@ -491,10 +496,16 @@ an ambiguous or failed replacement leaves the old session untouched.
 Window handles and element IDs are scoped to their originating session and
 process instance. Calls through a replaced session fail with
 `stale_session: process_replaced`, name the successor session, and require
-window and element identities to be reacquired. Existing subscriptions are
-stopped during the successful replacement commit. Restarting only the MCP
-server while the target stays alive remains a separate agent-reconnect path and
-does not require process replacement.
+window and element identities to be reacquired. Passing an old identity to the
+successor reports `stale_window: process_replaced` or
+`stale_element: process_replaced` rather than treating it as an unrelated or
+unknown identity. A raw numeric HWND cannot encode a process generation, so a
+value Windows has already reassigned to a live successor window represents that
+new window. Existing subscriptions are stopped during the successful
+replacement after the successor and predecessor tombstone are committed, and
+before the recovery response is returned. A failed pre-commit replacement does
+not remove them. Restarting only the MCP server while the target stays alive
+remains a separate agent-reconnect path and does not require process replacement.
 
 ### Deterministic Viewports
 

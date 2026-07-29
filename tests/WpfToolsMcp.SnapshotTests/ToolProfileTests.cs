@@ -579,21 +579,27 @@ public sealed class ToolProfileTests
 
     [TestCase(null)]
     [TestCase("diagnostics")]
-    public async Task Attach_schema_exposes_deterministic_selection_and_recovery(string? toolProfile)
+    public async Task Process_selection_schemas_support_structured_ambiguity(string? toolProfile)
     {
         var serverExe = McpServerPaths.FindMcpServerExecutable();
         await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: toolProfile);
-        var tool = (await mcp.ListToolsAsync()).Single(candidate => candidate.Name == "attach_to_app");
+        var tools = await mcp.ListToolsAsync();
+        var attach = tools.Single(candidate => candidate.Name == "attach_to_app");
+        var launch = tools.Single(candidate => candidate.Name == "launch_app");
 
         Assert.Multiple(() =>
         {
             Assert.That(
-                GetInputPropertyNames(tool),
+                GetInputPropertyNames(attach),
                 Is.EqualTo(new[] { "interactionPolicy", "pid", "processInstanceId", "processName", "sessionId" }));
             Assert.That(
-                tool.ProtocolTool.OutputSchema,
+                attach.ProtocolTool.OutputSchema,
                 Is.Null,
                 "attach_to_app returns protocol CallToolResult so ambiguity can carry structured candidates.");
+            Assert.That(
+                launch.ProtocolTool.OutputSchema,
+                Is.Null,
+                "launch_app returns protocol CallToolResult so existing-instance ambiguity can carry structured candidates.");
         });
     }
 

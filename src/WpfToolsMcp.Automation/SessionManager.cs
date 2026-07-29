@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -618,7 +617,8 @@ public sealed class SessionManager : IDisposable
         foreach (var session in sessions)
         {
             await RefreshBackendCapabilitiesAsync(session, cancellationToken).ConfigureAwait(false);
-            _ = ReconcileActiveWindow(session);
+            var activeWindow = ReconcileActiveWindow(session);
+            session.Controller.TrackOrRejectExternalWindowHandle(activeWindow.Handle);
         }
 
         var activeSessions = sessions
@@ -639,7 +639,7 @@ public sealed class SessionManager : IDisposable
         try
         {
             var launched = await controller.LaunchAsync(request, cancellationToken);
-            var target = ProcessTargetResolver.ResolveByPid(launched.Pid);
+            var identity = controller.AttachedProcessIdentity;
             var sessionId = CreateSessionId();
             var interactionPolicy = InteractionPolicyResolver.Resolve(request.InteractionPolicy);
             var session = new SessionState(
@@ -647,7 +647,7 @@ public sealed class SessionManager : IDisposable
                 controller,
                 launched.Pid,
                 launched.ProcessName,
-                target.Identity,
+                identity,
                 interactionPolicy);
 
             if (!_sessions.TryAdd(sessionId, session))
@@ -734,11 +734,19 @@ public sealed class SessionManager : IDisposable
         try
         {
             var previous = GetSession(previousSessionId);
-            if (ProcessTargetResolver.IsCurrent(previous.ProcessIdentity))
+            var previousProcessState = ProcessTargetResolver.Observe(previous.ProcessIdentity);
+            if (previousProcessState == ProcessInstanceState.Current)
             {
                 throw new InvalidOperationException(
                     $"target_process_still_running: session '{previousSessionId}' still targets live process " +
                     $"{previous.Pid}. Replacement is only allowed after that process instance exits.");
+            }
+
+            if (previousProcessState == ProcessInstanceState.Unavailable)
+            {
+                throw new InvalidOperationException(
+                    $"process_state_unavailable: session '{previousSessionId}' target process state could not be " +
+                    "verified. Retry after the process can be observed; the target was not replaced.");
             }
 
             var hasExplicitTarget = request.Pid is not null ||
@@ -770,7 +778,7 @@ public sealed class SessionManager : IDisposable
                     successorPolicy);
                 var activeWindow = await InitializeActiveWindowRequiredAsync(successor, cancellationToken)
                     .ConfigureAwait(false);
-                if (!ProcessTargetResolver.IsCurrent(successorIdentity))
+                if (ProcessTargetResolver.Observe(successorIdentity) != ProcessInstanceState.Current)
                 {
                     throw new InvalidOperationException(
                         $"stale_process_candidate: replacement process {successor.Pid} exited before recovery could commit. " +
@@ -782,11 +790,49 @@ public sealed class SessionManager : IDisposable
                     throw new InvalidOperationException($"Session '{previousSessionId}' is already ending.");
                 }
 
+                var predecessorRetirementStarted = false;
                 try
                 {
-                    if (releaseReplacedSessionResources is not null)
+                    if (ProcessTargetResolver.Observe(successorIdentity) != ProcessInstanceState.Current)
                     {
-                        await releaseReplacedSessionResources().ConfigureAwait(false);
+                        throw new InvalidOperationException(
+                            $"stale_process_candidate: replacement process {successor.Pid} exited before recovery " +
+                            "could commit. The previous session was not changed.");
+                    }
+
+                    activeWindow = await InitializeActiveWindowRequiredAsync(
+                        successor,
+                        CancellationToken.None).ConfigureAwait(false);
+                    if (ProcessTargetResolver.Observe(successorIdentity) != ProcessInstanceState.Current ||
+                        !IsWindowHandleValid(activeWindow.Handle, successorIdentity))
+                    {
+                        throw new InvalidOperationException(
+                            $"stale_process_candidate: replacement process {successor.Pid} or its active window " +
+                            "changed while recovery was committing. The previous session was not changed.");
+                    }
+
+                    var retiredIdentities = await previous.Controller
+                        .BeginProcessReplacementRetirementAsync(CancellationToken.None)
+                        .ConfigureAwait(false);
+                    predecessorRetirementStarted = true;
+                    successorController.ImportRetiredProcessIdentities(retiredIdentities);
+
+                    if (ProcessTargetResolver.Observe(successorIdentity) != ProcessInstanceState.Current)
+                    {
+                        throw new InvalidOperationException(
+                            $"stale_process_candidate: replacement process {successor.Pid} exited at the recovery " +
+                            "commit point. The previous session was not changed.");
+                    }
+
+                    activeWindow = await InitializeActiveWindowRequiredAsync(
+                        successor,
+                        CancellationToken.None).ConfigureAwait(false);
+                    if (ProcessTargetResolver.Observe(successorIdentity) != ProcessInstanceState.Current ||
+                        !IsWindowHandleValid(activeWindow.Handle, successorIdentity))
+                    {
+                        throw new InvalidOperationException(
+                            $"stale_process_candidate: replacement process {successor.Pid} or its active window " +
+                            "changed at the recovery commit point. The previous session was not changed.");
                     }
 
                     if (!_sessions.TryAdd(successorSessionId, successor))
@@ -794,22 +840,48 @@ public sealed class SessionManager : IDisposable
                         throw new InvalidOperationException("Failed to register replacement session.");
                     }
 
+                    var retired = new RetiredSession(successorSessionId, previous.Pid, successor.Pid);
+                    if (!_retiredSessions.TryAdd(previousSessionId, retired))
+                    {
+                        _sessions.TryRemove(successorSessionId, out _);
+                        throw new InvalidOperationException(
+                            $"Failed to publish replacement metadata for session '{previousSessionId}'.");
+                    }
+
                     if (!_sessions.TryRemove(previousSessionId, out var removed) ||
                         !ReferenceEquals(removed, previous))
                     {
+                        _retiredSessions.TryRemove(previousSessionId, out _);
                         _sessions.TryRemove(successorSessionId, out _);
                         throw new InvalidOperationException(
                             $"Session '{previousSessionId}' changed while replacement was being committed.");
                     }
 
-                    RememberRetiredSession(
-                        previousSessionId,
-                        new RetiredSession(successorSessionId, previous.Pid, successor.Pid));
+                    FinalizeRetiredSession(previousSessionId, retired);
                 }
                 catch
                 {
+                    if (predecessorRetirementStarted)
+                    {
+                        previous.Controller.CancelProcessReplacementRetirement();
+                    }
+
                     previous.CancelEnding();
                     throw;
+                }
+
+                var subscriptionsCleared = false;
+                if (releaseReplacedSessionResources is not null)
+                {
+                    try
+                    {
+                        await releaseReplacedSessionResources().ConfigureAwait(false);
+                        subscriptionsCleared = true;
+                    }
+                    catch
+                    {
+                        // Registry commit is final. Controller disposal below releases any remaining target resources.
+                    }
                 }
 
                 try
@@ -833,8 +905,17 @@ public sealed class SessionManager : IDisposable
                         PreviousPid: previous.Pid,
                         WindowHandlesInvalidated: true,
                         ElementIdsInvalidated: true,
-                        SubscriptionsCleared: releaseReplacedSessionResources is not null)
+                        SubscriptionsCleared: subscriptionsCleared)
                 };
+            }
+            catch (ProcessSelectionAmbiguityException ex)
+            {
+                successorController.Dispose();
+                throw new ProcessSelectionAmbiguityException(ex.Ambiguity with
+                {
+                    Recovery = $"Retry attach_to_app with sessionId '{previousSessionId}' and one candidate " +
+                               "processInstanceId (preferred) or pid."
+                });
             }
             catch
             {
@@ -1000,6 +1081,7 @@ public sealed class SessionManager : IDisposable
 
                 if (handle != 0)
                 {
+                    session.Controller.TrackOrRejectExternalWindowHandle(handle);
                     var response = new GetActiveWindowResponse(handle, title);
                     trace?.SetSummary($"handle={response.Handle} title={response.Title}");
                     return response;
@@ -1023,17 +1105,30 @@ public sealed class SessionManager : IDisposable
         }, cancellationToken);
     }
 
-    public (AutomationController Controller, long? WindowHandle) GetController(string sessionId, long? windowHandleOverride = null)
+    public (AutomationController Controller, long? WindowHandle) GetController(
+        string sessionId,
+        long? windowHandleOverride = null,
+        IReadOnlyList<long>? additionalWindowHandles = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
 
         var session = GetSession(sessionId);
+        if (additionalWindowHandles is not null)
+        {
+            foreach (var windowHandle in additionalWindowHandles)
+            {
+                session.Controller.TrackOrRejectExternalWindowHandle(windowHandle);
+            }
+        }
+
         if (windowHandleOverride is long requestedHandle)
         {
+            session.Controller.TrackOrRejectExternalWindowHandle(requestedHandle);
             return (session.Controller, requestedHandle);
         }
 
         var (activeHandle, _) = ReconcileActiveWindow(session);
+        session.Controller.TrackOrRejectExternalWindowHandle(activeHandle);
         long? effectiveHandle = activeHandle != 0 ? activeHandle : null;
         return (session.Controller, effectiveHandle);
     }
@@ -1080,18 +1175,21 @@ public sealed class SessionManager : IDisposable
     }
 
     private static ProcessInstanceIdentity ParseAttachedIdentity(AttachToAppResponse attached)
+        => ParseProcessIdentity(attached.ProcessInstanceId, attached.Pid);
+
+    private static ProcessInstanceIdentity ParseProcessIdentity(string? processInstanceId, int pid)
     {
-        if (!ProcessInstanceIdentity.TryParse(attached.ProcessInstanceId ?? string.Empty, out var identity) ||
-            identity.Pid != attached.Pid)
+        if (!ProcessInstanceIdentity.TryParse(processInstanceId ?? string.Empty, out var identity) ||
+            identity.Pid != pid)
         {
             throw new InvalidOperationException(
-                $"process_identity_unavailable: attachment to process {attached.Pid} did not return a stable identity.");
+                $"process_identity_unavailable: process {pid} did not return a stable identity.");
         }
 
         return identity;
     }
 
-    private void RememberRetiredSession(string sessionId, RetiredSession retired)
+    private void FinalizeRetiredSession(string sessionId, RetiredSession retired)
     {
         lock (_retiredSessionSync)
         {
@@ -1110,7 +1208,6 @@ public sealed class SessionManager : IDisposable
                 }
             }
 
-            _retiredSessions[sessionId] = retired;
             _retiredSessionOrder.Enqueue(sessionId);
             while (_retiredSessionOrder.Count > MaximumRetiredSessions)
             {
@@ -1379,33 +1476,23 @@ public sealed class SessionManager : IDisposable
 
     private static bool TryObserveProcessRunning(ProcessInstanceIdentity identity, out bool isRunning)
     {
-        isRunning = false;
         if (identity.Pid <= 0)
         {
+            isRunning = false;
             return true;
         }
 
-        try
+        switch (ProcessTargetResolver.Observe(identity))
         {
-            using var process = Process.GetProcessById(identity.Pid);
-            isRunning = identity.Matches(process);
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return true;
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-        catch (Win32Exception)
-        {
-            return false;
-        }
-        catch (NotSupportedException)
-        {
-            return false;
+            case ProcessInstanceState.Current:
+                isRunning = true;
+                return true;
+            case ProcessInstanceState.ExitedOrReused:
+                isRunning = false;
+                return true;
+            default:
+                isRunning = false;
+                return false;
         }
     }
 

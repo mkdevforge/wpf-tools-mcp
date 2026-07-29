@@ -23,14 +23,20 @@ must match the same PID and start time or fail as `stale_process_candidate`.
 `attach_to_app` also accepts an exited `sessionId`. Recovery prepares a fresh
 controller and successor session, establishes its active main window without
 foreground activation, and preserves the prior interaction policy unless an
-override is supplied. Only then does it stop predecessor subscriptions, retire
-the predecessor, and return the new session ID. A live predecessor cannot be
-replaced. Ambiguous selection or failed preparation does not change it.
+override is supplied. Only then does it atomically publish the successor and
+retire the predecessor. It stops predecessor subscriptions after that registry
+commit and before returning the new session ID. A live predecessor cannot be
+replaced. Ambiguous selection or failed preparation does not change it or its
+subscriptions.
 
 Retired session IDs are retained as bounded tombstones. Any later call through
 one reports `stale_session: process_replaced`, identifies the successor, and
 states that all window handles and element IDs from the retired session must be
-reacquired.
+reacquired. A bounded identity snapshot is transferred to the successor so an
+old element ID or window handle used with the new session reports
+`stale_element: process_replaced` or `stale_window: process_replaced`, unless
+Windows has already reassigned the same raw HWND value to a live successor
+window.
 
 ## Consequences
 

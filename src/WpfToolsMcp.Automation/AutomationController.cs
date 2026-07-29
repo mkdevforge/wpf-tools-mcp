@@ -26,6 +26,7 @@ public sealed partial class AutomationController : IDisposable
 {
     private Application? _application;
     private UIA3Automation? _automation;
+    private ProcessInstanceIdentity? _processIdentity;
     private readonly SemaphoreSlim _toolMutex = new(1, 1);
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly string _resourceOwnerId = Guid.NewGuid().ToString("N");
@@ -64,7 +65,12 @@ public sealed partial class AutomationController : IDisposable
 
     private sealed record LastHighlightRequest(Rect Bounds, string Color, int Thickness, DateTime ExpiresAtUtc);
 
-    public bool IsAttached => IsApplicationRunning(_application);
+    public bool IsAttached =>
+        IsApplicationRunning(_application) &&
+        _processIdentity is ProcessInstanceIdentity identity &&
+        ProcessTargetResolver.IsCurrent(identity);
+    internal ProcessInstanceIdentity AttachedProcessIdentity =>
+        _processIdentity ?? throw new InvalidOperationException("No stable process identity is attached.");
     internal bool IsDisposing => Volatile.Read(ref _disposeStarted) != 0;
     internal CancellationToken LifetimeToken => _lifetimeCts.Token;
 
@@ -95,12 +101,12 @@ public sealed partial class AutomationController : IDisposable
     public async Task RunExclusiveAsync(Func<Task> action, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(action);
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
+        ThrowIfUnavailableForToolCall();
 
         await _toolMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
+            ThrowIfUnavailableForToolCall();
             await action().ConfigureAwait(false);
         }
         finally
@@ -112,12 +118,12 @@ public sealed partial class AutomationController : IDisposable
     public async Task<T> RunExclusiveAsync<T>(Func<Task<T>> action, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(action);
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
+        ThrowIfUnavailableForToolCall();
 
         await _toolMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
+            ThrowIfUnavailableForToolCall();
             return await action().ConfigureAwait(false);
         }
         finally
@@ -197,8 +203,25 @@ public sealed partial class AutomationController : IDisposable
             try
             {
                 _application = Application.Launch(launchStrategy.StartInfo);
-                if (TryInitializeApplication(_application, waitTimeout, out var launchInitError))
+                ResolvedProcessTarget? launchedTarget = null;
+                Exception? launchInitError = null;
+                try
                 {
+                    launchedTarget = ProcessTargetResolver.ResolveByPid(_application.ProcessId);
+                }
+                catch (InvalidOperationException ex) when (
+                    request.ReuseExistingInstance &&
+                    ex.Message.StartsWith("process_not_found:", StringComparison.Ordinal))
+                {
+                    launchInitError = ex;
+                }
+
+                if (launchedTarget is not null &&
+                    TryInitializeApplication(_application, waitTimeout, out launchInitError))
+                {
+                    EnsureCurrentProcessInstance(launchedTarget.Identity, "launched process initialization");
+
+                    _processIdentity = launchedTarget.Identity;
                     var launchResponse = new LaunchAppResponse(SessionId: "", _application.ProcessId, _application.Name);
                     return Task.FromResult(launchResponse);
                 }
@@ -415,10 +438,13 @@ public sealed partial class AutomationController : IDisposable
                     continue;
                 }
 
-                if (!ProcessTargetResolver.IsCurrent(target.Identity))
+                try
                 {
-                    error = new InvalidOperationException(
-                        $"stale_process_candidate: process {target.Identity.Pid} changed during fallback attachment.");
+                    EnsureCurrentProcessInstance(target.Identity, "fallback attachment");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    error = ex;
                     attached.Dispose();
                     Cleanup();
                     Thread.Sleep(200);
@@ -426,6 +452,7 @@ public sealed partial class AutomationController : IDisposable
                 }
 
                 _application = attached;
+                _processIdentity = target.Identity;
                 return true;
             }
             catch (Exception ex)
@@ -450,13 +477,9 @@ public sealed partial class AutomationController : IDisposable
             var target = ProcessTargetResolver.Resolve(request);
             (_application, _automation) = CreateAttachment(target.Identity.Pid);
 
-            if (!ProcessTargetResolver.IsCurrent(target.Identity))
-            {
-                throw new InvalidOperationException(
-                    $"stale_process_candidate: process {target.Identity.Pid} changed while attachment was initializing. " +
-                    "Discover candidates again; no fallback target was selected.");
-            }
+            EnsureCurrentProcessInstance(target.Identity, "attachment initialization");
 
+            _processIdentity = target.Identity;
             var response = new AttachToAppResponse(SessionId: "", _application.ProcessId, _application.Name)
             {
                 ProcessInstanceId = target.Identity.Value
@@ -470,7 +493,7 @@ public sealed partial class AutomationController : IDisposable
         }
     }
 
-    private static (Application Application, UIA3Automation Automation) CreateAttachment(int pid)
+    private (Application Application, UIA3Automation Automation) CreateAttachment(int pid)
     {
         var application = Application.Attach(pid);
         UIA3Automation? automation = null;
@@ -487,6 +510,23 @@ public sealed partial class AutomationController : IDisposable
             automation?.Dispose();
             application.Dispose();
             throw;
+        }
+    }
+
+    private static void EnsureCurrentProcessInstance(ProcessInstanceIdentity identity, string operation)
+    {
+        switch (ProcessTargetResolver.Observe(identity))
+        {
+            case ProcessInstanceState.Current:
+                return;
+            case ProcessInstanceState.ExitedOrReused:
+                throw new InvalidOperationException(
+                    $"stale_process_candidate: process {identity.Pid} exited or was reused during {operation}. " +
+                    "Discover candidates again; no fallback target was selected.");
+            default:
+                throw new InvalidOperationException(
+                    $"process_identity_unavailable: process {identity.Pid} could not be verified during {operation}. " +
+                    "No fallback target was selected.");
         }
     }
 
@@ -9477,7 +9517,7 @@ public sealed partial class AutomationController : IDisposable
     private UIA3Automation EnsureAutomation() =>
         _automation ?? throw new InvalidOperationException("Automation has not been initialized.");
 
-    private static Window FindMainWindow(Application application, UIA3Automation automation, TimeSpan? timeout = null)
+    private Window FindMainWindow(Application application, UIA3Automation automation, TimeSpan? timeout = null)
     {
         var window = application.GetMainWindow(automation, timeout ?? TimeSpan.FromSeconds(10));
         if (window is null)
@@ -9485,10 +9525,11 @@ public sealed partial class AutomationController : IDisposable
             throw new InvalidOperationException("Failed to find the main window within the timeout.");
         }
 
+        ObserveWindowHandle(window.Properties.NativeWindowHandle.Value.ToInt64());
         return window;
     }
 
-    private static IReadOnlyList<Window> GetAllTopLevelWindows(Application application, UIA3Automation automation)
+    private IReadOnlyList<Window> GetAllTopLevelWindows(Application application, UIA3Automation automation)
     {
         var windows = new List<Window>();
         var handles = new HashSet<long>();
@@ -9536,6 +9577,7 @@ public sealed partial class AutomationController : IDisposable
                     return;
                 }
 
+                ObserveWindowHandle(handle);
                 windows.Add(window);
             }
             catch
@@ -9577,27 +9619,43 @@ public sealed partial class AutomationController : IDisposable
         return handles;
     }
 
-    private static Window FindWindowByHandle(Application application, UIA3Automation automation, long nativeWindowHandle)
+    private Window FindWindowByHandle(Application application, UIA3Automation automation, long nativeWindowHandle)
     {
         var hwnd = new IntPtr(nativeWindowHandle);
         if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
         {
+            if (IsRetiredWindowHandle(nativeWindowHandle))
+            {
+                throw CreateStaleWindowException(nativeWindowHandle);
+            }
+
             throw CreateWindowClosedException(nativeWindowHandle);
         }
 
         GetWindowThreadProcessId(hwnd, out var processId);
         if (processId == 0)
         {
+            if (IsRetiredWindowHandle(nativeWindowHandle))
+            {
+                throw CreateStaleWindowException(nativeWindowHandle);
+            }
+
             throw CreateWindowClosedException(nativeWindowHandle);
         }
 
         if (processId != application.ProcessId)
         {
+            if (IsRetiredWindowHandle(nativeWindowHandle))
+            {
+                throw CreateStaleWindowException(nativeWindowHandle);
+            }
+
             throw new InvalidOperationException(
                 $"window_outside_session: window handle {nativeWindowHandle} belongs to process {processId}, " +
                 $"not attached process {application.ProcessId}. Start or select the owning session.");
         }
 
+        ObserveWindowHandle(nativeWindowHandle);
         try
         {
             var element = automation.FromHandle(hwnd);
@@ -9607,17 +9665,32 @@ public sealed partial class AutomationController : IDisposable
         {
             if (!IsWindow(hwnd))
             {
+                if (IsRetiredWindowHandle(nativeWindowHandle))
+                {
+                    throw CreateStaleWindowException(nativeWindowHandle, ex);
+                }
+
                 throw CreateWindowClosedException(nativeWindowHandle, ex);
             }
 
             GetWindowThreadProcessId(hwnd, out var currentProcessId);
             if (currentProcessId == 0)
             {
+                if (IsRetiredWindowHandle(nativeWindowHandle))
+                {
+                    throw CreateStaleWindowException(nativeWindowHandle, ex);
+                }
+
                 throw CreateWindowClosedException(nativeWindowHandle, ex);
             }
 
             if (currentProcessId != application.ProcessId)
             {
+                if (IsRetiredWindowHandle(nativeWindowHandle))
+                {
+                    throw CreateStaleWindowException(nativeWindowHandle, ex);
+                }
+
                 throw new InvalidOperationException(
                     $"window_outside_session: window handle {nativeWindowHandle} belongs to process {currentProcessId}, " +
                     $"not attached process {application.ProcessId}. Start or select the owning session.",
@@ -9638,7 +9711,15 @@ public sealed partial class AutomationController : IDisposable
             "Call list_windows and select a live window.",
             innerException);
 
-    private static Window FindWindowByTitle(Application application, UIA3Automation automation, string title)
+    private static InvalidOperationException CreateStaleWindowException(
+        long nativeWindowHandle,
+        Exception? innerException = null) =>
+        new(
+            $"stale_window: process_replaced for window handle {nativeWindowHandle}. " +
+            "Call list_windows in the successor session and select a live window.",
+            innerException);
+
+    private Window FindWindowByTitle(Application application, UIA3Automation automation, string title)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
 
@@ -9692,11 +9773,17 @@ public sealed partial class AutomationController : IDisposable
         throw new InvalidOperationException($"No window found with title '{title}'.");
     }
 
-    private static WindowInfo ToWindowInfo(Window window)
+    private WindowInfo ToWindowInfo(Window window)
     {
         var bounds = window.BoundingRectangle;
         var handle = window.Properties.NativeWindowHandle.Value;
+        ObserveWindowHandle(handle.ToInt64());
         var ownerHandle = TryGetOwnerHandle(handle);
+        if (ownerHandle is long owner)
+        {
+            TrackOrRejectExternalWindowHandle(owner);
+        }
+
         return new WindowInfo(
             Title: GetWindowTitle(window),
             Handle: handle.ToInt64(),
@@ -12353,5 +12440,7 @@ public sealed partial class AutomationController : IDisposable
             _application.Dispose();
             _application = null;
         }
+
+        _processIdentity = null;
     }
 }

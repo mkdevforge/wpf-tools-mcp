@@ -8,22 +8,6 @@ internal readonly record struct ProcessInstanceIdentity(int Pid, long StartTimeF
 {
     internal string Value => $"{Pid}:{StartTimeFileTimeUtc}";
 
-    internal bool Matches(Process process)
-    {
-        ArgumentNullException.ThrowIfNull(process);
-
-        try
-        {
-            return process.Id == Pid &&
-                   !process.HasExited &&
-                   process.StartTime.ToUniversalTime().ToFileTimeUtc() == StartTimeFileTimeUtc;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     internal static bool TryParse(string value, out ProcessInstanceIdentity identity)
     {
         identity = default;
@@ -33,19 +17,25 @@ internal readonly record struct ProcessInstanceIdentity(int Pid, long StartTimeF
         }
 
         var parts = value.Trim().Split(':', 2, StringSplitOptions.TrimEntries);
-        return parts.Length == 2 &&
-               int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var pid) &&
-               pid > 0 &&
-               long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var startTime) &&
-               startTime > 0 &&
-               Assign(pid, startTime, out identity);
-
-        static bool Assign(int pid, long startTime, out ProcessInstanceIdentity parsed)
+        if (parts.Length != 2 ||
+            !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var pid) ||
+            pid <= 0 ||
+            !long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var startTime) ||
+            startTime <= 0)
         {
-            parsed = new ProcessInstanceIdentity(pid, startTime);
-            return true;
+            return false;
         }
+
+        identity = new ProcessInstanceIdentity(pid, startTime);
+        return true;
     }
+}
+
+internal enum ProcessInstanceState
+{
+    Current,
+    ExitedOrReused,
+    Unavailable
 }
 
 internal sealed record ResolvedProcessTarget(
@@ -149,15 +139,42 @@ internal static class ProcessTargetResolver
     }
 
     internal static bool IsCurrent(ProcessInstanceIdentity identity)
+        => Observe(identity) == ProcessInstanceState.Current;
+
+    internal static ProcessInstanceState Observe(ProcessInstanceIdentity identity)
     {
+        Process process;
         try
         {
-            using var process = Process.GetProcessById(identity.Pid);
-            return identity.Matches(process);
+            process = Process.GetProcessById(identity.Pid);
+        }
+        catch (ArgumentException)
+        {
+            return ProcessInstanceState.ExitedOrReused;
         }
         catch
         {
-            return false;
+            return ProcessInstanceState.Unavailable;
+        }
+
+        using (process)
+        {
+            try
+            {
+                if (process.HasExited)
+                {
+                    return ProcessInstanceState.ExitedOrReused;
+                }
+
+                var currentStartTime = process.StartTime.ToUniversalTime().ToFileTimeUtc();
+                return currentStartTime == identity.StartTimeFileTimeUtc
+                    ? ProcessInstanceState.Current
+                    : ProcessInstanceState.ExitedOrReused;
+            }
+            catch
+            {
+                return ProcessInstanceState.Unavailable;
+            }
         }
     }
 
@@ -175,7 +192,8 @@ internal static class ProcessTargetResolver
         {
             current = ResolveByPid(identity.Pid);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex) when (
+            ex.Message.StartsWith("process_not_found:", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"stale_process_candidate: '{processInstanceId}' is no longer running. Discover candidates again.");
@@ -215,9 +233,9 @@ internal static class ProcessTargetResolver
                     candidates.Add(CreateTarget(process));
                 }
             }
-            catch (InvalidOperationException)
+            catch (ProcessExitedDuringDiscoveryException)
             {
-                // The process exited or its stable identity could not be read during discovery.
+                // A process that exits during enumeration is not a live candidate.
             }
             finally
             {
@@ -240,7 +258,7 @@ internal static class ProcessTargetResolver
             process.Refresh();
             if (process.HasExited)
             {
-                throw new InvalidOperationException($"Process {process.Id} exited during discovery.");
+                throw new ProcessExitedDuringDiscoveryException();
             }
 
             var startTimeUtc = process.StartTime.ToUniversalTime();
@@ -249,10 +267,10 @@ internal static class ProcessTargetResolver
                 Identity: identity,
                 ProcessName: process.ProcessName,
                 StartTimeUtc: startTimeUtc,
-                MainWindowHandle: process.MainWindowHandle.ToInt64(),
-                MainWindowTitle: process.MainWindowTitle ?? string.Empty);
+                MainWindowHandle: SafeGetMainWindowHandle(process),
+                MainWindowTitle: Bound(SafeGetMainWindowTitle(process), 512));
         }
-        catch (InvalidOperationException)
+        catch (ProcessExitedDuringDiscoveryException)
         {
             throw;
         }
@@ -269,5 +287,43 @@ internal static class ProcessTargetResolver
         return fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
             ? fileName[..^4]
             : fileName;
+    }
+
+    private static string Bound(string? value, int maximumLength)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length <= maximumLength ? value : value[..maximumLength];
+    }
+
+    private static long SafeGetMainWindowHandle(Process process)
+    {
+        try
+        {
+            return process.MainWindowHandle.ToInt64();
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static string SafeGetMainWindowTitle(Process process)
+    {
+        try
+        {
+            return process.MainWindowTitle ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private sealed class ProcessExitedDuringDiscoveryException : Exception
+    {
     }
 }

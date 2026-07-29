@@ -179,15 +179,22 @@ start time. Process-name attachment returns structured candidates rather than
 silently choosing when multiple live instances match. Candidate retries use an
 opaque `processInstanceId` so PID reuse or candidate exit fails as
 `stale_process_candidate` without falling through to another process.
+The `launch_app` existing-instance fallback uses the same structured ambiguity
+result instead of choosing an existing process by recency.
 
 Replacing an exited session creates a fresh controller, session ID, and active
 window history. The successor is fully attached and its main window is pinned
-before predecessor subscriptions are stopped and the predecessor is retired.
-The durable interaction policy is inherited unless explicitly overridden.
-Retired session IDs remain as bounded tombstones and report
+before the predecessor is atomically retired. Predecessor subscriptions are
+stopped after that registry commit and before the response is returned, so a
+failed pre-commit replacement does not remove them. The durable interaction
+policy is inherited unless explicitly overridden. Retired session IDs remain
+as bounded tombstones and report
 `stale_session: process_replaced` with the successor ID; every prior HWND and
-element ID is therefore explicitly stale and must be reacquired. Ambiguous or
-failed preparation is atomic and leaves the predecessor unchanged.
+element ID is therefore explicitly stale and must be reacquired. The successor
+also recognizes transferred predecessor identities and reports
+`stale_window: process_replaced` or `stale_element: process_replaced` when one
+is reused directly. Ambiguous or failed preparation is atomic and leaves the
+predecessor unchanged.
 
 ### Desktop Interaction Policy
 
