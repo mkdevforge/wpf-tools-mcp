@@ -31,7 +31,9 @@
       MouseInput: false,
       KeyboardInput: false,
       CursorMoved: false
-    }
+    },
+    ForegroundFocusRequired: false,
+    PhysicalInputRequired: false
   },
   StatusAfter: Selected: Alicia (Age=30)
 }

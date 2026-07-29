@@ -30,7 +30,10 @@
       MouseInput: false,
       KeyboardInput: true,
       CursorMoved: false
-    }
+    },
+    ModeUsed: AtSelection,
+    ForegroundFocusRequired: true,
+    PhysicalInputRequired: true
   },
   Value: Focused text
 }

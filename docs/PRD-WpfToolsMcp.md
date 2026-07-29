@@ -110,7 +110,7 @@ The MCP server manages both channels in Phase 2. Backend-neutral inspection tool
 ## MCP Tools
 
 The tables below describe the full `diagnostics` profile. The default `core`
-profile intentionally exposes a smaller 29-tool surface with compact schemas;
+profile intentionally exposes a smaller 30-tool surface with compact schemas;
 see `README.md` for the current profile split and configuration.
 
 ### Phase 1 — Inspection (FlaUI / UIA)
@@ -136,7 +136,8 @@ see `README.md` for the current profile split and configuration.
 |---|---|---|
 | `click_element` | Click semantic-first, with mouse fallback when allowed | Locator strategy + optional click type (single/double/right) and click mode |
 | `mouse_click` | Send physical mouse input at a coordinate (Playwright-style) | `x`, `y`, `coordSpace` (screen/client), button, clickType |
-| `type_text` | Set text semantically, with keyboard input fallback when allowed | Locator + text |
+| `type_text` | Replace, append, or enter text at the current selection, using semantic WPF/UIA paths before keyboard fallback | Optional locator/elementId + text + optional mode |
+| `send_keys` | Send ordered physical keys and modifier chords to the focused or specified element | Optional locator/elementId + 1-100 structured key strokes |
 | `set_value` | Set a value through WPF-native or UIA value semantics | Locator + value |
 | `select_item` | Select semantically, with mouse fallback when allowed | Locator + item identifier (`text`, `index`, or `itemLocator`) |
 | `invoke` | Invoke through WPF-native or UIA semantic patterns | Locator |
@@ -187,13 +188,15 @@ Semantic WPF/UIA actions remain available under that policy. If an operation
 would need forbidden foreground activation or physical input, it fails before
 that fallback with `interaction_policy_blocked`. Callers can use a
 narrow per-operation override, `set_active_window` for intentional activation,
-or an explicit physical operation such as `mouse_click`, `drag`, or
-`click_element` with `clickMode: "mouseAlways"`.
+or an explicit physical operation such as `mouse_click`, `drag`, `send_keys`,
+or `click_element` with `clickMode: "mouseAlways"`.
 
 Interaction responses expose `Effects` for the mechanism actually used:
 `Semantic`, `ForegroundActivated`, `WindowRestored`, `MouseInput`,
-`KeyboardInput`, and `CursorMoved`; where available, `MethodUsed` identifies the
-specific path. The policy and effects cover automation performed by this
+`KeyboardInput`, `CursorMoved`, and the optional `KeyboardFocusChanged`; where
+available, `MethodUsed` identifies the specific path. Text and keyboard input
+responses also distinguish foreground-focus and physical-input requirements
+from effects that occurred. The policy and effects cover automation performed by this
 server. Code reached by a semantic invocation can independently open, restore,
 or activate the application's own windows.
 
@@ -464,7 +467,7 @@ Phase 1 delivers a fully functional MCP server that can see and interact with WP
 - Snapshot tests for all inspection tools
 
 #### P1-M2 — Interact
-- `click_element`, `type_text`, `set_value`, `select_item`, `invoke`
+- `click_element`, `type_text`, `send_keys`, `set_value`, `select_item`, `invoke`
 - Playwright-like robustness: `wait_for` (attached|visible|enabled|actionable|stable|value_equals|name_contains)
 - Pointer interactions: `drag` (for sliders, splitters, reorder, etc.)
 - `scroll_to_element`, `set_active_window`

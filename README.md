@@ -52,8 +52,8 @@ agent workflows:
 
 | Profile | Tools | Purpose |
 |---|---:|---|
-| `core` (default) | 29 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 52 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `core` (default) | 30 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
+| `diagnostics` | 53 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Enable the full profile with a command argument:
 
@@ -83,7 +83,8 @@ The `core` profile exposes:
   `resolve_element`, `get_element_properties`, `get_uia_locators`,
   `get_uia_tree`.
 - **Interaction and synchronization:** `click_element`, `invoke`, `type_text`,
-  `set_value`, `select_item`, `scroll_to_element`, `drag`, `wait_for`.
+  `send_keys`, `set_value`, `select_item`, `scroll_to_element`, `drag`,
+  `wait_for`.
 - **WPF diagnostics:** `get_binding_info`, `get_binding_errors`,
   `get_data_context`, `get_computed_properties`, `get_layout_context`.
 
@@ -269,7 +270,7 @@ Under this strict policy, semantic operations can still succeed without taking
 focus. An operation whose only remaining path requires a forbidden effect fails
 before that fallback with `interaction_policy_blocked`. A one-call override can
 allow only the needed effect. Use `set_active_window` when foreground activation
-is intentional; `mouse_click`, `drag`, or `click_element` with
+is intentional; `mouse_click`, `drag`, `send_keys`, or `click_element` with
 `clickMode: "mouseAlways"` are explicit physical-input choices.
 
 Interaction responses report what the tool actually did in `Effects`:
@@ -282,11 +283,46 @@ Interaction responses report what the tool actually did in `Effects`:
 | `MouseInput` | Sent physical mouse input. |
 | `KeyboardInput` | Sent physical keyboard input. |
 | `CursorMoved` | Moved the system pointer. |
+| `KeyboardFocusChanged` | Changed the element holding keyboard focus. Present only when a change was observed. |
 
 Where available, `MethodUsed` provides the more specific mechanism. These
 fields describe MCP automation, not arbitrary side effects of the invoked
 application code. For example, a semantic command handler may independently
 open or activate one of its own windows.
+
+### Text and Keyboard Input
+
+`type_text` makes text placement explicit with `mode=Replace`, `Append`, or
+`AtSelection`. Omitting `mode` preserves the previous behavior: a specified
+target uses `Replace`, while a targetless call types at the current selection of
+the focused element. Replace and append prefer background-safe WPF or UIA value
+operations. `AtSelection` uses WPF selection semantics when available; other
+targets use keyboard input only when the interaction policy permits it.
+
+`send_keys` sends an ordered sequence of physical keys and modifier chords. It
+accepts common navigation, editing, confirmation, and cancellation keys,
+letters, digits, and `F1` through `F24`; modifiers are `Control`, `Shift`, `Alt`,
+and `Windows`. A sequence contains 1-100 strokes:
+
+```json
+{
+  "sessionId": "session-id",
+  "locator": { "automationId": "SearchBox" },
+  "sequence": [
+    { "key": "A", "modifiers": ["Control"] },
+    { "key": "Delete" },
+    { "key": "Enter" }
+  ]
+}
+```
+
+Unlike semantic text assignment, `send_keys` always requires physical input and
+foreground keyboard focus. It focuses a specified WPF or UIA target without
+moving the mouse. Both input responses report the method used plus
+`ForegroundFocusRequired` and `PhysicalInputRequired`; `type_text` also reports
+the resolved `ModeUsed`. Set `interactionPolicy.allowPhysicalInput=false` to
+guarantee that a physical fallback fails with `interaction_policy_blocked`
+before focus or input is changed.
 
 ### Session Lifecycle
 

@@ -43,6 +43,7 @@ internal sealed class InteractionEffectTracker
     internal bool MouseInput { get; private set; }
     internal bool KeyboardInput { get; private set; }
     internal bool CursorMoved { get; private set; }
+    internal bool KeyboardFocusChanged { get; private set; }
 
     internal void MarkSemantic() => Semantic = true;
 
@@ -58,6 +59,8 @@ internal sealed class InteractionEffectTracker
 
     internal void MarkKeyboardInput() => KeyboardInput = true;
 
+    internal void MarkKeyboardFocusChanged() => KeyboardFocusChanged = true;
+
     internal InteractionEffects ToContract() =>
         new(
             Semantic,
@@ -65,5 +68,6 @@ internal sealed class InteractionEffectTracker
             WindowRestored,
             MouseInput,
             KeyboardInput,
-            CursorMoved);
+            CursorMoved,
+            KeyboardFocusChanged ? true : null);
 }

@@ -36,6 +36,7 @@ public sealed class ToolProfileTests
         "resolve_element",
         "scroll_to_element",
         "select_item",
+        "send_keys",
         "set_active_window",
         "set_value",
         "take_screenshot",
@@ -156,6 +157,10 @@ public sealed class ToolProfileTests
             new[] { "elementId", "locator", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["click_element"]), Is.EqualTo(
             new[] { "clickType", "elementId", "interactionPolicy", "locator", "sessionId" }));
+        Assert.That(GetInputPropertyNames(tools["type_text"]), Is.EqualTo(
+            new[] { "elementId", "interactionPolicy", "locator", "mode", "sessionId", "text" }));
+        Assert.That(GetInputPropertyNames(tools["send_keys"]), Is.EqualTo(
+            new[] { "elementId", "interactionPolicy", "locator", "sequence", "sessionId" }));
         Assert.That(GetInputPropertyNames(tools["drag"]), Is.EqualTo(
             new[] { "elementId", "interactionPolicy", "locator", "sessionId", "targetElementId", "targetLocator", "toX", "toY" }));
         Assert.That(
@@ -175,6 +180,7 @@ public sealed class ToolProfileTests
                      "get_computed_properties",
                      "get_layout_context",
                      "click_element",
+                     "type_text",
                      "drag"
                  })
         {
@@ -246,6 +252,68 @@ public sealed class ToolProfileTests
     }
 
     [Test]
+    public async Task Keyboard_input_tools_expose_discoverable_structured_schemas()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var core = await McpTestContext.StartAsync(serverExe, toolProfile: "core");
+        await using var diagnostics = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+
+        var coreTools = (await core.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var diagnosticTools = (await diagnostics.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var expectedModes = Enum.GetNames<TextEntryMode>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var expectedKeys = Enum.GetNames<KeyboardKey>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var expectedModifiers = Enum.GetNames<KeyboardModifier>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(GetInputPropertyNames(coreTools["type_text"]), Is.EqualTo(
+                new[] { "elementId", "interactionPolicy", "locator", "mode", "sessionId", "text" }));
+            Assert.That(GetInputPropertyNames(diagnosticTools["type_text"]), Is.EqualTo(
+                new[]
+                {
+                    "autoWait",
+                    "elementId",
+                    "interactionPolicy",
+                    "locator",
+                    "mode",
+                    "pollIntervalMs",
+                    "sessionId",
+                    "stableMs",
+                    "text",
+                    "timeoutMs",
+                    "windowHandle"
+                }));
+            Assert.That(GetInputEnumValues(coreTools["type_text"], "mode"), Is.EqualTo(expectedModes));
+            Assert.That(GetInputEnumValues(diagnosticTools["type_text"], "mode"), Is.EqualTo(expectedModes));
+
+            Assert.That(GetInputPropertyNames(coreTools["send_keys"]), Is.EqualTo(
+                new[] { "elementId", "interactionPolicy", "locator", "sequence", "sessionId" }));
+            Assert.That(GetInputPropertyNames(diagnosticTools["send_keys"]), Is.EqualTo(
+                new[]
+                {
+                    "autoWait",
+                    "elementId",
+                    "interactionPolicy",
+                    "locator",
+                    "pollIntervalMs",
+                    "sequence",
+                    "sessionId",
+                    "stableMs",
+                    "timeoutMs",
+                    "windowHandle"
+                }));
+            Assert.That(GetInputArrayItemObjectPropertyNames(coreTools["send_keys"], "sequence"),
+                Is.EqualTo(new[] { "key", "modifiers" }));
+            Assert.That(GetInputArrayItemObjectRequiredPropertyNames(coreTools["send_keys"], "sequence"),
+                Is.EqualTo(new[] { "key" }));
+            Assert.That(GetInputArrayItemObjectEnumValues(coreTools["send_keys"], "sequence", "key"),
+                Is.EqualTo(expectedKeys));
+            Assert.That(GetInputArrayItemObjectEnumValues(coreTools["send_keys"], "sequence", "modifiers"),
+                Is.EqualTo(expectedModifiers));
+        });
+    }
+
+    [Test]
     public async Task Core_profile_exposes_explicit_session_lifecycle_schemas()
     {
         var serverExe = McpServerPaths.FindMcpServerExecutable();
@@ -295,6 +363,7 @@ public sealed class ToolProfileTests
             "click_element",
             "invoke",
             "type_text",
+            "send_keys",
             "set_value",
             "select_item",
             "scroll_to_element",
@@ -333,6 +402,7 @@ public sealed class ToolProfileTests
             "mouse_click",
             "invoke",
             "type_text",
+            "send_keys",
             "set_value",
             "select_item",
             "scroll_to_element",
@@ -893,6 +963,115 @@ public sealed class ToolProfileTests
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
     }
+
+    private static string[] GetInputEnumValues(McpClientTool tool, string inputPropertyName)
+    {
+        var schema = tool.JsonSchema;
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var inputProperties) ||
+            inputProperties.ValueKind != JsonValueKind.Object ||
+            !inputProperties.TryGetProperty(inputPropertyName, out var inputProperty) ||
+            inputProperty.ValueKind != JsonValueKind.Object ||
+            !inputProperty.TryGetProperty("enum", out var values) ||
+            values.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return GetSortedStringValues(values);
+    }
+
+    private static string[] GetInputArrayItemObjectPropertyNames(
+        McpClientTool tool,
+        string inputPropertyName)
+    {
+        var schema = tool.JsonSchema;
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var inputProperties) ||
+            inputProperties.ValueKind != JsonValueKind.Object ||
+            !inputProperties.TryGetProperty(inputPropertyName, out var inputProperty) ||
+            inputProperty.ValueKind != JsonValueKind.Object ||
+            !inputProperty.TryGetProperty("items", out var items) ||
+            items.ValueKind != JsonValueKind.Object ||
+            !items.TryGetProperty("properties", out var itemProperties) ||
+            itemProperties.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return itemProperties
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string[] GetInputArrayItemObjectRequiredPropertyNames(
+        McpClientTool tool,
+        string inputPropertyName)
+    {
+        var schema = tool.JsonSchema;
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var inputProperties) ||
+            inputProperties.ValueKind != JsonValueKind.Object ||
+            !inputProperties.TryGetProperty(inputPropertyName, out var inputProperty) ||
+            inputProperty.ValueKind != JsonValueKind.Object ||
+            !inputProperty.TryGetProperty("items", out var items) ||
+            items.ValueKind != JsonValueKind.Object ||
+            !items.TryGetProperty("required", out var required) ||
+            required.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return GetSortedStringValues(required);
+    }
+
+    private static string[] GetInputArrayItemObjectEnumValues(
+        McpClientTool tool,
+        string inputPropertyName,
+        string itemPropertyName)
+    {
+        var schema = tool.JsonSchema;
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var inputProperties) ||
+            inputProperties.ValueKind != JsonValueKind.Object ||
+            !inputProperties.TryGetProperty(inputPropertyName, out var inputProperty) ||
+            inputProperty.ValueKind != JsonValueKind.Object ||
+            !inputProperty.TryGetProperty("items", out var items) ||
+            items.ValueKind != JsonValueKind.Object ||
+            !items.TryGetProperty("properties", out var itemProperties) ||
+            itemProperties.ValueKind != JsonValueKind.Object ||
+            !itemProperties.TryGetProperty(itemPropertyName, out var itemProperty) ||
+            itemProperty.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        if (itemProperty.TryGetProperty("enum", out var values) && values.ValueKind == JsonValueKind.Array)
+        {
+            return GetSortedStringValues(values);
+        }
+
+        if (itemProperty.TryGetProperty("items", out var arrayItems) &&
+            arrayItems.ValueKind == JsonValueKind.Object &&
+            arrayItems.TryGetProperty("enum", out values) &&
+            values.ValueKind == JsonValueKind.Array)
+        {
+            return GetSortedStringValues(values);
+        }
+
+        return [];
+    }
+
+    private static string[] GetSortedStringValues(JsonElement values) =>
+        values
+            .EnumerateArray()
+            .Select(value => value.GetString())
+            .Where(value => value is not null)
+            .Select(value => value!)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
 
     private static string[] GetInputObjectEnumValues(
         McpClientTool tool,

@@ -661,12 +661,179 @@ public sealed class NonIntrusiveInteractionTests
             Assert.Multiple(() =>
             {
                 Assert.That(typed.Typed, Is.True);
-                Assert.That(typed.MethodUsed, Does.Contain("keyboard").IgnoreCase);
-                AssertKeyboardFallbackEffects(typed.Effects);
+                Assert.That(typed.MethodUsed, Is.EqualTo("keyboard"));
+                Assert.That(typed.ModeUsed, Is.EqualTo(TextEntryMode.Replace));
+                Assert.That(typed.ForegroundFocusRequired, Is.True);
+                Assert.That(typed.PhysicalInputRequired, Is.True);
+                AssertKeyboardOnlyEffects(typed.Effects);
                 Assert.That(status, Is.EqualTo($"Keyboard text: {expectedText}"));
                 Assert.That(after.ForegroundWindowHandle, Is.EqualTo(probes.Target.WindowHandle));
-                Assert.That(after.CursorPosition, Is.Not.EqualTo(before.CursorPosition));
+                Assert.That(after.CursorPosition, Is.EqualTo(before.CursorPosition));
                 Assert.That(after.TargetActivity.Activations, Is.GreaterThan(before.TargetActivity.Activations));
+            });
+        }
+        finally
+        {
+            await CloseProbePairAsync(probes);
+        }
+    }
+
+    [Test]
+    public async Task Explicit_text_entry_modes_replace_then_append_without_physical_input()
+    {
+        var probes = await StartProbePairAsync(attachTarget: true, strictTargetPolicy: true);
+        try
+        {
+            AssertStrictPolicy(probes.TargetInteractionPolicy);
+            await FocusSentinelAsync(probes);
+            var before = CaptureDesktopState(probes.Target.WindowHandle);
+            AssertSentinelIsForeground(before, probes);
+
+            var replaced = await TypeTextIntoTextBoxAsync(
+                probes.TargetSessionId!,
+                "Replaced",
+                TextEntryMode.Replace);
+            var appended = await TypeTextIntoTextBoxAsync(
+                probes.TargetSessionId!,
+                " + appended",
+                TextEntryMode.Append);
+            var value = await ReadElementValueAsync(probes.TargetSessionId!, "FocusProbe_TextBox");
+            var after = CaptureDesktopState(probes.Target.WindowHandle);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(replaced.Typed, Is.True);
+                Assert.That(replaced.ModeUsed, Is.EqualTo(TextEntryMode.Replace));
+                Assert.That(replaced.ForegroundFocusRequired, Is.False);
+                Assert.That(replaced.PhysicalInputRequired, Is.False);
+                AssertOnlySemanticEffects(replaced.Effects);
+                Assert.That(appended.Typed, Is.True);
+                Assert.That(appended.ModeUsed, Is.EqualTo(TextEntryMode.Append));
+                Assert.That(appended.ForegroundFocusRequired, Is.False);
+                Assert.That(appended.PhysicalInputRequired, Is.False);
+                AssertOnlySemanticEffects(appended.Effects);
+                Assert.That(value, Is.EqualTo("Replaced + appended"));
+                AssertDesktopStatePreserved(before, after);
+            });
+        }
+        finally
+        {
+            await CloseProbePairAsync(probes);
+        }
+    }
+
+    [Test]
+    public async Task Send_keys_delivers_ordered_navigation_and_modifier_chords_without_moving_cursor()
+    {
+        var probes = await StartProbePairAsync(attachTarget: true, strictTargetPolicy: true);
+        try
+        {
+            AssertStrictPolicy(probes.TargetInteractionPolicy);
+            await FocusSentinelAsync(probes);
+            PlaceCursorAtKnownPoint();
+            var before = CaptureDesktopState(probes.Target.WindowHandle);
+            AssertSentinelIsForeground(before, probes);
+
+            var sent = await _mcp.CallToolAsync<SendKeysResponse>("send_keys", new Dictionary<string, object?>
+            {
+                ["sessionId"] = probes.TargetSessionId,
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "FocusProbe_KeyboardFallbackTarget"
+                },
+                ["sequence"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["key"] = "Enter" },
+                    new Dictionary<string, object?> { ["key"] = "Escape" },
+                    new Dictionary<string, object?> { ["key"] = "ArrowLeft" },
+                    new Dictionary<string, object?> { ["key"] = "ArrowUp" },
+                    new Dictionary<string, object?> { ["key"] = "ArrowRight" },
+                    new Dictionary<string, object?> { ["key"] = "ArrowDown" },
+                    new Dictionary<string, object?>
+                    {
+                        ["key"] = "A",
+                        ["modifiers"] = new[] { "Control" }
+                    },
+                    new Dictionary<string, object?> { ["key"] = "Tab" }
+                },
+                ["interactionPolicy"] = CreateInteractionPolicy(
+                    allowForegroundActivation: true,
+                    allowPhysicalInput: true)
+            });
+
+            var status = await WaitForElementNameAsync(
+                probes.TargetSessionId!,
+                "FocusProbe_KeyboardEventStatus",
+                "Keys: Enter,Escape,ArrowLeft,ArrowUp,ArrowRight,ArrowDown,Control+A,Tab");
+            await WaitForActivationIncreaseAsync(
+                probes.Target.WindowHandle,
+                before.TargetActivity.Activations);
+            var after = CaptureDesktopState(probes.Target.WindowHandle);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(sent.Sent, Is.True);
+                Assert.That(sent.MethodUsed, Does.Contain("keyboard").IgnoreCase);
+                Assert.That(sent.ForegroundFocusRequired, Is.True);
+                Assert.That(sent.PhysicalInputRequired, Is.True);
+                AssertKeyboardOnlyEffects(sent.Effects);
+                Assert.That(status, Is.EqualTo("Keys: Enter,Escape,ArrowLeft,ArrowUp,ArrowRight,ArrowDown,Control+A,Tab"));
+                Assert.That(after.ForegroundWindowHandle, Is.EqualTo(probes.Target.WindowHandle));
+                Assert.That(after.CursorPosition, Is.EqualTo(before.CursorPosition));
+                Assert.That(after.TargetActivity.Activations, Is.GreaterThan(before.TargetActivity.Activations));
+            });
+        }
+        finally
+        {
+            await CloseProbePairAsync(probes);
+        }
+    }
+
+    [Test]
+    public async Task Send_keys_strict_policy_fails_before_foreground_focus_or_input()
+    {
+        var probes = await StartProbePairAsync(attachTarget: true, strictTargetPolicy: true);
+        try
+        {
+            AssertStrictPolicy(probes.TargetInteractionPolicy);
+            await FocusSentinelAsync(probes);
+            var before = CaptureDesktopState(probes.Target.WindowHandle);
+            AssertSentinelIsForeground(before, probes);
+
+            InvalidOperationException? exception = null;
+            try
+            {
+                _ = await _mcp.CallToolAsync<SendKeysResponse>("send_keys", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = probes.TargetSessionId,
+                    ["locator"] = new Dictionary<string, object?>
+                    {
+                        ["automationId"] = "FocusProbe_KeyboardFallbackTarget"
+                    },
+                    ["sequence"] = new object[]
+                    {
+                        new Dictionary<string, object?> { ["key"] = "Enter" }
+                    }
+                });
+                Assert.Fail("Expected strict policy to block physical keyboard input.");
+            }
+            catch (InvalidOperationException caught)
+            {
+                exception = caught;
+            }
+
+            var status = await ReadElementNameAsync(
+                probes.TargetSessionId!,
+                "FocusProbe_KeyboardEventStatus");
+            var after = CaptureDesktopState(probes.Target.WindowHandle);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exception, Is.Not.Null);
+                Assert.That(exception!.Message, Does.Contain("interaction_policy_blocked"));
+                Assert.That(exception.Message, Does.Contain("allowPhysicalInput=false"));
+                Assert.That(status, Is.EqualTo("Keys: (none)"));
+                AssertDesktopStatePreserved(before, after);
             });
         }
         finally
@@ -939,6 +1106,36 @@ public sealed class NonIntrusiveInteractionTests
         return await _mcp.CallToolAsync<TypeTextResponse>("type_text", arguments);
     }
 
+    private async Task<TypeTextResponse> TypeTextIntoTextBoxAsync(
+        string sessionId,
+        string text,
+        TextEntryMode mode) =>
+        await _mcp.CallToolAsync<TypeTextResponse>("type_text", new Dictionary<string, object?>
+        {
+            ["sessionId"] = sessionId,
+            ["text"] = text,
+            ["mode"] = mode.ToString(),
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "FocusProbe_TextBox"
+            }
+        });
+
+    private async Task<string?> ReadElementValueAsync(string sessionId, string automationId)
+    {
+        var response = await _mcp.CallToolAsync<GetElementPropertiesResponse>(
+            "get_element_properties",
+            new Dictionary<string, object?>
+            {
+                ["sessionId"] = sessionId,
+                ["locator"] = new Dictionary<string, object?> { ["automationId"] = automationId }
+            });
+
+        return response.Patterns.TryGetValue("Value", out var valuePattern)
+            ? valuePattern?["values"]?["Value"]?.GetValue<string>()
+            : null;
+    }
+
     private static Dictionary<string, object?> CreateInteractionPolicy(
         bool? allowForegroundActivation,
         bool? allowPhysicalInput)
@@ -980,6 +1177,7 @@ public sealed class NonIntrusiveInteractionTests
         Assert.That(effects.MouseInput, Is.False);
         Assert.That(effects.KeyboardInput, Is.False);
         Assert.That(effects.CursorMoved, Is.False);
+        Assert.That(effects.KeyboardFocusChanged, Is.Null);
     }
 
     private static void AssertPhysicalFallbackEffects(InteractionEffects? effects)
@@ -991,17 +1189,19 @@ public sealed class NonIntrusiveInteractionTests
         Assert.That(effects.MouseInput, Is.True);
         Assert.That(effects.KeyboardInput, Is.False);
         Assert.That(effects.CursorMoved, Is.True);
+        Assert.That(effects.KeyboardFocusChanged, Is.Null);
     }
 
-    private static void AssertKeyboardFallbackEffects(InteractionEffects? effects)
+    private static void AssertKeyboardOnlyEffects(InteractionEffects? effects)
     {
         Assert.That(effects, Is.Not.Null, "The interaction response must report effects.");
         Assert.That(effects!.Semantic, Is.False);
         Assert.That(effects.ForegroundActivated, Is.True);
         Assert.That(effects.WindowRestored, Is.False);
-        Assert.That(effects.MouseInput, Is.True);
+        Assert.That(effects.MouseInput, Is.False);
         Assert.That(effects.KeyboardInput, Is.True);
-        Assert.That(effects.CursorMoved, Is.True);
+        Assert.That(effects.CursorMoved, Is.False);
+        Assert.That(effects.KeyboardFocusChanged, Is.True);
     }
 
     private static void AssertWindowStateEffects(InteractionEffects? effects, bool windowRestored)

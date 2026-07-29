@@ -21,6 +21,8 @@ public static class AgentProtocolCapabilities
     public const string GetLayoutContext = "wpf/get_layout_context";
     public const string GetComputedPropertyProvenance = "wpf/get_computed_properties:provenance-v1";
     public const string CorrelateScreenshotRegion = "wpf/correlate_screenshot_region:v1";
+    public const string SetValueTextModes = "wpf/set_value:text-modes-v1";
+    public const string FocusElement = "wpf/focus_element:v1";
 
     public static IReadOnlyList<string> Current { get; } = Array.AsReadOnly<string>(
     [
@@ -28,6 +30,8 @@ public static class AgentProtocolCapabilities
         FindElementsDiscoveryCounts,
         GetLayoutContext,
         GetComputedPropertyProvenance,
-        CorrelateScreenshotRegion
+        CorrelateScreenshotRegion,
+        SetValueTextModes,
+        FocusElement
     ]);
 }
