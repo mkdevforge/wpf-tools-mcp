@@ -12,7 +12,6 @@
     SessionId: <session>,
     Pid: -1,
     ProcessName: WpfToolsMcp.TestApp,
-    ActiveWindowTitle: WPF Tools MCP TestApp,
     CreatedAtUtc: <time>,
     BackendCapabilityStates: [
       {
