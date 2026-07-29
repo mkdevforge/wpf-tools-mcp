@@ -60,6 +60,9 @@
             <Border AutomationProperties.AutomationId="Provenance_Default"
                     Height="24" />
 
+            <DataGrid AutomationProperties.AutomationId="Provenance_PropertyCap"
+                      Height="24" />
+
             <StackPanel TextElement.Foreground="#FF8A2F5B">
                 <TextBlock AutomationProperties.AutomationId="Provenance_Inherited"
                            Text="Inherited foreground" />

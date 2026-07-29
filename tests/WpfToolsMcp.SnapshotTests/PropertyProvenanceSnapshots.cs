@@ -413,8 +413,9 @@ public sealed class PropertyProvenanceSnapshots
         var result = await _mcp.CallToolAsync<GetComputedPropertiesResponse>("get_computed_properties", new Dictionary<string, object?>
         {
             ["sessionId"] = _sessionId,
-            ["locator"] = new Dictionary<string, object?> { ["automationId"] = "Provenance_Default" },
+            ["locator"] = new Dictionary<string, object?> { ["automationId"] = "Provenance_PropertyCap" },
             ["includeDefault"] = true,
+            ["includeUnset"] = true,
             ["includeProvenance"] = true,
             ["maxProperties"] = 500,
             ["maxProvenanceCandidates"] = 0
