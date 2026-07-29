@@ -4755,6 +4755,15 @@ public sealed partial class AutomationController : IDisposable
         var trace = BeginTraceSpan("wait_for");
         try
         {
+            if (request.Condition is not null)
+            {
+                var structuredResponse = await WaitForConditionAsync(request, cancellationToken).ConfigureAwait(false);
+                trace?.SetSummary(
+                    $"{structuredResponse.State} succeeded={structuredResponse.Succeeded} " +
+                    $"attempts={structuredResponse.Attempts} backend={structuredResponse.BackendUsed}");
+                return structuredResponse;
+            }
+
         var hasLocator = request.Locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
         if (hasLocator == hasElementId)
@@ -4900,6 +4909,7 @@ public sealed partial class AutomationController : IDisposable
         var start = Stopwatch.GetTimestamp();
         var attempts = 0;
         WaitForObservation? lastObservation = null;
+        WaitObservedValue? lastObservedValue = null;
 
         Rectangle? lastBounds = null;
         long? stableStartTimestamp = null;
@@ -4931,6 +4941,7 @@ public sealed partial class AutomationController : IDisposable
 
             if (element is null)
             {
+                lastObservedValue = CreateUnavailableObservedValue("not_attached");
                 if (state == WaitForState.Attached)
                 {
                     failureReason = "not_attached";
@@ -4951,6 +4962,7 @@ public sealed partial class AutomationController : IDisposable
                     stableMs: stableMs,
                     ref lastBounds,
                     ref stableStartTimestamp);
+                lastObservedValue = ObserveLegacyUiaWaitValue(element, state);
             }
 
             if (satisfied)
@@ -4962,7 +4974,11 @@ public sealed partial class AutomationController : IDisposable
                     State: request.State,
                     ElapsedMs: elapsedMs,
                     Attempts: attempts,
-                    LastObservation: lastObservation);
+                    LastObservation: lastObservation)
+                {
+                    BackendUsed = WaitBackend.Uia,
+                    LastObservedValue = lastObservedValue
+                };
             }
 
             var elapsed = Stopwatch.GetElapsedTime(start);
@@ -4975,7 +4991,12 @@ public sealed partial class AutomationController : IDisposable
                     ElapsedMs: elapsedMs,
                     Attempts: attempts,
                     LastObservation: lastObservation,
-                    FailureReason: failureReason ?? "timeout");
+                    FailureReason: failureReason ?? "timeout")
+                {
+                    BackendUsed = WaitBackend.Uia,
+                    ReasonCode = "wait_timeout",
+                    LastObservedValue = lastObservedValue
+                };
 
                 if (request.ThrowOnTimeout)
                 {
@@ -5024,6 +5045,7 @@ public sealed partial class AutomationController : IDisposable
         var start = Stopwatch.GetTimestamp();
         var attempts = 0;
         WaitForObservation? lastObservation = null;
+        WaitObservedValue? lastObservedValue = null;
 
         Rect? lastBounds = null;
         long? stableStartTimestamp = null;
@@ -5092,11 +5114,13 @@ public sealed partial class AutomationController : IDisposable
                             IsOffscreen: null);
 
                         (satisfied, failureReason) = CheckWpfComputedValueEquals(computed.Properties, expectedValue.Value);
+                        lastObservedValue = ObserveWpfComputedValue(computed.Properties);
                     }
                     catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
                     {
                         currentXPath = null;
                         lastObservation = null;
+                        lastObservedValue = CreateUnavailableObservedValue("not_attached");
                         failureReason = "not_attached";
                     }
                 }
@@ -5128,12 +5152,14 @@ public sealed partial class AutomationController : IDisposable
                                 Bounds: resolved.Bounds,
                                 IsEnabled: null,
                                 IsOffscreen: null);
+                            lastObservedValue = BooleanObservedValue(true);
 
                             satisfied = true;
                         }
                     }
                     catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
                     {
+                        lastObservedValue = CreateUnavailableObservedValue("not_attached");
                         failureReason = "not_attached";
                     }
                 }
@@ -5163,6 +5189,7 @@ public sealed partial class AutomationController : IDisposable
                     {
                         currentXPath = null;
                         lastObservation = null;
+                        lastObservedValue = CreateUnavailableObservedValue("not_attached");
                         failureReason = "not_attached";
                     }
 
@@ -5196,6 +5223,7 @@ public sealed partial class AutomationController : IDisposable
                                 node,
                                 computed.Properties,
                                 expectedText);
+                            lastObservedValue = ObserveWpfNameValue(node, computed.Properties, expectedText);
                         }
                         else
                         {
@@ -5206,6 +5234,7 @@ public sealed partial class AutomationController : IDisposable
                                 expectedText,
                                 ref lastBounds,
                                 ref stableStartTimestamp);
+                            lastObservedValue = ObserveLegacyWpfWaitValue(node, state);
                         }
                     }
                 }
@@ -5219,7 +5248,11 @@ public sealed partial class AutomationController : IDisposable
                     State: stateText,
                     ElapsedMs: elapsedMs,
                     Attempts: attempts,
-                    LastObservation: lastObservation);
+                    LastObservation: lastObservation)
+                {
+                    BackendUsed = WaitBackend.Wpf,
+                    LastObservedValue = lastObservedValue
+                };
             }
 
             var elapsed = Stopwatch.GetElapsedTime(start);
@@ -5232,7 +5265,12 @@ public sealed partial class AutomationController : IDisposable
                     ElapsedMs: elapsedMs,
                     Attempts: attempts,
                     LastObservation: lastObservation,
-                    FailureReason: failureReason ?? "timeout");
+                    FailureReason: failureReason ?? "timeout")
+                {
+                    BackendUsed = WaitBackend.Wpf,
+                    ReasonCode = "wait_timeout",
+                    LastObservedValue = lastObservedValue
+                };
 
                 if (throwOnTimeout)
                 {
