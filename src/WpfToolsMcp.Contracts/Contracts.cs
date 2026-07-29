@@ -314,6 +314,9 @@ public sealed record TakeScreenshotRequest(
     bool ReturnBase64 = false)
 {
     public bool IncludeViewport { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ScreenshotCorrelationOptions? Correlation { get; init; }
 }
 
 public sealed record TakeScreenshotResponse(
@@ -330,6 +333,9 @@ public sealed record TakeScreenshotResponse(
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ViewportConditions? Viewport { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ScreenshotCorrelationResult? Correlation { get; init; }
 }
 
 public sealed record PickElementAtPointRequest(

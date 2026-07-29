@@ -295,6 +295,21 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case AgentProtocolCapabilities.CorrelateScreenshotRegion:
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<CorrelateWpfScreenshotRegionRequest>(JsonOptions)
+                            ?? throw new InvalidOperationException("Missing request params.");
+
+                        var response = WpfVisualTreeInspector.CorrelateScreenshotRegion(
+                            ownerId,
+                            typedRequest,
+                            cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
                 case "wpf/get_binding_info":
                     return await RunOnUiAsync(() =>
                     {

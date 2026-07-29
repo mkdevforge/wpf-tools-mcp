@@ -66,6 +66,11 @@ internal static class TestAppPaths
 
     public static string FindScrollTestAppExecutable() => FindExecutable("WpfToolsMcp.TestApp.Scroll", "WpfToolsMcp.TestApp.Scroll");
 
+    public static string FindScreenshotCorrelationProbeTestAppExecutable() =>
+        FindExecutable(
+            "WpfToolsMcp.TestApp.ScreenshotCorrelationProbe",
+            "WpfToolsMcp.TestApp.ScreenshotCorrelationProbe");
+
     public static string FindBrokenAutomationTestAppExecutable() =>
         FindExecutable("WpfToolsMcp.TestApp.BrokenAutomation", "WpfToolsMcp.TestApp.BrokenAutomation");
 

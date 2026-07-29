@@ -98,6 +98,9 @@ The `diagnostics` profile additionally exposes:
   `poll_subscription`, and `unsubscribe`.
 - `trace_start`, `trace_stop`, `performance_start`, and `performance_stop`.
 
+Its expanded `take_screenshot` schema also exposes capture controls and the
+opt-in screenshot-correlation workflow described below.
+
 ### WPF Layout Context
 
 `get_layout_context` is a bounded WPF-only relational snapshot for explaining
@@ -343,6 +346,74 @@ viewport is sampled immediately before and after capture; unstable captures
 are retried and fail with `screenshot_viewport_unstable` rather than returning
 mislabeled evidence.
 
+### Screenshot Correlation
+
+The `diagnostics` profile can correlate a point or rectangular region in a
+`take_screenshot` image with bounded WPF and UIA element candidates. The
+workflow is opt-in through the nested `correlation` argument; it does not add a
+separate top-level tool or enlarge the compact `core` schema:
+
+```json
+{
+  "sessionId": "session-id",
+  "captureMode": "screen",
+  "area": "client",
+  "correlation": {
+    "x": 320,
+    "y": 180,
+    "width": 48,
+    "height": 24,
+    "backend": "Both",
+    "includeAncestors": true,
+    "maxAncestors": 4,
+    "maxCandidates": 8,
+    "maxNodes": 10000,
+    "annotate": true
+  }
+}
+```
+
+`x`, `y`, `width`, and `height` are physical pixels local to the returned
+bitmap, with `(0, 0)` at its top-left corner. `x` and `y` must be non-negative,
+dimensions must be positive, and the complete region must fit inside the
+captured image. `width` and `height` default to `1`, so an `x`/`y` pair is a
+point query. The result includes both that image-space region and its mapped
+physical screen region. For a point query it also reports the single canonical
+`ScreenPointPhysicalPixels` used by both backends, even when one image pixel
+maps to multiple screen pixels.
+
+`backend=Both` scans WPF and UIA and keeps their candidates separate. `Auto`
+uses a connected agent when it advertises the current WPF capability and uses
+UIA otherwise; it does not inject as a side effect. Explicit `Wpf` and `Both`
+requests require a connected current agent, so call `inject_agent` first. If an
+already-loaded agent lacks the capability, restart the target application,
+start a new MCP session, and attach again.
+
+Candidates report backend, identity, path, bounds, match kind, and intersection
+bounds. Set `includeAncestors=true` for a bounded nearest-first ancestor chain.
+Overlapping matches are returned as explicit candidates instead of silently
+collapsing to one: per-backend `DirectHitIndex` and `HasOverlaps`, plus the
+aggregate `Ambiguous` flag, expose the distinction.
+
+Correlation forces stable viewport and capture-context collection even when
+`includeViewport` is false. `CaptureContext` records the actual window, client
+and outer bounds, effective DPI scales, requested and used capture modes,
+capture area, clipping, and sampled obscuration. Obscuration sampling applies
+to screen capture; other modes report it as not applicable rather than
+guessing.
+
+Annotations default to enabled. Candidate labels and colors are returned with
+their image-local bounds and are drawn into the same artifact, so a small set
+of selected elements can be shared without a tree dump. Set `annotate=false`
+to retain correlation data without modifying the pixels.
+
+Defaults are 8 candidates and 10,000 scanned nodes per backend, no ancestors,
+and 4 ancestors per candidate when ancestor context is enabled. The server
+clamps `maxCandidates` to 1-25, `maxNodes` to 1-200,000, and `maxAncestors` to
+0-20. Returned, discovered, and scanned counts remain separate.
+`ScanComplete`, `Truncated`, and `TruncatedReason` state whether the counts are
+exact or a lower bound and which cap stopped discovery.
+
 ### Direct Search and Disambiguation
 
 `find_elements` searches the selected WPF or UIA tree directly; callers do not
@@ -377,6 +448,7 @@ complete controls live in the `diagnostics` profile when exposing them in
 
 | Tool | Default response budget | Expanded evidence | Limit metadata |
 |---|---|---|---|
+| `take_screenshot` correlation (`diagnostics`) | Per backend: 8 candidates while scanning at most 10,000 nodes; no ancestor chains | Set `maxCandidates` (1-25), `maxNodes` (1-200,000), `includeAncestors`, and `maxAncestors` (0-20); use `backend=Both` for combined WPF and UIA evidence | Per backend: `ReturnedCandidates`, `DiscoveredCandidates`, `ScannedNodes`, `ScanComplete`, `Truncated`, `TruncatedReason`, `DirectHitIndex`, `HasOverlaps`; aggregate `Ambiguous` |
 | `get_visual_tree` | Depth 4, at most 500 nodes, minimal fields | Set `depth`, `maxNodes`, `preset`, or `fields` in `diagnostics` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_uia_tree` | Depth 4, at most 200 nodes | Increase `depth` or `maxNodes` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `find_elements` | At most 25 matches while scanning at most 5,000 nodes; minimal fields | Set `maxResults` or `returnFields`; `diagnostics` also exposes backend, root, scan limit, and ID controls | `ReturnedMatches`, `DiscoveredMatches`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
@@ -406,7 +478,9 @@ common-workflow rationale plus inventory and compact-schema contract coverage.
 2. Use `list_windows` to choose among top-level windows. Call
    `set_active_window` only when foreground activation is intended.
 3. For responsive-layout evidence, use `set_window_viewport` to establish the
-   exact client size and request `includeViewport` with screenshots.
+   exact client size and request `includeViewport` with screenshots. In the
+   diagnostics profile, add `correlation` to map a small image region to
+   bounded WPF/UIA candidates and an annotated artifact.
 4. Inspect with `get_visual_tree` or `find_elements`, use
    `get_layout_context` for WPF spacing/allocation evidence, then retain an
    `elementId` from `resolve_element` for follow-up calls.

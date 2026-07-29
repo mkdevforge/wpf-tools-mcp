@@ -20,12 +20,14 @@ public static class AgentProtocolCapabilities
     public const string FindElementsDiscoveryCounts = "wpf/find_elements:discovery-counts";
     public const string GetLayoutContext = "wpf/get_layout_context";
     public const string GetComputedPropertyProvenance = "wpf/get_computed_properties:provenance-v1";
+    public const string CorrelateScreenshotRegion = "wpf/correlate_screenshot_region:v1";
 
     public static IReadOnlyList<string> Current { get; } = Array.AsReadOnly<string>(
     [
         ResolveElementDetailed,
         FindElementsDiscoveryCounts,
         GetLayoutContext,
-        GetComputedPropertyProvenance
+        GetComputedPropertyProvenance,
+        CorrelateScreenshotRegion
     ]);
 }

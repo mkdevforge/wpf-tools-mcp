@@ -937,7 +937,7 @@ public sealed partial class AutomationController : IDisposable
                 Rect? requestedBounds)
             {
                 var stableCapture = await ViewportCaptureStabilityCoordinator.CaptureAsync(
-                    request.IncludeViewport,
+                    request.IncludeViewport || request.Correlation is not null,
                     () => CaptureViewportConditions(new IntPtr(windowHandleUsed)),
                     () => CaptureScreenshotWithMetadata(window, requestedBounds, mode, area, clip, includeOverlay: false),
                     rejected => rejected.Bitmap.Dispose(),
@@ -1352,6 +1352,40 @@ public sealed partial class AutomationController : IDisposable
 
             using var bitmapToSave = bitmap;
 
+            ScreenshotCorrelationResult? correlation = null;
+            if (request.Correlation is { } correlationOptions)
+            {
+                var viewport = capturedViewport
+                    ?? throw new InvalidOperationException("screenshot_correlation_missing_viewport_context");
+                var capturedWindow = ToWindowInfo(window) with
+                {
+                    Handle = windowHandleUsed,
+                    Bounds = viewport.OuterBoundsPhysicalPixels
+                };
+                var captureContext = new ScreenshotCaptureContext(
+                    CaptureModeRequested: request.CaptureMode,
+                    CaptureModeUsed: captureModeUsed,
+                    Area: request.Area,
+                    Clip: request.Clip,
+                    Window: capturedWindow,
+                    CapturedBounds: capturedBounds,
+                    RequestedBounds: requestedBoundsUsed,
+                    WasClipped: wasClipped,
+                    Viewport: viewport,
+                    Obscuration: CaptureScreenshotObscuration(
+                        new IntPtr(windowHandleUsed),
+                        capturedBounds,
+                        captureModeUsed));
+                correlation = await CorrelateScreenshotAsync(
+                    window,
+                    windowHandleUsed,
+                    bitmapToSave,
+                    capturedBounds,
+                    correlationOptions,
+                    captureContext,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             if (includeOverlay)
             {
                 DrawActiveHighlightOverlay(bitmapToSave, capturedBounds);
@@ -1397,7 +1431,8 @@ public sealed partial class AutomationController : IDisposable
                 CaptureModeUsed: captureModeUsed,
                 Base64: base64)
             {
-                Viewport = capturedViewport
+                Viewport = capturedViewport,
+                Correlation = correlation
             };
 
             trace?.SetSummary($"{response.Format} {response.Width}x{response.Height} {Path.GetFileName(response.Path)} backend={backendUsed} fallback={fallbackUsed}");
@@ -1463,39 +1498,20 @@ public sealed partial class AutomationController : IDisposable
             parsed = Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6);
         }
 
-        static Rect Intersect(Rect a, Rect b)
-        {
-            var left = Math.Max(a.X, b.X);
-            var top = Math.Max(a.Y, b.Y);
-            var right = Math.Min(a.X + a.Width, b.X + b.Width);
-            var bottom = Math.Min(a.Y + a.Height, b.Y + b.Height);
-            return new Rect(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
-        }
-
-        var visible = Intersect(annotationBounds, capturedBounds);
-        if (visible.Width <= 0 || visible.Height <= 0)
+        var imageBounds = ScreenshotCorrelationGeometry.MapScreenRegionToImage(
+            annotationBounds,
+            bitmap.Width,
+            bitmap.Height,
+            capturedBounds);
+        if (imageBounds is null)
         {
             return;
         }
 
-        var x = visible.X - capturedBounds.X;
-        var y = visible.Y - capturedBounds.Y;
-        var w = visible.Width;
-        var h = visible.Height;
-
-        // Clamp to bitmap bounds defensively.
-        if (x >= bitmap.Width || y >= bitmap.Height)
-        {
-            return;
-        }
-
-        w = Math.Min(w, bitmap.Width - x);
-        h = Math.Min(h, bitmap.Height - y);
-
-        if (w <= 0 || h <= 0)
-        {
-            return;
-        }
+        var x = imageBounds.X;
+        var y = imageBounds.Y;
+        var w = imageBounds.Width;
+        var h = imageBounds.Height;
 
         using var graphics = Graphics.FromImage(bitmap);
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
