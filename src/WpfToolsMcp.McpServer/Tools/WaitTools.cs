@@ -17,7 +17,7 @@ public static class WaitTools
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Inspection backend selection (ignored when elementId is set)")] InspectionBackend backend = InspectionBackend.Auto,
         [Description("Legacy wait state: attached|visible|enabled|actionable|stable|value_equals|name_contains (mutually exclusive with condition)")] string? state = null,
-        [Description("Structured wait condition (mutually exclusive with state)")] WaitCondition? condition = null,
+        [Description("Structured wait condition (mutually exclusive with state)")] WaitConditionInput? condition = null,
         [Description("Timeout (ms)")] int timeoutMs = 5000,
         [Description("Polling interval (ms)")] int pollIntervalMs = 100,
         [Description("Stable duration (ms)")] int stableMs = 250,
@@ -47,7 +47,7 @@ public static class WaitTools
                 ExpectedText: expectedText,
                 ThrowOnTimeout: throwOnTimeout ?? (condition is null))
             {
-                Condition = condition
+                Condition = condition?.ToContract()
             };
 
             return automation.RunExclusiveAsync(() => automation.WaitForAsync(request, cancellationToken), cancellationToken);

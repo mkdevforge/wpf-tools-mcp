@@ -325,6 +325,24 @@ public sealed class ToolProfileTests
         var expectedConditionKinds = Enum.GetNames<WaitConditionKind>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
         var expectedComparisons = Enum.GetNames<WaitComparison>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
         var expectedScalarKinds = Enum.GetNames<WaitScalarKind>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var expectedVariants = new Dictionary<string, (string[] Properties, string[] Required)>(StringComparer.Ordinal)
+        {
+            [nameof(WaitConditionKind.Attached)] = (["kind"], []),
+            [nameof(WaitConditionKind.Visible)] = (["kind"], []),
+            [nameof(WaitConditionKind.Enabled)] = (["kind"], []),
+            [nameof(WaitConditionKind.Actionable)] = (["kind"], []),
+            [nameof(WaitConditionKind.BoundsStable)] = (["holdForMs", "kind"], []),
+            [nameof(WaitConditionKind.NumericValueEquals)] =
+                (["comparison", "expected", "kind"], ["expected"]),
+            [nameof(WaitConditionKind.NameContains)] =
+                (["comparison", "expected", "kind"], ["expected"]),
+            [nameof(WaitConditionKind.DependencyPropertyValue)] =
+                (["comparison", "expected", "holdForMs", "kind", "propertyName"], ["expected", "propertyName"]),
+            [nameof(WaitConditionKind.DataContextValue)] =
+                (["comparison", "dataContextPath", "expected", "holdForMs", "kind"], ["dataContextPath", "expected"]),
+            [nameof(WaitConditionKind.WindowOpen)] = (["kind", "window"], ["window"]),
+            [nameof(WaitConditionKind.WindowClosed)] = (["kind", "window"], ["window"])
+        };
 
         Assert.Multiple(() =>
         {
@@ -361,16 +379,33 @@ public sealed class ToolProfileTests
 
             foreach (var waitTool in new[] { coreWait, diagnosticsWait })
             {
-                Assert.That(GetInputObjectPropertyNames(waitTool, "condition"), Is.EqualTo(
-                    new[] { "comparison", "dataContextPath", "expected", "holdForMs", "kind", "propertyName", "window" }));
                 Assert.That(GetInputObjectRequiredPropertyNames(waitTool, "condition"), Is.EqualTo(new[] { "kind" }));
-                Assert.That(GetInputObjectEnumValues(waitTool, "condition", "kind"), Is.EqualTo(expectedConditionKinds));
-                Assert.That(GetInputObjectEnumValues(waitTool, "condition", "comparison"), Is.EqualTo(expectedComparisons));
-                Assert.That(GetInputNestedObjectPropertyNames(waitTool, "condition", "expected"), Is.EqualTo(
+                var variants = GetInputObjectDiscriminatedVariants(waitTool, "condition", "kind");
+                Assert.That(
+                    variants.Keys.OrderBy(value => value, StringComparer.Ordinal),
+                    Is.EqualTo(expectedConditionKinds));
+
+                foreach (var (kind, expected) in expectedVariants)
+                {
+                    Assert.That(GetObjectPropertyNames(variants[kind]), Is.EqualTo(expected.Properties), kind);
+                    Assert.That(GetObjectRequiredPropertyNames(variants[kind]), Is.EqualTo(expected.Required), kind);
+                    Assert.That(
+                        variants[kind].GetProperty("additionalProperties").GetBoolean(),
+                        Is.False,
+                        kind);
+                }
+
+                var valueVariant = variants[nameof(WaitConditionKind.DependencyPropertyValue)];
+                Assert.That(GetObjectEnumValues(valueVariant, "comparison"), Is.EqualTo(expectedComparisons));
+                var expectedSchema = GetObjectPropertySchema(valueVariant, "expected");
+                Assert.That(GetObjectPropertyNames(expectedSchema), Is.EqualTo(
                     new[] { "booleanValue", "kind", "numberValue", "stringValue" }));
-                Assert.That(GetInputNestedObjectRequiredPropertyNames(waitTool, "condition", "expected"), Is.EqualTo(new[] { "kind" }));
-                Assert.That(GetInputNestedObjectEnumValues(waitTool, "condition", "expected", "kind"), Is.EqualTo(expectedScalarKinds));
-                Assert.That(GetInputNestedObjectPropertyNames(waitTool, "condition", "window"), Is.EqualTo(
+                Assert.That(GetObjectRequiredPropertyNames(expectedSchema), Is.EqualTo(new[] { "kind" }));
+                Assert.That(GetObjectEnumValues(expectedSchema, "kind"), Is.EqualTo(expectedScalarKinds));
+                var windowSchema = GetObjectPropertySchema(
+                    variants[nameof(WaitConditionKind.WindowOpen)],
+                    "window");
+                Assert.That(GetObjectPropertyNames(windowSchema), Is.EqualTo(
                     new[] { "frameworkId", "handle", "ownerHandle", "title", "titleContains" }));
             }
         });
@@ -389,6 +424,32 @@ public sealed class ToolProfileTests
                 ["sessionId"] = "unused",
                 ["state"] = "visible",
                 ["condition"] = new Dictionary<string, object?> { ["kind"] = "Visible" }
+            }));
+
+        Assert.That(exception!.Message, Does.Contain("wait_for accepts either state or condition, not both."));
+    }
+
+    [TestCase("core")]
+    [TestCase("diagnostics")]
+    public async Task Wait_for_accepts_condition_discriminator_after_variant_fields(string profile)
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: profile);
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            _ = await mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
+            {
+                ["sessionId"] = "unused",
+                ["state"] = "visible",
+                ["condition"] = new Dictionary<string, object?>
+                {
+                    ["expected"] = new Dictionary<string, object?>
+                    {
+                        ["kind"] = WaitScalarKind.String.ToString(),
+                        ["stringValue"] = "Ready"
+                    },
+                    ["kind"] = WaitConditionKind.NameContains.ToString()
+                }
             }));
 
         Assert.That(exception!.Message, Does.Contain("wait_for accepts either state or condition, not both."));
@@ -1060,6 +1121,95 @@ public sealed class ToolProfileTests
         }
 
         return GetSortedStringValues(required);
+    }
+
+    private static IReadOnlyDictionary<string, JsonElement> GetInputObjectDiscriminatedVariants(
+        McpClientTool tool,
+        string inputPropertyName,
+        string discriminatorPropertyName)
+    {
+        var schema = tool.JsonSchema;
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var inputProperties) ||
+            inputProperties.ValueKind != JsonValueKind.Object ||
+            !inputProperties.TryGetProperty(inputPropertyName, out var inputProperty) ||
+            inputProperty.ValueKind != JsonValueKind.Object ||
+            !inputProperty.TryGetProperty("anyOf", out var variants) ||
+            variants.ValueKind != JsonValueKind.Array)
+        {
+            return new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        }
+
+        var result = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var variant in variants.EnumerateArray())
+        {
+            if (variant.ValueKind != JsonValueKind.Object ||
+                !variant.TryGetProperty("properties", out var properties) ||
+                properties.ValueKind != JsonValueKind.Object ||
+                !properties.TryGetProperty(discriminatorPropertyName, out var discriminator) ||
+                discriminator.ValueKind != JsonValueKind.Object ||
+                !discriminator.TryGetProperty("const", out var value) ||
+                value.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            result.Add(value.GetString()!, variant.Clone());
+        }
+
+        return result;
+    }
+
+    private static string[] GetObjectPropertyNames(JsonElement schema)
+    {
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var properties) ||
+            properties.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return properties
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string[] GetObjectRequiredPropertyNames(JsonElement schema)
+    {
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("required", out var required) ||
+            required.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return GetSortedStringValues(required);
+    }
+
+    private static string[] GetObjectEnumValues(JsonElement schema, string propertyName)
+    {
+        var property = GetObjectPropertySchema(schema, propertyName);
+        return property.ValueKind == JsonValueKind.Object &&
+               property.TryGetProperty("enum", out var values) &&
+               values.ValueKind == JsonValueKind.Array
+            ? GetSortedStringValues(values)
+            : [];
+    }
+
+    private static JsonElement GetObjectPropertySchema(JsonElement schema, string propertyName)
+    {
+        if (schema.ValueKind == JsonValueKind.Object &&
+            schema.TryGetProperty("properties", out var properties) &&
+            properties.ValueKind == JsonValueKind.Object &&
+            properties.TryGetProperty(propertyName, out var property) &&
+            property.ValueKind == JsonValueKind.Object)
+        {
+            return property;
+        }
+
+        return default;
     }
 
     private static string[] GetInputNestedObjectPropertyNames(

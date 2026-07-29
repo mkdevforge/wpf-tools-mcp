@@ -229,8 +229,10 @@ typed element conditions (`Attached`, `Visible`, `Enabled`, `Actionable`,
 `BoundsStable`, `NumericValueEquals`, and `NameContains`), WPF
 `DependencyPropertyValue` and `DataContextValue` comparisons, and same-process
 `WindowOpen`/`WindowClosed` selectors. A request supplies either `state` or
-`condition`, never both. MCP calls default to throwing on a legacy timeout and
-returning a structured result for a typed timeout.
+`condition`, never both. The `condition.kind` discriminator exposes a separate
+schema for each variant, including its required operands and only the fields it
+accepts. MCP calls default to throwing on a legacy timeout and returning a
+structured result for a typed timeout.
 
 WPF value operands are closed scalar values (`String`, `Number`, `Boolean`, or
 `Null`), not expressions. Their string comparison is ordinal, numeric values

@@ -522,7 +522,7 @@ public static class CoreInteractionTools
         [Description("Element locator")] CoreElementLocator? locator = null,
         [Description("Element ID")] string? elementId = null,
         [Description("Legacy wait state (mutually exclusive with condition)")] string? state = null,
-        [Description("Structured wait condition (mutually exclusive with state)")] WaitCondition? condition = null,
+        [Description("Structured wait condition (mutually exclusive with state)")] WaitConditionInput? condition = null,
         [Description("Expected text for name_contains")] string? expectedText = null,
         [Description("Expected value for value_equals")] double? expectedValue = null,
         [Description("Timeout in milliseconds")] int timeoutMs = 5000,
@@ -548,7 +548,7 @@ public static class CoreInteractionTools
                 ExpectedText: expectedText,
                 ThrowOnTimeout: throwOnTimeout ?? (condition is null))
             {
-                Condition = condition
+                Condition = condition?.ToContract()
             };
 
             return automation.RunExclusiveAsync(() => automation.WaitForAsync(request, cancellationToken), cancellationToken);

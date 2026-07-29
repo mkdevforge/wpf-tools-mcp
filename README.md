@@ -251,7 +251,8 @@ available: `attached`, `visible`, `enabled`, `actionable`, `stable`,
 `value_equals`, and `name_contains`. Structured conditions advertise the same
 element checks as `Attached`, `Visible`, `Enabled`, `Actionable`,
 `BoundsStable`, `NumericValueEquals`, and `NameContains`, and add WPF value and
-window lifecycle checks.
+window lifecycle checks. The MCP schema is discriminated by `condition.kind`:
+each variant advertises only its legal fields and marks its required operands.
 
 WPF `DependencyPropertyValue` and `DataContextValue` conditions observe a named
 property or dotted DataContext path without evaluating caller-supplied code.
