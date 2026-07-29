@@ -108,7 +108,37 @@ public sealed record DetachSessionResponse(
     public bool ProcessStillRunningObserved { get; init; }
 }
 
-public sealed record BackendCapabilityState(string Backend, string State);
+public sealed record FailureInfo(
+    string Code,
+    string Stage,
+    string Detail)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Retryable { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? RetryAfterMs { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? RecoveryActions { get; init; }
+}
+
+public sealed record BackendFallbackInfo(
+    string FromBackend,
+    string ToBackend,
+    bool Attempted,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Available,
+    bool Used)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public FailureInfo? Failure { get; init; }
+}
+
+public sealed record BackendCapabilityState(string Backend, string State)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public FailureInfo? Failure { get; init; }
+}
 
 public sealed record SessionInfo(
     string SessionId,
@@ -205,7 +235,11 @@ public sealed record GetVisualTreeResponse(
     int ScannedNodes,
     bool Truncated,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BackendFallbackInfo? Fallback { get; init; }
+}
 
 public sealed record UiaTreeNode(
     string ControlType,
@@ -1077,7 +1111,11 @@ public sealed record ElementRef(
 public sealed record ResolveElementResponse(
     InspectionBackend BackendUsed,
     ElementRef Element,
-    long WindowHandleUsed);
+    long WindowHandleUsed)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BackendFallbackInfo? Fallback { get; init; }
+}
 
 public sealed record ResolveElementCandidate(
     int Index,
@@ -1109,6 +1147,9 @@ public sealed record FindElementsResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null)
 {
     public int DiscoveredMatches { get; init; } = ReturnedMatches;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BackendFallbackInfo? Fallback { get; init; }
 }
 
 public sealed record GetPathToElementResponse(
