@@ -12,6 +12,11 @@ namespace WpfToolsMcp.SnapshotTests;
 [Apartment(ApartmentState.STA)]
 public sealed class DialogsSnapshots
 {
+    private sealed record LaunchedProcessIdentity(
+        int Pid,
+        DateTime StartTimeUtc,
+        string ExecutablePath);
+
     private const string MainWindowTitle = "WPF Tools MCP Dialogs TestApp";
     private const string DialogTitle = "WPF Tools MCP Confirm Dialog";
     private const string NativeDialogTitle = "WPF Tools MCP Native Open Dialog";
@@ -23,7 +28,7 @@ public sealed class DialogsSnapshots
 
     private McpTestContext _mcp = null!;
     private string _sessionId = "";
-    private readonly Dictionary<string, int> _launchedProcesses = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, LaunchedProcessIdentity> _launchedProcesses = new(StringComparer.Ordinal);
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -40,17 +45,20 @@ public sealed class DialogsSnapshots
             return;
         }
 
-        try
+        var failures = new List<Exception>();
+        foreach (var sessionId in _launchedProcesses.Keys.ToArray())
         {
-            foreach (var sessionId in _launchedProcesses.Keys.ToArray())
-            {
-                await CloseAppAsync(sessionId);
-            }
+            await TryRunCleanupStepAsync(
+                failures,
+                $"session '{sessionId}'",
+                () => CloseAppAsync(sessionId));
         }
-        finally
-        {
-            await _mcp.DisposeAsync();
-        }
+
+        await TryRunCleanupStepAsync(
+            failures,
+            "MCP client",
+            async () => await _mcp.DisposeAsync());
+        ThrowCleanupFailures(failures);
     }
 
     private async Task LaunchDialogsAppAsync(string? nativeDialogFilePath = null, bool strictPolicy = false)
@@ -83,7 +91,36 @@ public sealed class DialogsSnapshots
         }
 
         var launch = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", arguments);
-        _launchedProcesses[launch.SessionId] = launch.Pid;
+        try
+        {
+            _launchedProcesses[launch.SessionId] = CaptureProcessIdentity(launch.Pid, exePath);
+        }
+        catch (Exception identityError)
+        {
+            try
+            {
+                var close = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = launch.SessionId,
+                    ["force"] = true,
+                    ["timeoutMs"] = 2000
+                });
+                if (!close.ProcessExited)
+                {
+                    throw new AssertionException(
+                        $"Unverified dialogs test process {launch.Pid} did not exit during launch rollback.");
+                }
+            }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException(
+                    "Failed to capture and roll back a dialogs test process.",
+                    identityError,
+                    cleanupError);
+            }
+
+            throw;
+        }
 
         return launch.SessionId;
     }
@@ -106,7 +143,8 @@ public sealed class DialogsSnapshots
 
     private async Task CloseAppAsync(string? sessionId)
     {
-        if (string.IsNullOrWhiteSpace(sessionId) || !_launchedProcesses.TryGetValue(sessionId, out var pid))
+        if (string.IsNullOrWhiteSpace(sessionId) ||
+            !_launchedProcesses.TryGetValue(sessionId, out var processIdentity))
         {
             return;
         }
@@ -127,9 +165,11 @@ public sealed class DialogsSnapshots
         }
         finally
         {
-            if (!processExited && !KillProcessIfRunning(pid))
+            if (!processExited && !TryTerminateProcess(processIdentity, out var failure))
             {
-                throw new AssertionException($"Failed to terminate dialogs test process {pid} for session '{sessionId}'.");
+                throw new AssertionException(
+                    $"Failed to terminate dialogs test process {processIdentity.Pid} " +
+                    $"for session '{sessionId}': {failure}");
             }
 
             _launchedProcesses.Remove(sessionId);
@@ -455,9 +495,14 @@ public sealed class DialogsSnapshots
         }
         finally
         {
-            await CloseAppAsync(foreignSessionId);
-            await CloseAppAsync();
-            DeleteFixtureDirectory(fixtureDirectory);
+            await RunCleanupStepsAsync(
+                ("foreign session", () => CloseAppAsync(foreignSessionId)),
+                ("main session", CloseAppAsync),
+                ("fixture directory", () =>
+                {
+                    DeleteFixtureDirectory(fixtureDirectory);
+                    return Task.CompletedTask;
+                }));
         }
     }
 
@@ -507,8 +552,13 @@ public sealed class DialogsSnapshots
         }
         finally
         {
-            await CloseAppAsync();
-            DeleteFixtureDirectory(fixtureDirectory);
+            await RunCleanupStepsAsync(
+                ("main session", CloseAppAsync),
+                ("fixture directory", () =>
+                {
+                    DeleteFixtureDirectory(fixtureDirectory);
+                    return Task.CompletedTask;
+                }));
         }
     }
 
@@ -633,18 +683,153 @@ public sealed class DialogsSnapshots
             $"Failed to delete native-dialog fixture directory '{directory}': {lastError?.Message}");
     }
 
-    private static bool KillProcessIfRunning(int pid)
+    private static LaunchedProcessIdentity CaptureProcessIdentity(int pid, string expectedExecutablePath)
     {
+        var expectedPath = Path.GetFullPath(expectedExecutablePath);
         try
         {
             using var process = Process.GetProcessById(pid);
-            if (process.HasExited)
+            if (!TryReadProcessIdentity(process, out var startTimeUtc, out var executablePath, out var failure))
+            {
+                throw new AssertionException(
+                    $"Failed to capture dialogs test process identity for PID {pid}: {failure}");
+            }
+
+            if (!string.Equals(executablePath, expectedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new AssertionException(
+                    $"Dialogs test process PID {pid} launched unexpected executable '{executablePath}' " +
+                    $"instead of '{expectedPath}'.");
+            }
+
+            return new LaunchedProcessIdentity(pid, startTimeUtc, executablePath);
+        }
+        catch (AssertionException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new AssertionException(
+                $"Failed to capture dialogs test process identity for PID {pid}: {ex.Message}");
+        }
+    }
+
+    private static bool TryTerminateProcess(
+        LaunchedProcessIdentity expected,
+        out string? failure)
+    {
+        failure = null;
+
+        Process process;
+        try
+        {
+            process = Process.GetProcessById(expected.Pid);
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+        catch (Exception ex)
+        {
+            failure = $"could not inspect PID {expected.Pid}: {ex.Message}";
+            return false;
+        }
+
+        using (process)
+        {
+            if (HasExited(process))
             {
                 return true;
             }
 
-            process.Kill(entireProcessTree: true);
-            return process.WaitForExit(5000);
+            if (!TryReadProcessIdentity(process, out var startTimeUtc, out var executablePath, out var identityFailure))
+            {
+                if (HasExited(process))
+                {
+                    return true;
+                }
+
+                failure = $"could not verify PID {expected.Pid} before termination: {identityFailure}";
+                return false;
+            }
+
+            if (startTimeUtc != expected.StartTimeUtc ||
+                !string.Equals(executablePath, expected.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+            {
+                // The recorded process has exited and Windows reused its PID. Never terminate the replacement.
+                return true;
+            }
+
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                if (process.WaitForExit(5000) || HasExited(process))
+                {
+                    return true;
+                }
+
+                failure = $"verified process {expected.Pid} did not exit within 5000 ms";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                if (HasExited(process))
+                {
+                    return true;
+                }
+
+                failure = $"failed to terminate verified process {expected.Pid}: {ex.Message}";
+                return false;
+            }
+        }
+    }
+
+    private static bool TryReadProcessIdentity(
+        Process process,
+        out DateTime startTimeUtc,
+        out string executablePath,
+        out string? failure)
+    {
+        startTimeUtc = default;
+        executablePath = "";
+        failure = null;
+
+        try
+        {
+            if (process.HasExited)
+            {
+                failure = "process has exited";
+                return false;
+            }
+
+            startTimeUtc = process.StartTime.ToUniversalTime();
+            var fileName = process.MainModule?.FileName;
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                failure = "main module path is unavailable";
+                return false;
+            }
+
+            executablePath = Path.GetFullPath(fileName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            failure = ex.Message;
+            return false;
+        }
+    }
+
+    private static bool HasExited(Process process)
+    {
+        try
+        {
+            return process.HasExited;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
         }
         catch (ArgumentException)
         {
@@ -653,6 +838,41 @@ public sealed class DialogsSnapshots
         catch
         {
             return false;
+        }
+    }
+
+    private static async Task RunCleanupStepsAsync(
+        params (string Name, Func<Task> Action)[] steps)
+    {
+        var failures = new List<Exception>();
+        foreach (var step in steps)
+        {
+            await TryRunCleanupStepAsync(failures, step.Name, step.Action);
+        }
+
+        ThrowCleanupFailures(failures);
+    }
+
+    private static async Task TryRunCleanupStepAsync(
+        List<Exception> failures,
+        string name,
+        Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            failures.Add(new InvalidOperationException($"Cleanup step {name} failed.", ex));
+        }
+    }
+
+    private static void ThrowCleanupFailures(IReadOnlyCollection<Exception> failures)
+    {
+        if (failures.Count > 0)
+        {
+            throw new AggregateException("One or more dialogs test cleanup steps failed.", failures);
         }
     }
 }
