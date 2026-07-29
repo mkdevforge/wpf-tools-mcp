@@ -1303,7 +1303,7 @@ public sealed partial class AutomationController
         var desktopWindowsScanned = 0;
         var truncated = false;
 
-        EnumWindows(
+        var completed = EnumWindows(
             (hwnd, _) =>
             {
                 desktopWindowsScanned++;
@@ -1336,6 +1336,12 @@ public sealed partial class AutomationController
                 return true;
             },
             IntPtr.Zero);
+
+        if (!completed && !truncated)
+        {
+            throw new InvalidOperationException(
+                "wait_window_scan_failed: EnumWindows did not complete the native window sample.");
+        }
 
         return new WaitWindowHandleScan(handles, truncated);
     }
