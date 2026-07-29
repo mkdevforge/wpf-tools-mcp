@@ -813,11 +813,14 @@ public sealed partial class AutomationController
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
         var capabilities = includeProvenance ? GetAgentCapabilities(client) : null;
+        var preparedPropertyNames = includeProvenance
+            ? PrepareProvenancePropertyNamesForAgent(propertyNames)
+            : (Names: propertyNames, TruncatedReason: (string?)null);
         var request = new GetComputedPropertiesRequest(
             WindowHandle: target.WindowHandle,
             Locator: target.Locator,
             ElementId: target.AgentElementId,
-            PropertyNames: propertyNames,
+            PropertyNames: preparedPropertyNames.Names,
             IncludeSources: includeSources,
             IncludeDefault: includeDefault,
             IncludeUnset: includeUnset,
@@ -839,6 +842,15 @@ public sealed partial class AutomationController
                 fallbackRequest,
                 target,
                 cancellationToken));
+        if (preparedPropertyNames.TruncatedReason is not null)
+        {
+            response = response with
+            {
+                Truncated = true,
+                TruncatedReason = preparedPropertyNames.TruncatedReason
+            };
+        }
+
         response = response with
         {
             Element = await StripAgentElementIdAsync(
@@ -858,6 +870,54 @@ public sealed partial class AutomationController
         {
             trace?.Dispose();
         }
+    }
+
+    internal static (IReadOnlyList<string>? Names, string? TruncatedReason)
+        PrepareProvenancePropertyNamesForAgent(IReadOnlyList<string>? propertyNames)
+    {
+        if (propertyNames is null)
+        {
+            return (null, null);
+        }
+
+        const int maxPropertyNames = 100;
+        const int maxPropertyNameLength = 512;
+        var count = Math.Min(propertyNames.Count, maxPropertyNames);
+        var names = new List<string>(count);
+        var propertyNameLengthTruncated = false;
+        for (var i = 0; i < count; i++)
+        {
+            var rawName = propertyNames[i] ?? string.Empty;
+            propertyNameLengthTruncated |= rawName.Length > maxPropertyNameLength;
+            var boundedName = TruncateAgentRequestText(rawName, maxPropertyNameLength).Trim();
+            if (boundedName.Length > 0)
+            {
+                names.Add(boundedName);
+            }
+        }
+
+        var truncatedReason = propertyNames.Count > maxPropertyNames
+            ? "maxProvenancePropertyNames"
+            : propertyNameLengthTruncated
+                ? "maxProvenancePropertyNameLength"
+                : null;
+        return (names, truncatedReason);
+    }
+
+    private static string TruncateAgentRequestText(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        var length = maxLength - 3;
+        if (length > 0 && char.IsHighSurrogate(value[length - 1]))
+        {
+            length--;
+        }
+
+        return value[..length] + "...";
     }
 
     public async Task<GetLayoutContextResponse> GetLayoutContextAsync(
@@ -1194,7 +1254,7 @@ public sealed partial class AutomationController
         return await client.CallAsync<GetPathToElementResponse>("wpf/get_path", request, cancellationToken);
     }
 
-    private static async Task<AgentCapabilitiesResponse> VerifyAgentAndGetCapabilitiesAsync(
+    internal static async Task<AgentCapabilitiesResponse> VerifyAgentAndGetCapabilitiesAsync(
         AgentClient client,
         CancellationToken cancellationToken)
     {

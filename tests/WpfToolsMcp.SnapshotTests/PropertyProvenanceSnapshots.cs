@@ -112,6 +112,9 @@ public sealed class PropertyProvenanceSnapshots
         var staticResource = await GetPropertyAsync("Provenance_StaticResource", "Background", maxProvenanceCandidates: 50);
         var dynamicResource = await GetPropertyAsync("Provenance_DynamicResource", "Background", maxProvenanceCandidates: 50);
         var ambiguousResource = await GetPropertyAsync("Provenance_AmbiguousResource", "Width", maxProvenanceCandidates: 50);
+        var elementResource = await GetPropertyAsync("Provenance_ElementResource", "Background", maxProvenanceCandidates: 50);
+        var applicationResource = await GetPropertyAsync("Provenance_ApplicationResource", "Background", maxProvenanceCandidates: 50);
+        var mergedResource = await GetPropertyAsync("Provenance_MergedResource", "Background", maxProvenanceCandidates: 50);
         var unsafeDynamicResource = await GetPropertyAsync("Provenance_UnsafeDynamicResource", "Background", maxProvenanceCandidates: 50);
         var implicitStyle = await GetPropertyAsync("Provenance_ImplicitStyle", "Padding");
         var themeStyle = await GetPropertyAsync("Provenance_ThemeStyle", "Padding");
@@ -130,6 +133,7 @@ public sealed class PropertyProvenanceSnapshots
 
             Assert.That(styleTrigger.Provenance!.ValueSource.BaseValueSource, Is.EqualTo(DependencyPropertyBaseValueSource.StyleTrigger));
             Assert.That(styleTrigger.Provenance.Style!.Candidates.Select(c => c.Kind), Does.Contain("StyleTrigger"));
+            Assert.That(styleTrigger.Provenance.Style.Candidates.Select(c => c.Value), Does.Contain("Bold"));
             Assert.That(styleTrigger.Provenance.Style.Candidates.All(c => c.Evidence.Kind == ProvenanceEvidenceKind.BestEffort), Is.True);
 
             Assert.That(styleResource.Provenance!.Resource!.Candidates.Select(c => c.Key), Does.Contain("Provenance.StaticBrush"));
@@ -137,6 +141,7 @@ public sealed class PropertyProvenanceSnapshots
 
             Assert.That(staticResource.Provenance!.Resource!.ReferenceKind, Is.EqualTo("ResourceCandidate"));
             Assert.That(staticResource.Provenance.Resource.Key, Is.EqualTo("Provenance.StaticBrush"));
+            Assert.That(staticResource.Provenance.Resource.Scope, Does.StartWith("Ancestor["));
             Assert.That(staticResource.Provenance.Resource.Scope, Does.EndWith(".Resources"));
             Assert.That(staticResource.Provenance.Resource.ScanComplete, Is.True);
             Assert.That(staticResource.Provenance.Resource.ScanEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
@@ -157,12 +162,23 @@ public sealed class PropertyProvenanceSnapshots
             Assert.That(ambiguousResource.Provenance.Resource.Key, Is.Null);
             Assert.That(ambiguousResource.Provenance.Resource.OriginEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
 
+            Assert.That(elementResource.Provenance!.Resource!.Key, Is.EqualTo("Provenance.ElementBrush"));
+            Assert.That(elementResource.Provenance.Resource.Scope, Is.EqualTo("Element.Resources"));
+
+            Assert.That(applicationResource.Provenance!.Resource!.Key, Is.EqualTo("Provenance.ApplicationBrush"));
+            Assert.That(applicationResource.Provenance.Resource.Scope, Is.EqualTo("Application.Resources"));
+
+            Assert.That(mergedResource.Provenance!.Resource!.Key, Is.EqualTo("Provenance.MergedBrush"));
+            Assert.That(mergedResource.Provenance.Resource.Scope,
+                Is.EqualTo("Element.Resources.MergedDictionaries[0]"));
+
             Assert.That(unsafeDynamicResource.Provenance!.Resource!.ReferenceKind, Is.EqualTo("DynamicResource"));
             Assert.That(unsafeDynamicResource.Provenance.Resource.Key, Is.Null);
             Assert.That(unsafeDynamicResource.Provenance.Resource.KeyEvidence.Reason,
                 Is.EqualTo("dynamic_resource_key_not_safely_serializable"));
 
             Assert.That(implicitStyle.Provenance!.Style!.Kind, Is.EqualTo(StyleProvenanceKind.Implicit));
+            Assert.That(implicitStyle.Value, Is.EqualTo("12,4,12,4"));
 
             Assert.That(themeStyle.Provenance!.ValueSource.BaseValueSource,
                 Is.EqualTo(DependencyPropertyBaseValueSource.DefaultStyle));
@@ -218,9 +234,85 @@ public sealed class PropertyProvenanceSnapshots
     }
 
     [Test]
+    public async Task Priority_binding_reports_the_active_child_when_the_full_bounded_range_is_returned()
+    {
+        var property = await GetPropertyAsync(
+            "Provenance_PriorityBound",
+            "Text",
+            maxProvenanceCandidates: 2);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(property.Provenance!.Binding!.Children.Select(child => child.Path),
+                Is.EqualTo(new[] { "MissingText", "BoundText" }));
+            Assert.That(property.Provenance.Binding.ReturnedChildren, Is.EqualTo(2));
+            Assert.That(property.Provenance.Binding.DiscoveredChildren, Is.EqualTo(2));
+            Assert.That(property.Provenance.Binding.ActiveChildIndex, Is.EqualTo(1));
+            Assert.That(property.Provenance.Binding.ActiveChildOutsideReturnedRange, Is.False);
+            Assert.That(property.Provenance.Binding.Truncated, Is.False);
+        });
+    }
+
+    [Test]
+    public async Task Multi_binding_child_details_are_bounded_without_losing_parent_semantics()
+    {
+        var full = await GetPropertyAsync("Provenance_MultiBound", "Text", maxProvenanceCandidates: 2);
+        var bounded = await GetPropertyAsync("Provenance_MultiBound", "Text", maxProvenanceCandidates: 1);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(full.Provenance!.Binding!.Kind, Is.EqualTo("MultiBinding"));
+            Assert.That(full.Provenance.Binding.Mode, Is.EqualTo("Default"));
+            Assert.That(full.Provenance.Binding.EffectiveMode, Is.EqualTo("OneWay"));
+            Assert.That(full.Provenance.Binding.UpdateSourceTrigger, Is.EqualTo("Default"));
+            Assert.That(full.Provenance.Binding.EffectiveUpdateSourceTrigger, Is.EqualTo("PropertyChanged"));
+            Assert.That(full.Provenance.Binding.Children.Select(child => child.Index), Is.EqualTo(new[] { 0, 1 }));
+            Assert.That(full.Provenance.Binding.Children.Select(child => child.Path),
+                Is.EqualTo(new[] { "BoundText", "SecondaryText" }));
+            Assert.That(full.Provenance.Binding.ReturnedChildren, Is.EqualTo(2));
+            Assert.That(full.Provenance.Binding.DiscoveredChildren, Is.EqualTo(2));
+            Assert.That(full.Provenance.Binding.Truncated, Is.False);
+
+            Assert.That(bounded.Provenance!.Binding!.Children, Has.Count.EqualTo(1));
+            Assert.That(bounded.Provenance.Binding.ReturnedChildren, Is.EqualTo(1));
+            Assert.That(bounded.Provenance.Binding.DiscoveredChildren, Is.EqualTo(2));
+            Assert.That(bounded.Provenance.Binding.Truncated, Is.True);
+        });
+    }
+
+    [Test]
+    public async Task Deferred_baml_resource_scan_reports_the_sentinel_without_realizing_its_value()
+    {
+        var property = await GetPropertyAsync(
+            "Provenance_DeferredResource",
+            "Width",
+            maxProvenanceCandidates: 50);
+        var sentinelState = await _mcp.CallToolAsync<GetComputedPropertiesResponse>(
+            "get_computed_properties",
+            new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["locator"] = new Dictionary<string, object?> { ["automationId"] = "Provenance_DeferredResource" },
+                ["propertyNames"] = new[] { "Tag" },
+                ["includeProvenance"] = false
+            });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(property.Provenance!.Resource!.ScanComplete, Is.False);
+            Assert.That(property.Provenance.Resource.Truncated, Is.False);
+            Assert.That(property.Provenance.Resource.ScanEvidence.Reason,
+                Is.EqualTo("resource_deferred_value_not_realized"));
+            Assert.That(sentinelState.Properties.Single().Value, Is.EqualTo("not-realized"));
+        });
+    }
+
+    [Test]
     public async Task Provenance_reports_animation_and_coercion_without_inventing_hidden_values()
     {
         var animated = await GetPropertyAsync("Provenance_Animated", "Opacity");
+        var longAnimated = await GetPropertyAsync("Provenance_LongAnimated", "Text");
+        var longDefault = await GetPropertyAsync("Provenance_LongDefault", "LongText");
         var coerced = await GetPropertyAsync("Provenance_Coerced", "Level");
 
         Assert.Multiple(() =>
@@ -229,6 +321,19 @@ public sealed class PropertyProvenanceSnapshots
             Assert.That(animated.Provenance.Animation!.BaseValue, Is.EqualTo("0.75"));
             Assert.That(animated.Provenance.Animation.BaseValueEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.Exact));
             Assert.That(animated.Provenance.Animation.OriginEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.Unavailable));
+
+            Assert.That(longAnimated.Provenance!.ValueSource.IsAnimated, Is.True);
+            Assert.That(longAnimated.Provenance.Animation!.BaseValue, Has.Length.LessThanOrEqualTo(2000));
+            Assert.That(longAnimated.Provenance.Animation.BaseValueEvidence.Kind,
+                Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
+            Assert.That(longAnimated.Provenance.Animation.BaseValueEvidence.Reason,
+                Is.EqualTo("maxStringLength"));
+
+            Assert.That(longDefault.Provenance!.DefaultMetadata.DefaultValue, Has.Length.LessThanOrEqualTo(2000));
+            Assert.That(longDefault.Provenance.DefaultMetadata.DefaultValueEvidence.Kind,
+                Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
+            Assert.That(longDefault.Provenance.DefaultMetadata.DefaultValueEvidence.Reason,
+                Is.EqualTo("maxStringLength"));
 
             Assert.That(coerced.Provenance!.ValueSource.IsCoerced, Is.True);
             Assert.That(coerced.Value, Is.EqualTo("100"));
@@ -321,6 +426,26 @@ public sealed class PropertyProvenanceSnapshots
             Assert.That(result.Truncated, Is.True);
             Assert.That(result.TruncatedReason, Is.EqualTo("maxProvenanceProperties"));
             Assert.That(result.Properties.All(property => property.Provenance is not null), Is.True);
+        });
+    }
+
+    [Test]
+    public async Task Provenance_hard_caps_requested_names_and_missing_name_output()
+    {
+        var result = await _mcp.CallToolAsync<GetComputedPropertiesResponse>("get_computed_properties", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["locator"] = new Dictionary<string, object?> { ["automationId"] = "Provenance_Default" },
+            ["propertyNames"] = Enumerable.Range(0, 101).Select(index => $"Missing{index}").ToArray(),
+            ["includeProvenance"] = true
+        });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Properties, Is.Empty);
+            Assert.That(result.MissingPropertyNames, Has.Count.EqualTo(100));
+            Assert.That(result.Truncated, Is.True);
+            Assert.That(result.TruncatedReason, Is.EqualTo("maxProvenancePropertyNames"));
         });
     }
 

@@ -29,6 +29,41 @@ internal static partial class WpfVisualTreeInspector
     private static readonly FieldInfo? ResourceDictionaryMergedDictionariesField =
         typeof(ResourceDictionary).GetField("_mergedDictionaries", BindingFlags.Instance | BindingFlags.NonPublic);
 
+    // WPF Resources getters lazily install collections. Read only existing backing storage.
+    private static readonly object? FrameworkElementResourcesField = GetStaticFieldValue(
+        typeof(FrameworkElement),
+        "ResourcesField");
+
+    private static readonly object? FrameworkContentElementResourcesField = GetStaticFieldValue(
+        typeof(FrameworkContentElement),
+        "ResourcesField");
+
+    private static readonly MethodInfo? FrameworkElementResourcesFieldGetValueMethod =
+        GetUncommonResourceFieldGetValueMethod(FrameworkElementResourcesField);
+
+    private static readonly MethodInfo? FrameworkContentElementResourcesFieldGetValueMethod =
+        GetUncommonResourceFieldGetValueMethod(FrameworkContentElementResourcesField);
+
+    private static readonly FieldInfo? StyleResourcesField =
+        typeof(Style).GetField("_resources", BindingFlags.Instance | BindingFlags.NonPublic);
+
+    private static readonly FieldInfo? FrameworkTemplateResourcesField =
+        typeof(FrameworkTemplate).GetField("_resources", BindingFlags.Instance | BindingFlags.NonPublic);
+
+    private static readonly FieldInfo? ApplicationResourcesField =
+        typeof(Application).GetField("_resources", BindingFlags.Instance | BindingFlags.NonPublic);
+
+    private static readonly object? ApplicationGlobalLock = GetStaticFieldValue(
+        typeof(Application),
+        "_globalLock");
+
+    private enum ResourceOwnerStorageAccess
+    {
+        Absent,
+        Present,
+        Unavailable
+    }
+
     private static readonly FieldInfo? HashtableBucketsField =
         typeof(Hashtable).GetField("_buckets", BindingFlags.Instance | BindingFlags.NonPublic);
 
@@ -88,13 +123,12 @@ internal static partial class WpfVisualTreeInspector
         }
 
         var source = valueSource is { } exactSource
-            ? new DependencyPropertyValueSourceProvenance(
-                MapBaseValueSource(exactSource.BaseValueSource),
+            ? MapValueSource(
+                exactSource.BaseValueSource,
                 exactSource.IsExpression,
                 exactSource.IsAnimated,
                 exactSource.IsCoerced,
-                exactSource.IsCurrent,
-                new ProvenanceEvidence(ProvenanceEvidenceKind.Exact))
+                exactSource.IsCurrent)
             : new DependencyPropertyValueSourceProvenance(
                 DependencyPropertyBaseValueSource.Unknown,
                 IsExpression: false,
@@ -440,7 +474,21 @@ internal static partial class WpfVisualTreeInspector
                 ProvenanceEvidenceKind.Unavailable,
                 "metadata_unavailable"));
 
-    private static DependencyPropertyBaseValueSource MapBaseValueSource(BaseValueSource source) => source switch
+    internal static DependencyPropertyValueSourceProvenance MapValueSource(
+        BaseValueSource source,
+        bool isExpression,
+        bool isAnimated,
+        bool isCoerced,
+        bool isCurrent) =>
+        new(
+            MapBaseValueSource(source),
+            isExpression,
+            isAnimated,
+            isCoerced,
+            isCurrent,
+            new ProvenanceEvidence(ProvenanceEvidenceKind.Exact));
+
+    internal static DependencyPropertyBaseValueSource MapBaseValueSource(BaseValueSource source) => source switch
     {
         BaseValueSource.Default => DependencyPropertyBaseValueSource.Default,
         BaseValueSource.Inherited => DependencyPropertyBaseValueSource.Inherited,
@@ -1294,7 +1342,13 @@ internal static partial class WpfVisualTreeInspector
                     : TruncateProvenanceText(
                         $"Ancestor[{parentIndex}:{GetTypeName(parent) ?? "unknown"}]",
                         512);
-                foreach (var (dictionary, suffix) in GetResourceDictionaries(parent))
+                var resourceDictionaries = GetResourceDictionaries(parent, out var ownerStorageUnavailable);
+                if (ownerStorageUnavailable)
+                {
+                    scanIncompleteReason ??= "resource_owner_storage_unavailable";
+                }
+
+                foreach (var (dictionary, suffix) in resourceDictionaries)
                 {
                     ProbeResourceDictionary(
                         dictionary,
@@ -1326,22 +1380,32 @@ internal static partial class WpfVisualTreeInspector
                 parentIndex++;
             }
 
-            if (!budget.Exhausted && Application.Current is { } application && budget.TryConsume())
+            if (!budget.Exhausted && Application.Current is { } application)
             {
-                ProbeResourceDictionary(
-                    application.Resources,
-                    "Application.Resources",
-                    dynamicResourceDetected ? dynamicResourceKey : null,
-                    dynamicResourceDetected,
-                    effectiveValue,
-                    hasEffectiveValue,
-                    budget,
-                    visited,
-                    candidates,
-                    ref scannedDictionaries,
-                    ref scannedEntries,
-                    ref discoveredCandidates,
-                    ref scanIncompleteReason);
+                var applicationResourceAccess = GetExistingResourcesForProvenance(
+                    application,
+                    out var applicationResources);
+                if (applicationResourceAccess == ResourceOwnerStorageAccess.Unavailable)
+                {
+                    scanIncompleteReason ??= "resource_owner_storage_unavailable";
+                }
+                else if (applicationResourceAccess == ResourceOwnerStorageAccess.Present && budget.TryConsume())
+                {
+                    ProbeResourceDictionary(
+                        applicationResources,
+                        "Application.Resources",
+                        dynamicResourceDetected ? dynamicResourceKey : null,
+                        dynamicResourceDetected,
+                        effectiveValue,
+                        hasEffectiveValue,
+                        budget,
+                        visited,
+                        candidates,
+                        ref scannedDictionaries,
+                        ref scannedEntries,
+                        ref discoveredCandidates,
+                        ref scanIncompleteReason);
+                }
             }
         }
 
@@ -1458,49 +1522,197 @@ internal static partial class WpfVisualTreeInspector
         }
     }
 
-    private static IEnumerable<(ResourceDictionary Dictionary, string ScopeSuffix)> GetResourceDictionaries(
-        DependencyObject element)
+    private static IReadOnlyList<(ResourceDictionary Dictionary, string ScopeSuffix)> GetResourceDictionaries(
+        DependencyObject element,
+        out bool storageUnavailable)
     {
+        var dictionaries = new List<(ResourceDictionary Dictionary, string ScopeSuffix)>(capacity: 4);
+        storageUnavailable = false;
+
         if (element is FrameworkElement frameworkElement)
         {
-            if (frameworkElement.Resources.Count > 0)
+            AddExistingResourceDictionary(frameworkElement, ".Resources", dictionaries, ref storageUnavailable);
+
+            if (frameworkElement.Style is { } style)
             {
-                yield return (frameworkElement.Resources, ".Resources");
+                AddExistingResourceDictionary(style, ".Style.Resources", dictionaries, ref storageUnavailable);
             }
 
-            if (frameworkElement.Style?.Resources is { Count: > 0 } styleResources)
+            if (TryGetAppliedTemplate(frameworkElement) is { } template)
             {
-                yield return (styleResources, ".Style.Resources");
+                AddExistingResourceDictionary(template, ".Template.Resources", dictionaries, ref storageUnavailable);
             }
 
-            if (TryGetAppliedTemplate(frameworkElement)?.Resources is { Count: > 0 } templateResources)
+            if (TryGetRelevantStyle(frameworkElement, StyleProvenanceKind.Theme) is { } themeStyle)
             {
-                yield return (templateResources, ".Template.Resources");
-            }
-
-            if (TryGetRelevantStyle(frameworkElement, StyleProvenanceKind.Theme)?.Resources is { Count: > 0 }
-                themeStyleResources)
-            {
-                yield return (themeStyleResources, ".ThemeStyle.Resources");
+                AddExistingResourceDictionary(
+                    themeStyle,
+                    ".ThemeStyle.Resources",
+                    dictionaries,
+                    ref storageUnavailable);
             }
         }
         else if (element is FrameworkContentElement contentElement)
         {
-            if (contentElement.Resources.Count > 0)
+            AddExistingResourceDictionary(contentElement, ".Resources", dictionaries, ref storageUnavailable);
+
+            if (contentElement.Style is { } style)
             {
-                yield return (contentElement.Resources, ".Resources");
+                AddExistingResourceDictionary(style, ".Style.Resources", dictionaries, ref storageUnavailable);
             }
 
-            if (contentElement.Style?.Resources is { Count: > 0 } styleResources)
+            if (TryGetRelevantStyle(contentElement, StyleProvenanceKind.Theme) is { } themeStyle)
             {
-                yield return (styleResources, ".Style.Resources");
+                AddExistingResourceDictionary(
+                    themeStyle,
+                    ".ThemeStyle.Resources",
+                    dictionaries,
+                    ref storageUnavailable);
+            }
+        }
+
+        return dictionaries;
+    }
+
+    internal static bool TryGetExistingResourcesForProvenance(
+        object owner,
+        out ResourceDictionary resources) =>
+        GetExistingResourcesForProvenance(owner, out resources) == ResourceOwnerStorageAccess.Present;
+
+    private static void AddExistingResourceDictionary(
+        object owner,
+        string scopeSuffix,
+        List<(ResourceDictionary Dictionary, string ScopeSuffix)> dictionaries,
+        ref bool storageUnavailable)
+    {
+        var access = GetExistingResourcesForProvenance(owner, out var resources);
+        if (access == ResourceOwnerStorageAccess.Present)
+        {
+            dictionaries.Add((resources, scopeSuffix));
+        }
+        else if (access == ResourceOwnerStorageAccess.Unavailable)
+        {
+            storageUnavailable = true;
+        }
+    }
+
+    private static ResourceOwnerStorageAccess GetExistingResourcesForProvenance(
+        object owner,
+        out ResourceDictionary resources)
+    {
+        resources = null!;
+
+        try
+        {
+            object? value;
+            switch (owner)
+            {
+                case FrameworkElement frameworkElement:
+                    if (FrameworkElementResourcesField is null ||
+                        FrameworkElementResourcesFieldGetValueMethod is null)
+                    {
+                        return ResourceOwnerStorageAccess.Unavailable;
+                    }
+
+                    value = GetUncommonResourceFieldValue(
+                        FrameworkElementResourcesField,
+                        FrameworkElementResourcesFieldGetValueMethod,
+                        frameworkElement);
+                    break;
+                case FrameworkContentElement contentElement:
+                    if (FrameworkContentElementResourcesField is null ||
+                        FrameworkContentElementResourcesFieldGetValueMethod is null)
+                    {
+                        return ResourceOwnerStorageAccess.Unavailable;
+                    }
+
+                    value = GetUncommonResourceFieldValue(
+                        FrameworkContentElementResourcesField,
+                        FrameworkContentElementResourcesFieldGetValueMethod,
+                        contentElement);
+                    break;
+                case Style style:
+                    if (StyleResourcesField is null)
+                    {
+                        return ResourceOwnerStorageAccess.Unavailable;
+                    }
+
+                    value = StyleResourcesField.GetValue(style);
+                    break;
+                case FrameworkTemplate template:
+                    if (FrameworkTemplateResourcesField is null)
+                    {
+                        return ResourceOwnerStorageAccess.Unavailable;
+                    }
+
+                    value = FrameworkTemplateResourcesField.GetValue(template);
+                    break;
+                case Application application:
+                    if (ApplicationResourcesField is null || ApplicationGlobalLock is null)
+                    {
+                        return ResourceOwnerStorageAccess.Unavailable;
+                    }
+
+                    lock (ApplicationGlobalLock)
+                    {
+                        value = ApplicationResourcesField.GetValue(application);
+                    }
+
+                    break;
+                default:
+                    return ResourceOwnerStorageAccess.Unavailable;
             }
 
-            if (TryGetRelevantStyle(contentElement, StyleProvenanceKind.Theme)?.Resources is { Count: > 0 }
-                themeStyleResources)
+            if (value is not ResourceDictionary existingResources)
             {
-                yield return (themeStyleResources, ".ThemeStyle.Resources");
+                return ResourceOwnerStorageAccess.Absent;
             }
+
+            resources = existingResources;
+            return ResourceOwnerStorageAccess.Present;
+        }
+        catch
+        {
+            return ResourceOwnerStorageAccess.Unavailable;
+        }
+    }
+
+    private static object? GetUncommonResourceFieldValue(
+        object uncommonField,
+        MethodInfo getValueMethod,
+        DependencyObject owner) =>
+        getValueMethod.Invoke(uncommonField, [owner]);
+
+    private static object? GetStaticFieldValue(Type type, string fieldName)
+    {
+        try
+        {
+            return type
+                .GetField(fieldName, BindingFlags.Static | BindingFlags.NonPublic)
+                ?.GetValue(null);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static MethodInfo? GetUncommonResourceFieldGetValueMethod(object? uncommonField)
+    {
+        try
+        {
+            return uncommonField?
+                .GetType()
+                .GetMethod(
+                    "GetValue",
+                    BindingFlags.Instance | BindingFlags.Public,
+                    binder: null,
+                    types: [typeof(DependencyObject)],
+                    modifiers: null);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -1537,7 +1749,7 @@ internal static partial class WpfVisualTreeInspector
         }
 
         var canMatchKnownKey = hasKnownKey && knownKey is not null && IsSafeResourceKey(knownKey);
-        for (var i = 0; i < buckets.Length; i++)
+        for (var i = 0; buckets is not null && i < buckets.Length; i++)
         {
             if (!budget.TryConsume())
             {
@@ -1639,9 +1851,9 @@ internal static partial class WpfVisualTreeInspector
 
     private static bool TryGetResourceDictionaryStorage(
         ResourceDictionary dictionary,
-        out Array buckets)
+        out Array? buckets)
     {
-        buckets = null!;
+        buckets = null;
         if (ResourceDictionaryBaseDictionaryField is null ||
             HashtableBucketsField is null ||
             HashtableBucketKeyField is null ||
@@ -1652,7 +1864,13 @@ internal static partial class WpfVisualTreeInspector
 
         try
         {
-            if (ResourceDictionaryBaseDictionaryField.GetValue(dictionary) is not Hashtable baseDictionary ||
+            var rawDictionary = ResourceDictionaryBaseDictionaryField.GetValue(dictionary);
+            if (rawDictionary is null)
+            {
+                return true;
+            }
+
+            if (rawDictionary is not Hashtable baseDictionary ||
                 HashtableBucketsField.GetValue(baseDictionary) is not Array storage)
             {
                 return false;
@@ -1835,17 +2053,14 @@ internal static partial class WpfVisualTreeInspector
             try
             {
                 var baseValue = animatable.GetAnimationBaseValue(property);
-                var canFormatBaseValue = CanFormatProvenanceValueExactly(baseValue, valueFormat);
+                var formattedBaseValue = FormatProvenanceValueWithEvidence(
+                    baseValue,
+                    valueFormat,
+                    maxStringLength);
                 return new AnimationPropertyProvenance(
-                    BaseValue: canFormatBaseValue
-                        ? FormatSafeProvenanceValue(baseValue, valueFormat, maxStringLength)
-                        : null,
+                    BaseValue: formattedBaseValue.Value,
                     BaseValueType: GetTypeName(baseValue),
-                    BaseValueEvidence: canFormatBaseValue
-                        ? new ProvenanceEvidence(ProvenanceEvidenceKind.Exact)
-                        : new ProvenanceEvidence(
-                            ProvenanceEvidenceKind.Unavailable,
-                            "value_not_safely_serializable"),
+                    BaseValueEvidence: formattedBaseValue.Evidence,
                     OriginEvidence: new ProvenanceEvidence(
                         ProvenanceEvidenceKind.Unavailable,
                         "animation_origin_not_exposed"));
@@ -1912,17 +2127,14 @@ internal static partial class WpfVisualTreeInspector
         }
 
         var frameworkMetadata = metadata as FrameworkPropertyMetadata;
-        var canFormatDefaultValue = CanFormatProvenanceValueExactly(metadata.DefaultValue, valueFormat);
+        var formattedDefaultValue = FormatProvenanceValueWithEvidence(
+            metadata.DefaultValue,
+            valueFormat,
+            maxStringLength);
         return new DefaultMetadataPropertyProvenance(
-            DefaultValue: canFormatDefaultValue
-                ? FormatSafeProvenanceValue(metadata.DefaultValue, valueFormat, maxStringLength)
-                : null,
+            DefaultValue: formattedDefaultValue.Value,
             DefaultValueType: GetTypeName(metadata.DefaultValue),
-            DefaultValueEvidence: canFormatDefaultValue
-                ? new ProvenanceEvidence(ProvenanceEvidenceKind.Exact)
-                : new ProvenanceEvidence(
-                    ProvenanceEvidenceKind.Unavailable,
-                    "value_not_safely_serializable"),
+            DefaultValueEvidence: formattedDefaultValue.Evidence,
             MetadataType: GetTypeName(metadata) ?? metadata.GetType().Name,
             IsEffectiveValueSource: isEffectiveValueSource,
             EffectiveValueSourceEvidence: isEffectiveValueSource.HasValue
@@ -1942,22 +2154,6 @@ internal static partial class WpfVisualTreeInspector
         var method = callback.Method;
         var declaringType = method.DeclaringType?.FullName ?? method.DeclaringType?.Name ?? "unknown";
         return TruncateProvenanceText($"{declaringType}.{method.Name}", 512);
-    }
-
-    private static bool CanFormatProvenanceValueExactly(object? value, string valueFormat)
-    {
-        if (value is null || ReferenceEquals(value, DependencyProperty.UnsetValue))
-        {
-            return true;
-        }
-
-        if (string.Equals(valueFormat, "type", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var type = value.GetType();
-        return IsSafeScalarType(type) || value is Type or SolidColorBrush;
     }
 
     private static string? FormatSafeResourceKey(object? key)
@@ -1984,23 +2180,58 @@ internal static partial class WpfVisualTreeInspector
             : null;
     }
 
-    private static string? FormatSafeProvenanceValue(object? value, string valueFormat, int maxLength)
+    internal readonly record struct SafeProvenanceValueFormatting(
+        string Text,
+        bool RepresentsValue,
+        bool Truncated);
+
+    internal static (string? Value, ProvenanceEvidence Evidence) FormatProvenanceValueWithEvidence(
+        object? value,
+        string valueFormat,
+        int maxLength)
+    {
+        var formatted = FormatSafeProvenanceValueDetails(value, valueFormat, maxLength);
+        if (!formatted.RepresentsValue)
+        {
+            return (
+                null,
+                new ProvenanceEvidence(
+                    ProvenanceEvidenceKind.Unavailable,
+                    "value_not_safely_serializable"));
+        }
+
+        return formatted.Truncated
+            ? (
+                formatted.Text,
+                new ProvenanceEvidence(
+                    ProvenanceEvidenceKind.BestEffort,
+                    "maxStringLength"))
+            : (formatted.Text, new ProvenanceEvidence(ProvenanceEvidenceKind.Exact));
+    }
+
+    private static string FormatSafeProvenanceValue(object? value, string valueFormat, int maxLength) =>
+        FormatSafeProvenanceValueDetails(value, valueFormat, maxLength).Text;
+
+    internal static SafeProvenanceValueFormatting FormatSafeProvenanceValueDetails(
+        object? value,
+        string valueFormat,
+        int maxLength)
     {
         if (value is null)
         {
-            return "null";
+            return CreateSafeProvenanceValueFormatting("null", representsValue: true, maxLength);
         }
 
         if (ReferenceEquals(value, DependencyProperty.UnsetValue))
         {
-            return "{UnsetValue}";
+            return CreateSafeProvenanceValueFormatting("{UnsetValue}", representsValue: true, maxLength);
         }
 
         var type = value.GetType();
         var typeName = type.FullName ?? type.Name;
         if (string.Equals(valueFormat, "type", StringComparison.OrdinalIgnoreCase))
         {
-            return TruncateProvenanceText(typeName, maxLength);
+            return CreateSafeProvenanceValueFormatting(typeName, representsValue: true, maxLength);
         }
 
         string? text = value switch
@@ -2025,16 +2256,121 @@ internal static partial class WpfVisualTreeInspector
             DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
             TimeSpan timeSpan => timeSpan.ToString("c", CultureInfo.InvariantCulture),
             Type reflectedType => reflectedType.FullName ?? reflectedType.Name,
-            SolidColorBrush brush => $"SolidColorBrush(#{brush.Color.A:X2}{brush.Color.R:X2}{brush.Color.G:X2}{brush.Color.B:X2})",
+            Thickness thickness => FormatThickness(thickness),
+            CornerRadius cornerRadius => FormatCornerRadius(cornerRadius),
+            GridLength gridLength => FormatGridLength(gridLength),
+            Point point => $"{FormatInvariantDouble(point.X)},{FormatInvariantDouble(point.Y)}",
+            Size size => $"{FormatInvariantDouble(size.Width)},{FormatInvariantDouble(size.Height)}",
+            System.Windows.Rect rect => rect.IsEmpty
+                ? "Empty"
+                : $"{FormatInvariantDouble(rect.X)},{FormatInvariantDouble(rect.Y)},{FormatInvariantDouble(rect.Width)},{FormatInvariantDouble(rect.Height)}",
+            Vector vector => $"{FormatInvariantDouble(vector.X)},{FormatInvariantDouble(vector.Y)}",
+            Int32Rect int32Rect => $"{int32Rect.X},{int32Rect.Y},{int32Rect.Width},{int32Rect.Height}",
+            Matrix matrix => string.Join(",",
+                FormatInvariantDouble(matrix.M11),
+                FormatInvariantDouble(matrix.M12),
+                FormatInvariantDouble(matrix.M21),
+                FormatInvariantDouble(matrix.M22),
+                FormatInvariantDouble(matrix.OffsetX),
+                FormatInvariantDouble(matrix.OffsetY)),
+            Color color => FormatColor(color),
+            SolidColorBrush brush when type == typeof(SolidColorBrush) => FormatColor(brush.Color),
+            FontFamily fontFamily when type == typeof(FontFamily) => fontFamily.Source,
+            FontWeight fontWeight => fontWeight.ToString(),
+            FontStyle fontStyle => fontStyle.ToString(),
+            FontStretch fontStretch => fontStretch.ToString(),
+            Duration duration => FormatDuration(duration),
+            RepeatBehavior repeatBehavior => FormatRepeatBehavior(repeatBehavior),
+            Point3D point3D => string.Join(",",
+                FormatInvariantDouble(point3D.X),
+                FormatInvariantDouble(point3D.Y),
+                FormatInvariantDouble(point3D.Z)),
+            Vector3D vector3D => string.Join(",",
+                FormatInvariantDouble(vector3D.X),
+                FormatInvariantDouble(vector3D.Y),
+                FormatInvariantDouble(vector3D.Z)),
+            Quaternion quaternion => string.Join(",",
+                FormatInvariantDouble(quaternion.X),
+                FormatInvariantDouble(quaternion.Y),
+                FormatInvariantDouble(quaternion.Z),
+                FormatInvariantDouble(quaternion.W)),
             _ => null
         };
+
+        var representsValue = text is not null;
 
         if (text is null && value is FrameworkElement frameworkElement)
         {
             text = DescribeBindingRuntimeSource(frameworkElement, maxLength);
         }
 
-        return TruncateProvenanceText(text ?? typeName, maxLength);
+        return CreateSafeProvenanceValueFormatting(text ?? typeName, representsValue, maxLength);
+    }
+
+    private static SafeProvenanceValueFormatting CreateSafeProvenanceValueFormatting(
+        string text,
+        bool representsValue,
+        int maxLength) =>
+        new(
+            TruncateProvenanceText(text, maxLength),
+            representsValue,
+            text.Length > Math.Max(0, maxLength));
+
+    private static string FormatInvariantDouble(double value) =>
+        value.ToString("R", CultureInfo.InvariantCulture);
+
+    private static string FormatThickness(Thickness value) => string.Join(",",
+        FormatInvariantDouble(value.Left),
+        FormatInvariantDouble(value.Top),
+        FormatInvariantDouble(value.Right),
+        FormatInvariantDouble(value.Bottom));
+
+    private static string FormatCornerRadius(CornerRadius value) => string.Join(",",
+        FormatInvariantDouble(value.TopLeft),
+        FormatInvariantDouble(value.TopRight),
+        FormatInvariantDouble(value.BottomRight),
+        FormatInvariantDouble(value.BottomLeft));
+
+    private static string FormatGridLength(GridLength value)
+    {
+        if (value.IsAuto)
+        {
+            return "Auto";
+        }
+
+        if (!value.IsStar)
+        {
+            return FormatInvariantDouble(value.Value);
+        }
+
+        return value.Value == 1d ? "*" : $"{FormatInvariantDouble(value.Value)}*";
+    }
+
+    private static string FormatColor(Color value) =>
+        $"#{value.A:X2}{value.R:X2}{value.G:X2}{value.B:X2}";
+
+    private static string FormatDuration(Duration value)
+    {
+        if (value == Duration.Automatic)
+        {
+            return "Automatic";
+        }
+
+        return value == Duration.Forever
+            ? "Forever"
+            : value.TimeSpan.ToString("c", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatRepeatBehavior(RepeatBehavior value)
+    {
+        if (value == RepeatBehavior.Forever)
+        {
+            return "Forever";
+        }
+
+        return value.HasCount
+            ? $"{FormatInvariantDouble(value.Count)}x"
+            : value.Duration.ToString("c", CultureInfo.InvariantCulture);
     }
 
     internal static string TruncateProvenanceText(string value, int maxLength)

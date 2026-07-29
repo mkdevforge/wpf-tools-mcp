@@ -164,25 +164,36 @@ pre-coercion value. Dynamic-resource keys use an implementation detail and are
 best effort. Unsafe custom resource keys are omitted rather than invoking
 application-defined formatting.
 
-Resource candidates cover bounded element/ancestor, relevant style, template,
-theme-style, merged-dictionary, and application scopes. The agent reads raw
-dictionary storage through guarded implementation access so it does not copy a
-whole dictionary or realize deferred resources. `ScanComplete` only describes
-that candidate scan; it does not upgrade a candidate into exact WPF lookup
-origin or claim complete precedence/shadowing analysis. A deferred value or an
-incompatible runtime marks the scan incomplete with a stable reason instead of
-inflating target resources. Even a complete scan therefore has `BestEffort`
-scan evidence.
+Resource candidates cover bounded element, ancestor, application, and
+pre-existing merged-dictionary scopes. The agent reads only already-existing
+owner backing fields and raw dictionary storage through guarded implementation
+access. It never calls lazy WPF `Resources` getters, creates a missing resource
+collection, copies a whole dictionary, or realizes a deferred resource.
+`ScanComplete` only describes that candidate scan; it does not upgrade a
+candidate into exact WPF lookup origin or claim complete precedence/shadowing
+analysis. A deferred value or an incompatible runtime marks the scan incomplete
+with a stable reason. Even a complete scan therefore has `BestEffort` scan
+evidence.
 
 Provenance caps the outer property response at 100 entries with
-`TruncatedReason=maxProvenanceProperties`. `maxProvenanceCandidates` defaults
-to 20 and is clamped from 0 through 50. It bounds discovery work as well as
-returned binding children and contributor/resource candidates. Style and
-template sections expose declaration counts; resource sections expose the
-single decrementing `ScanAttempts` budget plus dictionary and entry counts.
+`TruncatedReason=maxProvenanceProperties`. Explicit `propertyNames` are also
+bounded to 100 entries and 512 characters each before the agent pipe, reported
+as `maxProvenancePropertyNames` or `maxProvenancePropertyNameLength` when cut.
+This also bounds `MissingPropertyNames`. `maxProvenanceCandidates` defaults to
+20 and is clamped from 0 through 50. It bounds discovery work as well as returned
+binding children and contributor/resource candidates. Style and template
+sections expose declaration counts; resource sections expose the single
+decrementing `ScanAttempts` budget plus dictionary and entry counts.
 `ScanComplete=false` means discovered counts are lower bounds. Budget exhaustion
 sets `TruncatedReason=maxProvenanceCandidates`; an unavailable section that
 failed safely is incomplete but is not mislabeled as budget-truncated.
+
+Effective values keep useful invariant summaries for explicitly supported WPF
+types such as `Thickness`, `CornerRadius`, `GridLength`, colors, font values,
+and common geometry structs. Unknown application objects fall back to their
+type identity without invoking application-defined `ToString()`. Truncated
+default or animation values carry `BestEffort/maxStringLength` evidence rather
+than `Exact` evidence.
 
 Provenance requires an agent advertising
 `wpf/get_computed_properties:provenance-v1`. When a target still hosts an older

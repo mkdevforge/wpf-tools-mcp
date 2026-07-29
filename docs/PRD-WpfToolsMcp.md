@@ -304,7 +304,9 @@ large app with scenario pages:
 - `WpfToolsMcp.TestApp.ProvenanceProbe`: local, metadata-default, inherited,
   bound, explicit/implicit/theme-styled, static/dynamic/ambiguous-resource,
   template-triggered, animated, and coerced dependency-property origins, plus
-  bounded priority-binding and unsafe resource-key cases.
+  bounded priority/multi-binding, element/ancestor/application/merged resource
+  scopes, deferred BAML, unsafe resource-key, and truncated-value evidence
+  cases.
 - `WpfToolsMcp.TestApp.BindingErrors`: binding and DataContext diagnostics.
 - `WpfToolsMcp.TestApp.BrokenAutomation`: controls with missing UIA peers.
 - `WpfToolsMcp.TestApp.CustomControls`: user controls and templated controls.
@@ -392,9 +394,19 @@ Current build, focused-test, full-test, and smoke commands are documented in
   animation clock, and pre-coercion value remain unavailable rather than being
   inferred. Theme-style and dynamic-resource details use guarded implementation
   access and degrade per section if that access changes. Bounded resource
-  candidate scans also use guarded raw dictionary storage so they neither copy
-  an unbounded key set nor inflate deferred values; their scan evidence remains
-  best effort even when the bounded scope scan completes.
+  candidate scans read existing `FrameworkElement`/`FrameworkContentElement`
+  uncommon fields and `Style`/`FrameworkTemplate`/`Application` backing fields
+  (holding the WPF application resource lock where required), then inspect raw
+  dictionary storage. They never call lazy `Resources` getters, copy an
+  unbounded key set, or inflate deferred values; their scan evidence remains
+  best effort even when the bounded scope scan completes. Missing or changed
+  internal storage access makes only the resource section incomplete.
+- **Provenance request and rendering work is bounded.** Opt-in calls inspect at
+  most 100 explicit property names, bound each name before the agent pipe, and
+  cap `MissingPropertyNames` accordingly. Effective values use an explicit
+  allowlist of invariant WPF formatters; arbitrary application `ToString()` is
+  never invoked. A safely formatted default or animation value is exact only
+  when it is complete; bounded text is best effort with `maxStringLength`.
 - **DataContext change notifications are best effort.** Live state observation uses WPF bindings so dependency properties and `INotifyPropertyChanged` paths are event-driven. Plain CLR properties that emit no notification do not produce changes; the tool does not add invasive target polling.
 - **Live observation work is capped across subscriptions.** Each subscription has bounded watches and queues, and the server admits at most eight live or completed-retained property subscription handles per session and 64 per server process. Completed handles free capacity on explicit unsubscribe or idle-grace retirement.
 - **Live state observation requires a live WPF window source.** Explicit window handles are resolved to their owning `HwndSource` before traversal, including windows on secondary UI dispatchers; non-WPF or already-destroyed handles fail without attaching handlers.

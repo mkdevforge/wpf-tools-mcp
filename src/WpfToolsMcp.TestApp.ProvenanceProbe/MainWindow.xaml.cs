@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 
 namespace WpfToolsMcp.TestApp.ProvenanceProbe;
@@ -11,8 +12,29 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        DeferredResourceProbe.Tag = DeferredRealizationSentinel.RealizationCount == 0
+            ? "not-realized"
+            : "realized";
         MaterializeFixtureResources();
         DataContext = new ProvenanceViewModel();
+        LongAnimatedProbe.Text = new string('A', 3000);
+
+        var elementBrush = new SolidColorBrush(Color.FromRgb(0x6A, 0x48, 0xA8));
+        ElementResourceProbe.Resources.Add("Provenance.ElementBrush", elementBrush);
+        ElementResourceProbe.Background = elementBrush;
+
+        var applicationBrush = new SolidColorBrush(Color.FromRgb(0xB0, 0x48, 0x52));
+        Application.Current.Resources.Add("Provenance.ApplicationBrush", applicationBrush);
+        ApplicationResourceProbe.Background = applicationBrush;
+
+        var mergedBrush = new SolidColorBrush(Color.FromRgb(0x2F, 0x78, 0x8F));
+        var mergedDictionary = new ResourceDictionary
+        {
+            ["Provenance.MergedBrush"] = mergedBrush
+        };
+        MergedResourceProbe.Resources.MergedDictionaries.Add(mergedDictionary);
+        MergedResourceProbe.Background = mergedBrush;
+
         var unsafeResourceKey = new UnsafeResourceKey();
         Resources.Add(unsafeResourceKey, System.Windows.Media.Brushes.MediumPurple);
         UnsafeDynamicResourceProbe.SetResourceReference(Border.BackgroundProperty, unsafeResourceKey);
@@ -53,12 +75,29 @@ public partial class MainWindow : Window
             {
                 RepeatBehavior = RepeatBehavior.Forever
             });
+
+        var stringAnimation = new StringAnimationUsingKeyFrames
+        {
+            Duration = TimeSpan.FromDays(1),
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        stringAnimation.KeyFrames.Add(new DiscreteStringKeyFrame(
+            "animated",
+            KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        LongAnimatedProbe.BeginAnimation(TextBlock.TextProperty, stringAnimation);
+    }
+
+    internal void MarkDeferredResourceRealized()
+    {
+        DeferredResourceProbe.Tag = "realized";
     }
 }
 
 public sealed class ProvenanceViewModel
 {
     public string BoundText => "Bound from the fixture view model";
+
+    public string SecondaryText => "Secondary fixture value";
 }
 
 public sealed class ProvenanceConverter : IValueConverter
@@ -97,6 +136,21 @@ public sealed class ThemeProbe : Control
     }
 }
 
+public sealed class LongDefaultProbe : Border
+{
+    public static readonly DependencyProperty LongTextProperty = DependencyProperty.Register(
+        nameof(LongText),
+        typeof(string),
+        typeof(LongDefaultProbe),
+        new FrameworkPropertyMetadata(new string('D', 3000)));
+
+    public string LongText
+    {
+        get => (string)GetValue(LongTextProperty);
+        set => SetValue(LongTextProperty, value);
+    }
+}
+
 public sealed class ThrowingValueProbe : Border
 {
     public static readonly DependencyProperty PayloadProperty = DependencyProperty.Register(
@@ -126,4 +180,20 @@ public sealed class UnsafeResourceKey
 {
     public override string ToString() =>
         throw new InvalidOperationException("Provenance must not invoke application-defined ToString().");
+}
+
+public sealed class DeferredRealizationSentinel
+{
+    private static int _realizationCount;
+
+    public DeferredRealizationSentinel()
+    {
+        Interlocked.Increment(ref _realizationCount);
+        if (Application.Current?.MainWindow is MainWindow window)
+        {
+            window.MarkDeferredResourceRealized();
+        }
+    }
+
+    public static int RealizationCount => Volatile.Read(ref _realizationCount);
 }

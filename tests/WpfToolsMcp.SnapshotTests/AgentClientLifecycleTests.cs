@@ -1,7 +1,9 @@
 using System.IO.Pipes;
+using System.Reflection;
 using System.Text.Json.Nodes;
 using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Automation;
+using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.SnapshotTests;
 
@@ -287,7 +289,7 @@ public sealed class AgentClientLifecycleTests
     }
 
     [Test]
-    public async Task Missing_property_provenance_capability_does_not_write_or_poison_agent_pipe()
+    public async Task Production_computed_properties_path_gates_an_old_agent_before_the_property_pipe_write()
     {
         var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
         await using var server = new NamedPipeServerStream(
@@ -297,6 +299,7 @@ public sealed class AgentClientLifecycleTests
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous);
 
+        AutomationController? controller = null;
         AgentClient? client = null;
         try
         {
@@ -306,20 +309,45 @@ public sealed class AgentClientLifecycleTests
             await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
             client = await clientTask;
 
-            var provenanceCallInvoked = false;
+            var capabilitiesTask = AutomationController.VerifyAgentAndGetCapabilitiesAsync(client, timeout.Token);
+            var pingRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(pingRequest.Method, Is.EqualTo("ping"));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(pingRequest.Id, Ok: true, Result: JsonValue.Create("pong")),
+                timeout.Token);
+
+            var capabilitiesRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(capabilitiesRequest.Method, Is.EqualTo(AgentProtocolCapabilities.GetCapabilitiesMethod));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    capabilitiesRequest.Id,
+                    Ok: false,
+                    Error: new AgentError(
+                        $"Unknown method '{AgentProtocolCapabilities.GetCapabilitiesMethod}'.")),
+                timeout.Token);
+            var capabilities = await capabilitiesTask.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.That(capabilities.ProtocolVersion, Is.Zero);
+
+            controller = new AutomationController();
+            SetPrivateField(
+                controller,
+                "_application",
+                FlaUI.Core.Application.Attach(Environment.ProcessId));
+            SetPrivateField(controller, "_agentClient", client);
+            SetPrivateField(controller, "_agentPipeName", pipeName);
+            SetPrivateField(controller, "_agentPid", (int?)Environment.ProcessId);
+            SetPrivateField(controller, "_agentCapabilities", capabilities);
+
             var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
-                _ = await AutomationController.CallGetComputedPropertiesWhenSupportedAsync(
+                _ = await controller.GetComputedPropertiesAsync(
+                    locator: new ElementLocator(AutomationId: "never-sent"),
                     includeProvenance: true,
-                    capabilities: new AgentCapabilitiesResponse(ProtocolVersion: 0, Capabilities: []),
-                    call: () =>
-                    {
-                        provenanceCallInvoked = true;
-                        return client.CallAsync<string>("wpf/get_computed_properties", null, CancellationToken.None);
-                    }));
+                    cancellationToken: timeout.Token));
 
             Assert.Multiple(() =>
             {
-                Assert.That(provenanceCallInvoked, Is.False);
                 Assert.That(exception!.Message, Does.Contain("Restart the target application"));
                 Assert.That(exception.Message, Does.Contain("start a new MCP session"));
             });
@@ -338,6 +366,12 @@ public sealed class AgentClientLifecycleTests
         }
         finally
         {
+            if (controller is not null)
+            {
+                controller.Dispose();
+                client = null;
+            }
+
             if (client is not null)
             {
                 await client.DisposeAsync();
@@ -359,5 +393,12 @@ public sealed class AgentClientLifecycleTests
         }
 
         Assert.Fail("The controller did not enter disposal within the bounded wait.");
+    }
+
+    private static void SetPrivateField<T>(AutomationController controller, string name, T value)
+    {
+        var field = typeof(AutomationController).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)
+                    ?? throw new InvalidOperationException($"Missing AutomationController field '{name}'.");
+        field.SetValue(controller, value);
     }
 }

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Windows;
+using System.Windows.Media;
 using NUnit.Framework;
 using WpfToolsMcp.Agent;
 using WpfToolsMcp.AgentProtocol;
@@ -95,6 +97,138 @@ public sealed class PropertyProvenanceContractTests
     }
 
     [Test]
+    public void Base_value_source_mapping_is_exhaustive_and_preserves_overlay_flags()
+    {
+        var expected = new Dictionary<BaseValueSource, DependencyPropertyBaseValueSource>
+        {
+            [BaseValueSource.Unknown] = DependencyPropertyBaseValueSource.Unknown,
+            [BaseValueSource.Default] = DependencyPropertyBaseValueSource.Default,
+            [BaseValueSource.Inherited] = DependencyPropertyBaseValueSource.Inherited,
+            [BaseValueSource.DefaultStyle] = DependencyPropertyBaseValueSource.DefaultStyle,
+            [BaseValueSource.DefaultStyleTrigger] = DependencyPropertyBaseValueSource.DefaultStyleTrigger,
+            [BaseValueSource.Style] = DependencyPropertyBaseValueSource.Style,
+            [BaseValueSource.TemplateTrigger] = DependencyPropertyBaseValueSource.TemplateTrigger,
+            [BaseValueSource.StyleTrigger] = DependencyPropertyBaseValueSource.StyleTrigger,
+            [BaseValueSource.ImplicitStyleReference] = DependencyPropertyBaseValueSource.ImplicitStyleReference,
+            [BaseValueSource.ParentTemplate] = DependencyPropertyBaseValueSource.ParentTemplate,
+            [BaseValueSource.ParentTemplateTrigger] = DependencyPropertyBaseValueSource.ParentTemplateTrigger,
+            [BaseValueSource.Local] = DependencyPropertyBaseValueSource.Local
+        };
+
+        Assert.That(Enum.GetValues<BaseValueSource>(), Is.EquivalentTo(expected.Keys));
+        foreach (var (source, mapped) in expected)
+        {
+            Assert.That(WpfVisualTreeInspector.MapBaseValueSource(source), Is.EqualTo(mapped), source.ToString());
+        }
+
+        var provenance = WpfVisualTreeInspector.MapValueSource(
+            BaseValueSource.Local,
+            isExpression: true,
+            isAnimated: true,
+            isCoerced: true,
+            isCurrent: true);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                WpfVisualTreeInspector.MapBaseValueSource((BaseValueSource)int.MaxValue),
+                Is.EqualTo(DependencyPropertyBaseValueSource.Unknown));
+            Assert.That(provenance.BaseValueSource, Is.EqualTo(DependencyPropertyBaseValueSource.Local));
+            Assert.That(provenance.IsExpression, Is.True);
+            Assert.That(provenance.IsAnimated, Is.True);
+            Assert.That(provenance.IsCoerced, Is.True);
+            Assert.That(provenance.IsCurrent, Is.True);
+            Assert.That(provenance.Evidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.Exact));
+        });
+    }
+
+    [Test]
+    public void Safe_value_formatter_preserves_common_wpf_values_without_calling_application_to_string()
+    {
+        var thickness = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+            new Thickness(1, 2, 3, 4),
+            "string",
+            2000);
+        var cornerRadius = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+            new CornerRadius(1, 2, 3, 4),
+            "string",
+            2000);
+        var gridLength = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+            new GridLength(2, GridUnitType.Star),
+            "string",
+            2000);
+        var color = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+            Colors.CornflowerBlue,
+            "string",
+            2000);
+        var fontWeight = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+            FontWeights.Bold,
+            "string",
+            2000);
+        var fontFamily = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+            new FontFamily("Segoe UI"),
+            "string",
+            2000);
+        var applicationValue = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+            new ThrowingDisplayValue(),
+            "string",
+            2000);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(thickness.Text, Is.EqualTo("1,2,3,4"));
+            Assert.That(cornerRadius.Text, Is.EqualTo("1,2,3,4"));
+            Assert.That(gridLength.Text, Is.EqualTo("2*"));
+            Assert.That(color.Text, Is.EqualTo("#FF6495ED"));
+            Assert.That(fontWeight.Text, Is.EqualTo("Bold"));
+            Assert.That(fontFamily.Text, Is.EqualTo("Segoe UI"));
+            Assert.That(applicationValue.Text, Does.EndWith("ThrowingDisplayValue"));
+            Assert.That(applicationValue.RepresentsValue, Is.False);
+        });
+    }
+
+    [Test]
+    public void Truncated_safe_values_are_not_labeled_exact()
+    {
+        var formatted = WpfVisualTreeInspector.FormatProvenanceValueWithEvidence(
+            "abcdefgh",
+            "string",
+            maxLength: 5);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(formatted.Value, Is.EqualTo("ab..."));
+            Assert.That(formatted.Evidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
+            Assert.That(formatted.Evidence.Reason, Is.EqualTo("maxStringLength"));
+        });
+    }
+
+    [Test]
+    public void Provenance_property_name_preparation_bounds_indexing_strings_and_output()
+    {
+        var names = new NonEnumerablePropertyNames(count: 10_000);
+        var prepared = WpfVisualTreeInspector.PrepareProvenancePropertyNames(names);
+        var transportPrepared = AutomationController.PrepareProvenancePropertyNamesForAgent(names);
+        var longName = WpfVisualTreeInspector.PrepareProvenancePropertyNames(
+            [new string('x', 600)]);
+        var longTransportName = AutomationController.PrepareProvenancePropertyNamesForAgent(
+            [new string('x', 600)]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(names.IndexReads, Is.EqualTo(200));
+            Assert.That(prepared.Names, Has.Length.EqualTo(100));
+            Assert.That(prepared.TruncatedReason, Is.EqualTo("maxProvenancePropertyNames"));
+            Assert.That(transportPrepared.Names, Has.Count.EqualTo(100));
+            Assert.That(transportPrepared.TruncatedReason, Is.EqualTo("maxProvenancePropertyNames"));
+            Assert.That(longName.Names.Single().Length, Is.LessThanOrEqualTo(512));
+            Assert.That(longName.TruncatedReason, Is.EqualTo("maxProvenancePropertyNameLength"));
+            Assert.That(longTransportName.Names!.Single().Length, Is.LessThanOrEqualTo(512));
+            Assert.That(longTransportName.TruncatedReason, Is.EqualTo("maxProvenancePropertyNameLength"));
+        });
+    }
+
+    [Test]
     public void Missing_property_provenance_capability_requires_target_and_session_restart()
     {
         var exception = AutomationController.CreateComputedPropertyProvenanceCapabilityException();
@@ -172,5 +306,32 @@ public sealed class PropertyProvenanceContractTests
         }
 
         return false;
+    }
+
+    private sealed class ThrowingDisplayValue
+    {
+        public override string ToString() =>
+            throw new InvalidOperationException("The safe formatter must not call application ToString().");
+    }
+
+    private sealed class NonEnumerablePropertyNames(int count) : IReadOnlyList<string>
+    {
+        public int Count { get; } = count;
+
+        public int IndexReads { get; private set; }
+
+        public string this[int index]
+        {
+            get
+            {
+                IndexReads++;
+                return $"Missing{index}";
+            }
+        }
+
+        public IEnumerator<string> GetEnumerator() =>
+            throw new InvalidOperationException("Bounded preparation must not enumerate the complete input.");
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

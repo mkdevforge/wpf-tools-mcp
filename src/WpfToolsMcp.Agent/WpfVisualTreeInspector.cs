@@ -4465,10 +4465,21 @@ internal static partial class WpfVisualTreeInspector
 
         var elementRef = BuildElementRefWpf(ownerId, element, xpath, FindReturnFields.Standard);
 
-        var propertyNames = request.PropertyNames?
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p.Trim())
-            .ToArray();
+        string[]? propertyNames;
+        string? propertyNameTruncatedReason = null;
+        if (includeProvenance && request.PropertyNames is { } requestedPropertyNames)
+        {
+            var preparedPropertyNames = PrepareProvenancePropertyNames(requestedPropertyNames);
+            propertyNames = preparedPropertyNames.Names;
+            propertyNameTruncatedReason = preparedPropertyNames.TruncatedReason;
+        }
+        else
+        {
+            propertyNames = request.PropertyNames?
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .ToArray();
+        }
 
         var properties = new HashSet<DependencyProperty>(GetDependencyPropertiesCached(element.GetType()));
         try
@@ -4485,8 +4496,8 @@ internal static partial class WpfVisualTreeInspector
 
         var computed = new List<ComputedPropertyInfo>();
         var warnings = new List<string>();
-        var truncated = false;
-        string? truncatedReason = null;
+        var truncated = propertyNameTruncatedReason is not null;
+        string? truncatedReason = propertyNameTruncatedReason;
 
         const int maxValueLength = 2000;
 
@@ -4500,7 +4511,7 @@ internal static partial class WpfVisualTreeInspector
                 if (computed.Count >= maxProperties)
                 {
                     truncated = true;
-                    truncatedReason = provenancePropertyCapApplied
+                    truncatedReason ??= provenancePropertyCapApplied
                         ? "maxProvenanceProperties"
                         : "maxProperties";
                     break;
@@ -4540,7 +4551,7 @@ internal static partial class WpfVisualTreeInspector
             if (computed.Count >= maxProperties)
             {
                 truncated = true;
-                truncatedReason = provenancePropertyCapApplied
+                truncatedReason ??= provenancePropertyCapApplied
                     ? "maxProvenanceProperties"
                     : "maxProperties";
                 break;
@@ -4605,6 +4616,38 @@ internal static partial class WpfVisualTreeInspector
             TruncatedReason: truncatedReason,
             MissingPropertyNames: null,
             Warnings: warnings.Count > 0 ? warnings : null);
+    }
+
+    internal readonly record struct PreparedProvenancePropertyNames(
+        string[] Names,
+        string? TruncatedReason);
+
+    internal static PreparedProvenancePropertyNames PrepareProvenancePropertyNames(
+        IReadOnlyList<string> propertyNames)
+    {
+        const int maxPropertyNames = 100;
+        const int maxPropertyNameLength = 512;
+
+        var count = Math.Min(propertyNames.Count, maxPropertyNames);
+        var names = new List<string>(count);
+        var propertyNameLengthTruncated = false;
+        for (var i = 0; i < count; i++)
+        {
+            var rawName = propertyNames[i] ?? string.Empty;
+            propertyNameLengthTruncated |= rawName.Length > maxPropertyNameLength;
+            var name = TruncateProvenanceText(rawName, maxPropertyNameLength).Trim();
+            if (name.Length > 0)
+            {
+                names.Add(name);
+            }
+        }
+
+        var truncatedReason = propertyNames.Count > maxPropertyNames
+            ? "maxProvenancePropertyNames"
+            : propertyNameLengthTruncated
+                ? "maxProvenancePropertyNameLength"
+                : null;
+        return new PreparedProvenancePropertyNames(names.ToArray(), truncatedReason);
     }
 
     public static GetStyleChainResponse GetStyleChain(

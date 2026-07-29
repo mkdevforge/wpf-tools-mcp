@@ -77,6 +77,15 @@
                 </TextBlock.Text>
             </TextBlock>
 
+            <TextBlock AutomationProperties.AutomationId="Provenance_MultiBound">
+                <TextBlock.Text>
+                    <MultiBinding StringFormat="{}{0} / {1}">
+                        <Binding Path="BoundText" />
+                        <Binding Path="SecondaryText" />
+                    </MultiBinding>
+                </TextBlock.Text>
+            </TextBlock>
+
             <TextBlock AutomationProperties.AutomationId="Provenance_Styled"
                        Style="{StaticResource Provenance.ExplicitTextStyle}"
                        Tag="Hot"
@@ -94,6 +103,28 @@
                     Width="{StaticResource Provenance.AmbiguousWidthA}"
                     Height="24" />
 
+            <Border x:Name="ElementResourceProbe"
+                    AutomationProperties.AutomationId="Provenance_ElementResource"
+                    Height="24" />
+
+            <Border x:Name="ApplicationResourceProbe"
+                    AutomationProperties.AutomationId="Provenance_ApplicationResource"
+                    Height="24" />
+
+            <Border x:Name="MergedResourceProbe"
+                    AutomationProperties.AutomationId="Provenance_MergedResource"
+                    Height="24" />
+
+            <Border x:Name="DeferredResourceProbe"
+                    AutomationProperties.AutomationId="Provenance_DeferredResource"
+                    Tag="not-realized"
+                    Width="17"
+                    Height="24">
+                <Border.Resources>
+                    <local:DeferredRealizationSentinel x:Key="Provenance.DeferredSentinel" />
+                </Border.Resources>
+            </Border>
+
             <Border x:Name="UnsafeDynamicResourceProbe"
                     AutomationProperties.AutomationId="Provenance_UnsafeDynamicResource"
                     Height="24" />
@@ -102,6 +133,13 @@
                     AutomationProperties.AutomationId="Provenance_Animated"
                     Opacity="0.75"
                     Height="24" />
+
+            <TextBlock x:Name="LongAnimatedProbe"
+                       AutomationProperties.AutomationId="Provenance_LongAnimated"
+                       Height="24" />
+
+            <local:LongDefaultProbe AutomationProperties.AutomationId="Provenance_LongDefault"
+                                    Height="24" />
 
             <local:CoercedProbe AutomationProperties.AutomationId="Provenance_Coerced"
                                 Level="250"

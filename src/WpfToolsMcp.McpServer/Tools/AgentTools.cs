@@ -140,7 +140,7 @@ public static class AgentTools
         [Description("Element locator (WPF XPath recommended)")] ElementLocator? locator = null,
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Native window handle")] long? windowHandle = null,
-        [Description("Optional dependency property names to include (e.g. Width, Control.Width)")] string[]? propertyNames = null,
+        [Description("Optional dependency property names to include (e.g. Width, Control.Width); provenance mode inspects at most 100 names of 512 characters each")] string[]? propertyNames = null,
         [Description("Include value source details")] bool includeSources = true,
         [Description("Include default-valued properties when propertyNames is omitted")] bool includeDefault = false,
         [Description("Include UnsetValue properties when propertyNames is omitted")] bool includeUnset = false,
