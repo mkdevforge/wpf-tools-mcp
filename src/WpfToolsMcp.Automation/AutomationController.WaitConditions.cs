@@ -100,6 +100,7 @@ public sealed partial class AutomationController
             Condition = null
         };
 
+        var structuredStart = Stopwatch.GetTimestamp();
         try
         {
             var response = await WaitForAsync(legacyRequest, cancellationToken).ConfigureAwait(false);
@@ -111,12 +112,14 @@ public sealed partial class AutomationController
                     : response.ReasonCode ?? "wait_timeout"
             };
         }
-        catch (InvalidOperationException) when (!IsAttached)
+        catch (Exception ex) when (
+            ex is not OperationCanceledException &&
+            !IsAttached)
         {
             return CreateTargetProcessExitedResponse(
                 GetConditionStateName(condition.Kind),
                 WaitBackendForRequest(request),
-                elapsedMs: 0,
+                elapsedMs: GetElapsedMilliseconds(structuredStart),
                 attempts: 0,
                 lastObservation: null,
                 lastObservedValue: null);
@@ -1243,6 +1246,11 @@ public sealed partial class AutomationController
         var title = GetWindowTitleForWait(hwnd);
         var ownerHandle = TryGetOwnerHandle(hwnd);
         var isVisible = IsWindowVisible(hwnd);
+        if (!IsWindow(hwnd) || (requireVisible && !isVisible))
+        {
+            return null;
+        }
+
         Rect? bounds = null;
         if (GetWindowRect(hwnd, out var nativeBounds) &&
             nativeBounds.Width > 0 &&
@@ -1267,6 +1275,13 @@ public sealed partial class AutomationController
             catch
             {
             }
+        }
+
+        if (!IsWindow(hwnd) ||
+            GetWindowThreadProcessId(hwnd, out var finalProcessId) != threadId ||
+            finalProcessId != processId)
+        {
+            return null;
         }
 
         return new ObservedWaitWindow(
