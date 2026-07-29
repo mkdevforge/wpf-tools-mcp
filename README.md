@@ -191,9 +191,10 @@ failed safely is incomplete but is not mislabeled as budget-truncated.
 Effective values keep useful invariant summaries for explicitly supported WPF
 types such as `Thickness`, `CornerRadius`, `GridLength`, colors, font values,
 and common geometry structs. Unknown application objects fall back to their
-type identity without invoking application-defined `ToString()`. Truncated
-default or animation values carry `BestEffort/maxStringLength` evidence rather
-than `Exact` evidence.
+type identity without invoking application-defined `ToString()` or virtual
+`Type` name members. Truncated binding details, default values, or animation
+base values carry `BestEffort/maxStringLength` evidence rather than `Exact`
+evidence.
 
 Provenance requires an agent advertising
 `wpf/get_computed_properties:provenance-v1`. When a target still hosts an older

@@ -21,6 +21,8 @@ internal static partial class WpfVisualTreeInspector
 
     private const string StaticResourceOriginUnavailable = "static_resource_origin_not_retained";
 
+    private static readonly Type RuntimeTypeImplementation = typeof(object).GetType();
+
     // Public ResourceDictionary enumeration copies every key and realizes values.
     // Guarded raw storage lets one bucket consume exactly one provenance scan unit.
     private static readonly FieldInfo? ResourceDictionaryBaseDictionaryField =
@@ -504,7 +506,7 @@ internal static partial class WpfVisualTreeInspector
         _ => DependencyPropertyBaseValueSource.Unknown
     };
 
-    private static BindingProvenance BuildBindingProvenance(
+    internal static BindingProvenance BuildBindingProvenance(
         BindingExpressionBase expression,
         PropertyMetadata? metadata,
         int maxCandidates,
@@ -524,6 +526,7 @@ internal static partial class WpfVisualTreeInspector
         IReadOnlyList<BindingExpressionBase> childExpressions = [];
         BindingMode parentMode = BindingMode.Default;
         UpdateSourceTrigger parentUpdateSourceTrigger = UpdateSourceTrigger.Default;
+        var textTruncated = false;
 
         if (expression is BindingExpression bindingExpression)
         {
@@ -543,7 +546,8 @@ internal static partial class WpfVisualTreeInspector
                 out effectiveMode,
                 out updateSourceTrigger,
                 out effectiveUpdateSourceTrigger,
-                out converter);
+                out converter,
+                out textTruncated);
         }
         else if (expression is MultiBindingExpression multiExpression)
         {
@@ -563,7 +567,7 @@ internal static partial class WpfVisualTreeInspector
                     : ResolveEffectiveUpdateSourceTrigger(
                         binding.UpdateSourceTrigger,
                         metadata).ToString();
-            converter = GetTypeName(binding.Converter);
+            converter = GetTypeName(binding.Converter, ref textTruncated);
             childExpressions = multiExpression.BindingExpressions;
         }
         else if (expression is PriorityBindingExpression priorityExpression)
@@ -588,13 +592,16 @@ internal static partial class WpfVisualTreeInspector
                 activeChildIndex = i;
             }
 
-            returnedChildren.Add(BuildBindingChildProvenance(
+            var childProvenance = BuildBindingChildProvenance(
                 child,
                 i,
                 metadata,
                 expression is MultiBindingExpression ? parentMode : null,
                 expression is MultiBindingExpression ? parentUpdateSourceTrigger : null,
-                maxStringLength));
+                maxStringLength,
+                out var childTextTruncated);
+            textTruncated |= childTextTruncated;
+            returnedChildren.Add(childProvenance);
         }
 
         var activeChildOutsideReturnedRange =
@@ -623,7 +630,11 @@ internal static partial class WpfVisualTreeInspector
             Truncated: returnedChildren.Count < childExpressions.Count,
             ActiveChildIndex: activeChildIndex,
             ActiveChildOutsideReturnedRange: activeChildOutsideReturnedRange,
-            Evidence: new ProvenanceEvidence(ProvenanceEvidenceKind.Exact));
+            Evidence: textTruncated
+                ? new ProvenanceEvidence(
+                    ProvenanceEvidenceKind.BestEffort,
+                    "maxStringLength")
+                : new ProvenanceEvidence(ProvenanceEvidenceKind.Exact));
     }
 
     private static BindingChildProvenance BuildBindingChildProvenance(
@@ -632,8 +643,10 @@ internal static partial class WpfVisualTreeInspector
         PropertyMetadata? metadata,
         BindingMode? parentMode,
         UpdateSourceTrigger? parentUpdateSourceTrigger,
-        int maxStringLength)
+        int maxStringLength,
+        out bool textTruncated)
     {
+        textTruncated = false;
         string? path = null;
         string? sourceKind = null;
         string? sourceSummary = null;
@@ -664,7 +677,8 @@ internal static partial class WpfVisualTreeInspector
                 out effectiveMode,
                 out updateSourceTrigger,
                 out effectiveUpdateSourceTrigger,
-                out converter);
+                out converter,
+                out textTruncated);
         }
 
         return new BindingChildProvenance(
@@ -702,21 +716,41 @@ internal static partial class WpfVisualTreeInspector
         out string? effectiveMode,
         out string? updateSourceTrigger,
         out string? effectiveUpdateSourceTrigger,
-        out string? converter)
+        out string? converter,
+        out bool textTruncated)
     {
+        textTruncated = false;
         var binding = expression.ParentBinding;
-        path = TruncateProvenanceText(binding.Path?.Path ?? binding.XPath ?? string.Empty, maxStringLength);
+        path = TruncateBindingText(
+            binding.Path?.Path ?? binding.XPath ?? string.Empty,
+            maxStringLength,
+            ref textTruncated);
         if (path.Length == 0)
         {
             path = null;
         }
 
-        (sourceKind, sourceSummary) = DescribeConfiguredBindingSource(binding, maxStringLength);
-        dataItemSummary = DescribeBindingRuntimeSource(expression.DataItem, maxStringLength);
-        resolvedSourceSummary = DescribeBindingRuntimeSource(expression.ResolvedSource, maxStringLength);
+        (sourceKind, sourceSummary) = DescribeConfiguredBindingSource(
+            binding,
+            maxStringLength,
+            out var configuredSourceTruncated);
+        textTruncated |= configuredSourceTruncated;
+        dataItemSummary = DescribeBindingRuntimeSource(
+            expression.DataItem,
+            maxStringLength,
+            out var dataItemTruncated);
+        textTruncated |= dataItemTruncated;
+        resolvedSourceSummary = DescribeBindingRuntimeSource(
+            expression.ResolvedSource,
+            maxStringLength,
+            out var resolvedSourceTruncated);
+        textTruncated |= resolvedSourceTruncated;
         resolvedSourcePropertyName = string.IsNullOrEmpty(expression.ResolvedSourcePropertyName)
             ? null
-            : TruncateProvenanceText(expression.ResolvedSourcePropertyName, maxStringLength);
+            : TruncateBindingText(
+                expression.ResolvedSourcePropertyName,
+                maxStringLength,
+                ref textTruncated);
         mode = binding.Mode.ToString();
         var configuredMode = binding.Mode == BindingMode.Default && parentMode is { } inheritedMode
             ? inheritedMode
@@ -735,19 +769,27 @@ internal static partial class WpfVisualTreeInspector
                 : ResolveEffectiveUpdateSourceTrigger(
                     configuredUpdateSourceTrigger,
                     metadata).ToString();
-        converter = GetTypeName(binding.Converter);
+        converter = GetTypeName(binding.Converter, ref textTruncated);
     }
 
-    private static (string Kind, string Summary) DescribeConfiguredBindingSource(Binding binding, int maxStringLength)
+    private static (string Kind, string Summary) DescribeConfiguredBindingSource(
+        Binding binding,
+        int maxStringLength,
+        out bool textTruncated)
     {
+        textTruncated = false;
         if (binding.Source is not null)
         {
-            return ("ExplicitSource", DescribeBindingRuntimeSource(binding.Source, maxStringLength) ?? "null");
+            return (
+                "ExplicitSource",
+                DescribeBindingRuntimeSource(binding.Source, maxStringLength, out textTruncated) ?? "null");
         }
 
         if (!string.IsNullOrWhiteSpace(binding.ElementName))
         {
-            return ("ElementName", TruncateProvenanceText(binding.ElementName, maxStringLength));
+            return (
+                "ElementName",
+                TruncateBindingText(binding.ElementName, maxStringLength, ref textTruncated));
         }
 
         if (binding.RelativeSource is { } relativeSource)
@@ -755,18 +797,27 @@ internal static partial class WpfVisualTreeInspector
             var summary = relativeSource.Mode.ToString();
             if (relativeSource.Mode == RelativeSourceMode.FindAncestor)
             {
-                summary += $" ancestorType={GetTypeName(relativeSource.AncestorType) ?? "unknown"}";
+                summary += $" ancestorType={GetTypeName(relativeSource.AncestorType, ref textTruncated) ?? "unknown"}";
                 summary += $" level={relativeSource.AncestorLevel}";
             }
 
-            return ("RelativeSource", TruncateProvenanceText(summary, maxStringLength));
+            return (
+                "RelativeSource",
+                TruncateBindingText(summary, maxStringLength, ref textTruncated));
         }
 
         return ("DataContext", "Inherited or local DataContext");
     }
 
-    private static string? DescribeBindingRuntimeSource(object? source, int maxStringLength)
+    private static string? DescribeBindingRuntimeSource(object? source, int maxStringLength) =>
+        DescribeBindingRuntimeSource(source, maxStringLength, out _);
+
+    private static string? DescribeBindingRuntimeSource(
+        object? source,
+        int maxStringLength,
+        out bool textTruncated)
     {
+        textTruncated = false;
         if (source is null)
         {
             return null;
@@ -777,23 +828,35 @@ internal static partial class WpfVisualTreeInspector
             return "{DisconnectedSource}";
         }
 
-        var typeName = GetTypeName(source) ?? "unknown";
+        var typeName = GetTypeName(source, ref textTruncated) ?? "unknown";
         if (source is FrameworkElement frameworkElement)
         {
             var name = frameworkElement.Name;
             var automationId = AutomationProperties.GetAutomationId(frameworkElement);
             if (!string.IsNullOrWhiteSpace(automationId))
             {
-                return TruncateProvenanceText($"{typeName} automationId={automationId}", maxStringLength);
+                return TruncateBindingText(
+                    $"{typeName} automationId={automationId}",
+                    maxStringLength,
+                    ref textTruncated);
             }
 
             if (!string.IsNullOrWhiteSpace(name))
             {
-                return TruncateProvenanceText($"{typeName} name={name}", maxStringLength);
+                return TruncateBindingText(
+                    $"{typeName} name={name}",
+                    maxStringLength,
+                    ref textTruncated);
             }
         }
 
-        return TruncateProvenanceText(typeName, maxStringLength);
+        return TruncateBindingText(typeName, maxStringLength, ref textTruncated);
+    }
+
+    private static string TruncateBindingText(string value, int maxLength, ref bool textTruncated)
+    {
+        textTruncated |= value.Length > Math.Max(0, maxLength);
+        return TruncateProvenanceText(value, maxLength);
     }
 
     private static BindingMode ResolveEffectiveMode(BindingMode mode, PropertyMetadata? metadata)
@@ -1956,7 +2019,8 @@ internal static partial class WpfVisualTreeInspector
     private static bool IsSafeResourceKey(object key)
     {
         var type = key.GetType();
-        return key is string or Type or ComponentResourceKey ||
+        return key is string or ComponentResourceKey ||
+               key is Type reflectedType && IsRuntimeOwnedType(reflectedType) ||
                type.IsEnum ||
                type == typeof(char) ||
                type == typeof(bool) ||
@@ -2255,7 +2319,8 @@ internal static partial class WpfVisualTreeInspector
             DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
             DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
             TimeSpan timeSpan => timeSpan.ToString("c", CultureInfo.InvariantCulture),
-            Type reflectedType => reflectedType.FullName ?? reflectedType.Name,
+            Type reflectedType when IsRuntimeOwnedType(reflectedType) =>
+                reflectedType.FullName ?? reflectedType.Name,
             Thickness thickness => FormatThickness(thickness),
             CornerRadius cornerRadius => FormatCornerRadius(cornerRadius),
             GridLength gridLength => FormatGridLength(gridLength),
@@ -2399,15 +2464,28 @@ internal static partial class WpfVisualTreeInspector
         return value[..length] + "...";
     }
 
-    private static string? GetTypeName(object? value)
+    internal static string? GetTypeName(object? value)
     {
-        var name = value switch
-        {
-            null => null,
-            Type type => type.FullName ?? type.Name,
-            _ => value.GetType().FullName ?? value.GetType().Name
-        };
-
-        return name is null ? null : TruncateProvenanceText(name, 512);
+        var truncated = false;
+        return GetTypeName(value, ref truncated);
     }
+
+    private static string? GetTypeName(object? value, ref bool textTruncated)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var type = value is Type representedType && IsRuntimeOwnedType(representedType)
+            ? representedType
+            : value.GetType();
+        var name = type.FullName ?? type.Name;
+
+        textTruncated |= name.Length > 512;
+        return TruncateProvenanceText(name, 512);
+    }
+
+    private static bool IsRuntimeOwnedType(Type type) =>
+        type.GetType() == RuntimeTypeImplementation;
 }

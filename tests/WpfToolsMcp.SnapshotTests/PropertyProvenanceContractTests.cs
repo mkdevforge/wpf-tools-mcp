@@ -1,5 +1,8 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 using NUnit.Framework;
 using WpfToolsMcp.Agent;
@@ -188,6 +191,86 @@ public sealed class PropertyProvenanceContractTests
     }
 
     [Test]
+    public void Safe_type_formatting_does_not_call_virtual_type_name_members()
+    {
+        var applicationType = new ThrowingTypeValue();
+        WpfVisualTreeInspector.SafeProvenanceValueFormatting formatted = default;
+        string? typeName = null;
+
+        Assert.DoesNotThrow(() =>
+        {
+            formatted = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+                applicationType,
+                "string",
+                2000);
+            typeName = WpfVisualTreeInspector.GetTypeName(applicationType);
+        });
+
+        var runtimeType = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+            typeof(string),
+            "string",
+            2000);
+        Assert.Multiple(() =>
+        {
+            Assert.That(formatted.Text, Does.EndWith("ThrowingTypeValue"));
+            Assert.That(formatted.RepresentsValue, Is.False);
+            Assert.That(typeName, Does.EndWith("ThrowingTypeValue"));
+            Assert.That(runtimeType.Text, Is.EqualTo("System.String"));
+            Assert.That(runtimeType.RepresentsValue, Is.True);
+        });
+    }
+
+    [Test]
+    [Apartment(ApartmentState.STA)]
+    public void Binding_evidence_downgrades_when_parent_or_child_text_is_truncated()
+    {
+        const int maxStringLength = 2000;
+        var longPath = new string('P', maxStringLength + 100);
+        var metadata = TextBlock.TextProperty.GetMetadata(typeof(TextBlock));
+
+        var leafTarget = new TextBlock();
+        BindingOperations.SetBinding(
+            leafTarget,
+            TextBlock.TextProperty,
+            new Binding(longPath) { Source = new object() });
+        var leafExpression = BindingOperations.GetBindingExpressionBase(
+            leafTarget,
+            TextBlock.TextProperty)!;
+        var leaf = WpfVisualTreeInspector.BuildBindingProvenance(
+            leafExpression,
+            metadata,
+            maxCandidates: 20,
+            maxStringLength);
+
+        var priorityBinding = new PriorityBinding();
+        priorityBinding.Bindings.Add(new Binding(longPath) { Source = new object() });
+        priorityBinding.Bindings.Add(new Binding("Length") { Source = "fallback" });
+        var priorityTarget = new TextBlock();
+        BindingOperations.SetBinding(priorityTarget, TextBlock.TextProperty, priorityBinding);
+        var priorityExpression = BindingOperations.GetBindingExpressionBase(
+            priorityTarget,
+            TextBlock.TextProperty)!;
+        var priority = WpfVisualTreeInspector.BuildBindingProvenance(
+            priorityExpression,
+            metadata,
+            maxCandidates: 20,
+            maxStringLength);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(leaf.Path, Has.Length.EqualTo(maxStringLength));
+            Assert.That(leaf.Path, Does.EndWith("..."));
+            Assert.That(leaf.Evidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
+            Assert.That(leaf.Evidence.Reason, Is.EqualTo("maxStringLength"));
+
+            Assert.That(priority.Children, Has.Count.EqualTo(2));
+            Assert.That(priority.Children[0].Path, Has.Length.EqualTo(maxStringLength));
+            Assert.That(priority.Evidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
+            Assert.That(priority.Evidence.Reason, Is.EqualTo("maxStringLength"));
+        });
+    }
+
+    [Test]
     public void Truncated_safe_values_are_not_labeled_exact()
     {
         var formatted = WpfVisualTreeInspector.FormatProvenanceValueWithEvidence(
@@ -312,6 +395,20 @@ public sealed class PropertyProvenanceContractTests
     {
         public override string ToString() =>
             throw new InvalidOperationException("The safe formatter must not call application ToString().");
+    }
+
+    private sealed class ThrowingTypeValue : TypeDelegator
+    {
+        public ThrowingTypeValue()
+            : base(typeof(string))
+        {
+        }
+
+        public override string? FullName =>
+            throw new InvalidOperationException("The safe formatter must not call application Type.FullName.");
+
+        public override string Name =>
+            throw new InvalidOperationException("The safe formatter must not call application Type.Name.");
     }
 
     private sealed class NonEnumerablePropertyNames(int count) : IReadOnlyList<string>
