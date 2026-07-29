@@ -176,6 +176,7 @@ public partial class MainWindow : Window
             Key.Up => "ArrowUp",
             Key.Right => "ArrowRight",
             Key.Down => "ArrowDown",
+            Key.PageDown => "PageDown",
             Key.D0 => "Digit0",
             Key.D1 => "Digit1",
             Key.D2 => "Digit2",
