@@ -164,9 +164,9 @@ public static class AgentTools
                     includeUnset,
                     maxProperties,
                     valueFormat,
-                    cancellationToken,
                     includeProvenance: includeProvenance,
-                    maxProvenanceCandidates: maxProvenanceCandidates),
+                    maxProvenanceCandidates: maxProvenanceCandidates,
+                    cancellationToken: cancellationToken),
                 cancellationToken);
         });
 

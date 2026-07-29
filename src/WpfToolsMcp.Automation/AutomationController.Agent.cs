@@ -802,9 +802,9 @@ public sealed partial class AutomationController
         bool includeUnset = false,
         int maxProperties = 500,
         string valueFormat = "string",
-        CancellationToken cancellationToken = default,
         bool includeProvenance = false,
-        int maxProvenanceCandidates = 20)
+        int maxProvenanceCandidates = 20,
+        CancellationToken cancellationToken = default)
     {
         var trace = BeginTraceSpan("get_computed_properties");
         try
