@@ -53,6 +53,7 @@ internal static class DiagnosticSnapshotCoordinator
             try
             {
                 var evidence = await capture(section, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
                 var completedTimestamp = clock.GetTimestamp();
                 var completedAtUtc = captureStartedAtUtc + clock.GetElapsedTime(captureStartedTimestamp, completedTimestamp);
                 results.Add(CreateResult(

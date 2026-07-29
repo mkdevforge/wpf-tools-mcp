@@ -1,3 +1,4 @@
+using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -85,7 +86,29 @@ internal static class AgentServer
                     break;
                 }
 
-                var response = await HandleAsync(ownerId, request, cancellationToken).ConfigureAwait(false);
+                using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                using var disconnectMonitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var disconnectTask = MonitorClientDisconnectAsync(
+                    pipe,
+                    requestCancellation,
+                    disconnectMonitorCancellation.Token);
+
+                AgentResponse response;
+                bool clientDisconnected;
+                try
+                {
+                    response = await HandleAsync(ownerId, request, requestCancellation.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    disconnectMonitorCancellation.Cancel();
+                    clientDisconnected = await disconnectTask.ConfigureAwait(false);
+                }
+
+                if (clientDisconnected)
+                {
+                    break;
+                }
 
                 try
                 {
@@ -109,6 +132,38 @@ internal static class AgentServer
             }
 
             await ReleaseOwnerResourcesAsync(ownerId).ConfigureAwait(false);
+        }
+    }
+
+    internal static async Task<bool> MonitorClientDisconnectAsync(
+        Stream pipe,
+        CancellationTokenSource requestCancellation,
+        CancellationToken monitorCancellation)
+    {
+        ArgumentNullException.ThrowIfNull(pipe);
+        ArgumentNullException.ThrowIfNull(requestCancellation);
+
+        var probe = new byte[1];
+        try
+        {
+            // AgentClient does not pipeline calls, so completion here means disconnect or invalid framing.
+            _ = await pipe.ReadAsync(probe, monitorCancellation).ConfigureAwait(false);
+            requestCancellation.Cancel();
+            return true;
+        }
+        catch (OperationCanceledException) when (monitorCancellation.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            requestCancellation.Cancel();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            requestCancellation.Cancel();
+            return true;
         }
     }
 
