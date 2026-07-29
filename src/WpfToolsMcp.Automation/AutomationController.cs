@@ -8073,6 +8073,19 @@ public sealed partial class AutomationController : IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool IsWindowVisible(IntPtr hwnd);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowEnabled(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+
+    private const uint GW_OWNER = 4;
+
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
@@ -9328,15 +9341,17 @@ public sealed partial class AutomationController : IDisposable
     private static Window FindWindowByHandle(Application application, UIA3Automation automation, long nativeWindowHandle)
     {
         var hwnd = new IntPtr(nativeWindowHandle);
-        if (hwnd == IntPtr.Zero)
+        if (hwnd == IntPtr.Zero || !IsWindow(hwnd))
         {
-            throw new InvalidOperationException($"No window found with handle {nativeWindowHandle}.");
+            throw CreateWindowClosedException(nativeWindowHandle);
         }
 
         GetWindowThreadProcessId(hwnd, out var processId);
         if (processId != application.ProcessId)
         {
-            throw new InvalidOperationException($"No window found with handle {nativeWindowHandle}.");
+            throw new InvalidOperationException(
+                $"window_outside_session: window handle {nativeWindowHandle} belongs to process {processId}, " +
+                $"not attached process {application.ProcessId}. Start or select the owning session.");
         }
 
         try
@@ -9346,9 +9361,33 @@ public sealed partial class AutomationController : IDisposable
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException($"No window found with handle {nativeWindowHandle}.", ex);
+            if (!IsWindow(hwnd))
+            {
+                throw CreateWindowClosedException(nativeWindowHandle, ex);
+            }
+
+            GetWindowThreadProcessId(hwnd, out var currentProcessId);
+            if (currentProcessId != application.ProcessId)
+            {
+                throw new InvalidOperationException(
+                    $"window_outside_session: window handle {nativeWindowHandle} belongs to process {currentProcessId}, " +
+                    $"not attached process {application.ProcessId}. Start or select the owning session.",
+                    ex);
+            }
+
+            throw new InvalidOperationException(
+                $"window_uia_unavailable: window handle {nativeWindowHandle} belongs to the attached process but " +
+                "does not expose a usable UI Automation window. Select another window with list_windows; " +
+                "owner-drawn dialogs without UIA are outside the supported scope.",
+                ex);
         }
     }
+
+    private static InvalidOperationException CreateWindowClosedException(long nativeWindowHandle, Exception? innerException = null) =>
+        new(
+            $"window_closed: window handle {nativeWindowHandle} is no longer valid. " +
+            "Call list_windows and select a live window.",
+            innerException);
 
     private static Window FindWindowByTitle(Application application, UIA3Automation automation, string title)
     {
@@ -9407,16 +9446,79 @@ public sealed partial class AutomationController : IDisposable
     private static WindowInfo ToWindowInfo(Window window)
     {
         var bounds = window.BoundingRectangle;
+        var handle = window.Properties.NativeWindowHandle.Value;
+        var ownerHandle = TryGetOwnerHandle(handle);
         return new WindowInfo(
             Title: GetWindowTitle(window),
-            Handle: window.Properties.NativeWindowHandle.Value.ToInt64(),
+            Handle: handle.ToInt64(),
             Bounds: new Rect(
                 X: bounds.Left,
                 Y: bounds.Top,
                 Width: bounds.Width,
                 Height: bounds.Height),
             IsVisible: !window.IsOffscreen,
-            IsEnabled: window.IsEnabled);
+            IsEnabled: window.IsEnabled)
+        {
+            OwnerHandle = ownerHandle,
+            IsModal = TryGetModalState(window, ownerHandle),
+            FrameworkId = TryGetFrameworkId(window)
+        };
+    }
+
+    private static long? TryGetOwnerHandle(IntPtr handle)
+    {
+        if (!OperatingSystem.IsWindows() || handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            var owner = GetWindow(handle, GW_OWNER);
+            return owner == IntPtr.Zero ? null : owner.ToInt64();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool? TryGetModalState(Window window, long? ownerHandle)
+    {
+        try
+        {
+            return window.IsModal;
+        }
+        catch
+        {
+            if (ownerHandle is not long owner || owner == 0 || !OperatingSystem.IsWindows())
+            {
+                return null;
+            }
+
+            try
+            {
+                return !IsWindowEnabled(new IntPtr(owner));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    private static string? TryGetFrameworkId(Window window)
+    {
+        try
+        {
+            return window.FrameworkType == FrameworkType.None
+                ? null
+                : window.FrameworkType.ToString();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string GetWindowTitle(Window window)
