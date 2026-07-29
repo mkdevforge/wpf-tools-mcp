@@ -378,7 +378,35 @@ public sealed partial class AutomationController
 
                 if (!drainImmediately)
                 {
-                    await Task.Delay(pollIntervalMs, cancellationToken).ConfigureAwait(false);
+                    var remainingMs = Math.Max(1, timeoutMs - elapsedMs);
+                    await Task.Delay(
+                        Math.Min(pollIntervalMs, remainingMs),
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (!IsApplicationRunning(_application))
+                    {
+                        return CreateTargetProcessExitedResponse(
+                            stateName,
+                            WaitBackend.Wpf,
+                            GetElapsedMilliseconds(start),
+                            attempts,
+                            lastObservation,
+                            lastObservedValue);
+                    }
+
+                    if (GetElapsedMilliseconds(start) >= timeoutMs)
+                    {
+                        return CreateStructuredTimeoutResponse(
+                            request,
+                            stateName,
+                            WaitBackend.Wpf,
+                            timeoutMs,
+                            start,
+                            attempts,
+                            lastObservation,
+                            lastObservedValue,
+                            failureReason);
+                    }
                 }
 
                 attempts++;
@@ -533,7 +561,6 @@ public sealed partial class AutomationController
     {
         lastObservedValue = WaitConditionEvaluator.FromObserveStateValue(observationEvent.NewValue);
         var evaluation = WaitConditionEvaluator.Evaluate(lastObservedValue, comparison, expected);
-        failureReason = evaluation.FailureReason ?? "value_mismatch";
         currentSatisfied = evaluation.Satisfied;
 
         if (observationEvent.Visual is { } visual && lastObservation is not null)
@@ -548,7 +575,11 @@ public sealed partial class AutomationController
             };
         }
 
-        return hold.Observe(evaluation.Satisfied, observationEvent.ElapsedMs);
+        var completed = hold.Observe(evaluation.Satisfied, observationEvent.ElapsedMs);
+        failureReason = evaluation.Satisfied && !completed
+            ? "hold_duration_not_met"
+            : evaluation.FailureReason ?? "value_mismatch";
+        return completed;
     }
 
     private static WaitForObservation ToWpfWaitObservation(ElementRef element, long windowHandle) =>
