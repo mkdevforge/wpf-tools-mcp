@@ -332,6 +332,16 @@ public sealed class ToolProfileTests
             [nameof(WaitScalarKind.Boolean)] = (["booleanValue", "kind"], ["booleanValue"]),
             [nameof(WaitScalarKind.Null)] = (["kind"], [])
         };
+        var expectedComparisonScalarKinds = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            [nameof(WaitComparison.Equals)] = expectedScalarKinds,
+            [nameof(WaitComparison.NotEquals)] = expectedScalarKinds,
+            [nameof(WaitComparison.Contains)] = [nameof(WaitScalarKind.String)],
+            [nameof(WaitComparison.GreaterThan)] = [nameof(WaitScalarKind.Number)],
+            [nameof(WaitComparison.GreaterThanOrEqual)] = [nameof(WaitScalarKind.Number)],
+            [nameof(WaitComparison.LessThan)] = [nameof(WaitScalarKind.Number)],
+            [nameof(WaitComparison.LessThanOrEqual)] = [nameof(WaitScalarKind.Number)]
+        };
         var expectedVariants = new Dictionary<string, (string[] Properties, string[] Required)>(StringComparer.Ordinal)
         {
             [nameof(WaitConditionKind.Attached)] = (["kind"], []),
@@ -402,23 +412,55 @@ public sealed class ToolProfileTests
                         kind);
                 }
 
-                var valueVariant = variants[nameof(WaitConditionKind.DependencyPropertyValue)];
-                Assert.That(GetObjectEnumValues(valueVariant, "comparison"), Is.EqualTo(expectedComparisons));
-                var expectedSchema = GetObjectPropertySchema(valueVariant, "expected");
-                Assert.That(GetObjectRequiredPropertyNames(expectedSchema), Is.EqualTo(new[] { "kind" }));
-                var scalarVariants = GetObjectDiscriminatedVariants(expectedSchema, "kind");
-                Assert.That(
-                    scalarVariants.Keys.OrderBy(value => value, StringComparer.Ordinal),
-                    Is.EqualTo(expectedScalarKinds));
-                foreach (var (kind, expected) in expectedScalarVariants)
+                foreach (var (valueKind, pathPropertyName) in new[]
+                         {
+                             (nameof(WaitConditionKind.DependencyPropertyValue), "propertyName"),
+                             (nameof(WaitConditionKind.DataContextValue), "dataContextPath")
+                         })
                 {
-                    Assert.That(GetObjectPropertyNames(scalarVariants[kind]), Is.EqualTo(expected.Properties), kind);
-                    Assert.That(GetObjectRequiredPropertyNames(scalarVariants[kind]), Is.EqualTo(expected.Required), kind);
+                    var valueVariant = variants[valueKind];
+                    Assert.That(GetObjectEnumValues(valueVariant, "comparison"), Is.EqualTo(expectedComparisons));
+                    var expectedSchema = GetObjectPropertySchema(valueVariant, "expected");
+                    Assert.That(GetObjectRequiredPropertyNames(expectedSchema), Is.EqualTo(new[] { "kind" }));
+                    var scalarVariants = GetObjectDiscriminatedVariants(expectedSchema, "kind");
                     Assert.That(
-                        scalarVariants[kind].GetProperty("additionalProperties").GetBoolean(),
-                        Is.False,
-                        kind);
+                        scalarVariants.Keys.OrderBy(value => value, StringComparer.Ordinal),
+                        Is.EqualTo(expectedScalarKinds));
+                    foreach (var (kind, expected) in expectedScalarVariants)
+                    {
+                        Assert.That(GetObjectPropertyNames(scalarVariants[kind]), Is.EqualTo(expected.Properties), kind);
+                        Assert.That(GetObjectRequiredPropertyNames(scalarVariants[kind]), Is.EqualTo(expected.Required), kind);
+                        Assert.That(
+                            scalarVariants[kind].GetProperty("additionalProperties").GetBoolean(),
+                            Is.False,
+                            kind);
+                    }
+
+                    var comparisonScalarKinds = GetComparisonScalarKindConstraints(valueVariant);
+                    Assert.That(comparisonScalarKinds.Keys, Is.EquivalentTo(expectedComparisons));
+                    foreach (var (comparison, scalarKinds) in expectedComparisonScalarKinds)
+                    {
+                        Assert.That(comparisonScalarKinds[comparison], Is.EqualTo(scalarKinds), comparison);
+                    }
+
+                    Assert.That(
+                        GetComparisonConstraintRequiredProperties(valueVariant, nameof(WaitComparison.Equals)),
+                        Does.Not.Contain("comparison"));
+                    Assert.That(
+                        GetComparisonConstraintRequiredProperties(valueVariant, nameof(WaitComparison.Contains)),
+                        Does.Contain("comparison"));
+
+                    var pathSchema = GetObjectPropertySchema(valueVariant, pathPropertyName);
+                    Assert.That(pathSchema.GetProperty("minLength").GetInt32(), Is.EqualTo(1));
+                    Assert.That(pathSchema.GetProperty("pattern").GetString(), Is.EqualTo("\\S"));
+                    AssertIntegerBounds(valueVariant, "holdForMs", minimum: 0, maximum: 5_000);
                 }
+
+                AssertIntegerBounds(
+                    variants[nameof(WaitConditionKind.BoundsStable)],
+                    "holdForMs",
+                    minimum: 0,
+                    maximum: 5_000);
 
                 var numericVariant = variants[nameof(WaitConditionKind.NumericValueEquals)];
                 Assert.That(GetObjectConstValue(numericVariant, "comparison"), Is.EqualTo(nameof(WaitComparison.Equals)));
@@ -1286,6 +1328,68 @@ public sealed class ToolProfileTests
             .SelectMany(GetObjectRequiredPropertyNames)
             .OrderBy(value => value, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static IReadOnlyDictionary<string, string[]> GetComparisonScalarKindConstraints(JsonElement schema)
+    {
+        var result = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("anyOf", out var variants) ||
+            variants.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (var variant in variants.EnumerateArray())
+        {
+            var scalarKinds = GetObjectDiscriminatedVariants(
+                    GetObjectPropertySchema(variant, "expected"),
+                    "kind")
+                .Keys
+                .OrderBy(value => value, StringComparer.Ordinal)
+                .ToArray();
+            foreach (var comparison in GetObjectEnumValues(variant, "comparison"))
+            {
+                result.Add(comparison, scalarKinds);
+            }
+        }
+
+        return result;
+    }
+
+    private static string[] GetComparisonConstraintRequiredProperties(JsonElement schema, string comparison)
+    {
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("anyOf", out var variants) ||
+            variants.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        foreach (var variant in variants.EnumerateArray())
+        {
+            if (GetObjectEnumValues(variant, "comparison").Contains(comparison, StringComparer.Ordinal))
+            {
+                return GetObjectRequiredPropertyNames(variant);
+            }
+        }
+
+        return [];
+    }
+
+    private static void AssertIntegerBounds(
+        JsonElement schema,
+        string propertyName,
+        int minimum,
+        int maximum)
+    {
+        var property = GetObjectPropertySchema(schema, propertyName);
+        Assert.Multiple(() =>
+        {
+            Assert.That(property.GetProperty("type").GetString(), Is.EqualTo("integer"));
+            Assert.That(property.GetProperty("minimum").GetInt32(), Is.EqualTo(minimum));
+            Assert.That(property.GetProperty("maximum").GetInt32(), Is.EqualTo(maximum));
+        });
     }
 
     private static JsonElement GetObjectPropertySchema(JsonElement schema, string propertyName)

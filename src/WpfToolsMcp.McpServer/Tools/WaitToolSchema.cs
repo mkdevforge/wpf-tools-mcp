@@ -8,6 +8,8 @@ namespace WpfToolsMcp.McpServer.Tools;
 
 internal static class WaitToolSchema
 {
+    private const int MaxHoldForMs = 5_000;
+
     public static McpRequestFilter<ListToolsRequestParams, ListToolsResult> CreateListToolsFilter() =>
         next => async (context, cancellationToken) =>
         {
@@ -41,6 +43,9 @@ internal static class WaitToolSchema
 
             switch (kind)
             {
+                case nameof(WaitConditionKind.BoundsStable):
+                    properties["holdForMs"] = HoldForMsSchema();
+                    break;
                 case nameof(WaitConditionKind.NumericValueEquals):
                     properties["comparison"] = CreateFixedStringSchema(nameof(WaitComparison.Equals));
                     properties["expected"] = CreateScalarSchema(WaitScalarKind.Number);
@@ -50,8 +55,10 @@ internal static class WaitToolSchema
                     properties["expected"] = CreateScalarSchema(WaitScalarKind.String);
                     break;
                 case nameof(WaitConditionKind.DependencyPropertyValue):
+                    RefineWpfValueCondition(variant, properties, "propertyName");
+                    break;
                 case nameof(WaitConditionKind.DataContextValue):
-                    properties["expected"] = CreateScalarSchema(Enum.GetValues<WaitScalarKind>());
+                    RefineWpfValueCondition(variant, properties, "dataContextPath");
                     break;
                 case nameof(WaitConditionKind.WindowOpen):
                 case nameof(WaitConditionKind.WindowClosed):
@@ -72,6 +79,13 @@ internal static class WaitToolSchema
         {
             ["type"] = "string",
             ["const"] = value
+        };
+
+    private static JsonObject CreateStringEnumSchema(params WaitComparison[] comparisons) =>
+        new()
+        {
+            ["type"] = "string",
+            ["enum"] = new JsonArray(comparisons.Select(value => JsonValue.Create(value.ToString())).ToArray())
         };
 
     private static JsonObject CreateScalarSchema(params WaitScalarKind[] kinds) =>
@@ -118,6 +132,57 @@ internal static class WaitToolSchema
         };
     }
 
+    private static void RefineWpfValueCondition(
+        JsonObject variant,
+        JsonObject properties,
+        string pathPropertyName)
+    {
+        var scalarKinds = Enum.GetValues<WaitScalarKind>();
+        properties[pathPropertyName] = NonWhitespaceStringSchema();
+        properties["comparison"] = CreateStringEnumSchema(Enum.GetValues<WaitComparison>());
+        properties["expected"] = CreateScalarSchema(scalarKinds);
+        properties["holdForMs"] = HoldForMsSchema();
+        variant["anyOf"] = new JsonArray(
+            ComparisonScalarConstraint(
+                [WaitComparison.Equals, WaitComparison.NotEquals],
+                scalarKinds,
+                comparisonRequired: false),
+            ComparisonScalarConstraint(
+                [WaitComparison.Contains],
+                [WaitScalarKind.String],
+                comparisonRequired: true),
+            ComparisonScalarConstraint(
+                [
+                    WaitComparison.GreaterThan,
+                    WaitComparison.GreaterThanOrEqual,
+                    WaitComparison.LessThan,
+                    WaitComparison.LessThanOrEqual
+                ],
+                [WaitScalarKind.Number],
+                comparisonRequired: true));
+    }
+
+    private static JsonObject ComparisonScalarConstraint(
+        WaitComparison[] comparisons,
+        WaitScalarKind[] scalarKinds,
+        bool comparisonRequired)
+    {
+        var constraint = new JsonObject
+        {
+            ["properties"] = new JsonObject
+            {
+                ["comparison"] = CreateStringEnumSchema(comparisons),
+                ["expected"] = CreateScalarSchema(scalarKinds)
+            }
+        };
+        if (comparisonRequired)
+        {
+            constraint["required"] = new JsonArray("comparison");
+        }
+
+        return constraint;
+    }
+
     private static void RefineWindowSelector(JsonObject window)
     {
         if (window["properties"] is not JsonObject properties)
@@ -155,5 +220,13 @@ internal static class WaitToolSchema
             ["type"] = "string",
             ["minLength"] = 1,
             ["pattern"] = "\\S"
+        };
+
+    private static JsonObject HoldForMsSchema() =>
+        new()
+        {
+            ["type"] = "integer",
+            ["minimum"] = 0,
+            ["maximum"] = MaxHoldForMs
         };
 }
