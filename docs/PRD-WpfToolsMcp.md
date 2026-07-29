@@ -103,7 +103,7 @@ The injected agent (`WpfToolsMcp.Agent`) is a thin assembly that:
                           └───────────────────────────────┘
 ```
 
-The MCP server manages both channels in Phase 2. Backend-neutral inspection tools route through the named pipe for deep WPF data and fall back to FlaUI/UIA when they have a UIA equivalent. WPF-only diagnostics require the agent. Interaction is semantic-first across WPF-native and UIA patterns, with foreground and physical-input fallbacks only where needed and permitted. The MCP tool surface remains unified.
+The MCP server manages both channels in Phase 2. Backend-neutral inspection tools route through the named pipe for deep WPF data and fall back to FlaUI/UIA when they have a UIA equivalent. Known application-owned native windows route directly to FlaUI/UIA rather than failing WPF window resolution. WPF-only diagnostics require the agent. Interaction is semantic-first across WPF-native and UIA patterns, with foreground and physical-input fallbacks only where needed and permitted. The MCP tool surface remains unified.
 
 ---
 
@@ -117,7 +117,7 @@ see `README.md` for the current profile split and configuration.
 
 | Tool | Description | Returns |
 |---|---|---|
-| `list_windows` | Enumerate all windows of the target process | Native window captions (UI Automation name fallback), handles, dimensions, process info |
+| `list_windows` | Enumerate all windows of the target process | Native window captions (UI Automation name fallback), handles, dimensions, process info, owner HWND, nullable modal state, and UIA framework identity |
 | `list_displays` | List connected displays and virtual screen bounds (multi-monitor diagnostics) | Virtual screen bounds + per-display bounds |
 | `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`), viewport evidence (`includeViewport=true`), and diagnostics-only point/region correlation (`correlation`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload, `ViewportConditions`, and bounded WPF/UIA correlation evidence |
 | `get_visual_tree` | Return an inspection tree (UIA or WPF) for the main window or a subtree | Structured JSON. Configurable depth. `visibleOnly=true` means **in-viewport**; use `includeOffViewport=true` to include offscreen elements. |
@@ -199,6 +199,27 @@ responses also distinguish foreground-focus and physical-input requirements
 from effects that occurred. The policy and effects cover automation performed by this
 server. Code reached by a semantic invocation can independently open, restore,
 or activate the application's own windows.
+
+### Application-Owned Native Window Contract
+
+The session window model includes WPF windows and application-owned native
+top-level HWNDs in the attached process. `OwnerHandle`, nullable `IsModal`, and
+`FrameworkId` preserve enough context to identify a common dialog without
+depending on localized captions. For a known native target, `Auto` inspection,
+locator-based screenshot targeting, and interaction targeting use UIA directly.
+Explicit WPF selection remains WPF-only.
+
+Active-window reconciliation follows a live owned/modal dialog and restores the
+most recent live owner or main HWND after the dialog closes. A window handle is
+stable only for that live-window interval. A previously observed destroyed
+handle reports `window_closed`; an HWND from another process reports
+`window_outside_session`; and a live native HWND without a usable UIA root
+reports `window_uia_unavailable`.
+
+This support is deliberately narrower than general Windows automation. The
+native window must belong to the attached WPF process and expose useful UIA.
+Brokered system pickers, secure-desktop surfaces, cross-process dialogs, and
+owner-drawn controls without UIA are not inferred to be part of the session.
 
 ### Deterministic Viewport Contract
 
@@ -334,7 +355,9 @@ large app with scenario pages:
   Grid allocation, dedicated spacer columns, splitter ownership, implicit
   cells, empty and bounded clipping, transforms, z-order, and comparable
   window-DIP/physical-screen bounds.
-- `WpfToolsMcp.TestApp.Dialogs`: modal windows and window targeting.
+- `WpfToolsMcp.TestApp.Dialogs`: WPF modal windows plus a deterministic native
+  open-file dialog with owner/modal metadata, UIA semantics, and lifecycle
+  restoration.
 - `WpfToolsMcp.TestApp.DynamicContent`: changing trees and stale handles.
 - `WpfToolsMcp.TestApp.FocusProbe`: foreground ownership, cursor preservation,
   activation counters, and semantic versus physical fallback behavior.
@@ -368,6 +391,9 @@ real stdio MCP server. Coverage includes:
   and coverage diagnostics;
 - clicks, invocation, typing, value setting, selection, drag, scrolling, and
   waits;
+- application-owned native common-dialog discovery, Auto-to-UIA routing,
+  semantic open/cancel workflows, strict physical-input rejection, owner
+  restoration, and stale/foreign HWND errors;
 - screenshots, annotations, highlighting, deterministic viewport sizing and
   DPI context, display coordinates, traces, subscriptions, and performance
   sampling;
@@ -387,7 +413,10 @@ Current build, focused-test, full-test, and smoke commands are documented in
 
 ## Scope — What This Is Not
 
-- **Not a general Windows automation tool.** WPF only. Win32/WinForms/UWP support is not a goal.
+- **Not a general Windows automation tool.** The target remains a WPF process.
+  Same-process native HWNDs owned by that application are supported only as
+  bounded dialog workflow surfaces; general Win32/WinForms/UWP automation is
+  not a goal.
 - **Not a testing framework.** The MCP server enables AI-driven interaction, not a replacement for Appium, FlaUI test suites, or Coded UI. The test infrastructure is for testing *the MCP server itself*.
 - **No pre-emptive caching.** The server queries on every tool call. Latency is irrelevant compared to the developer round-trip it replaces.
 - **Phase 1 is not a throwaway.** FlaUI/UIA remains the permanent automation baseline and the fallback for backend-neutral inspection when injection is unavailable. The WPF agent now also assists selected interaction paths.

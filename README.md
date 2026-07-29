@@ -243,6 +243,29 @@ therefore best effort.
 Locator resolution is also bounded: `maxNodes` defaults to 5,000 and is capped
 at 20,000. Reusing a resolved `elementId` avoids that scan entirely.
 
+### Application-Owned Native Dialogs
+
+An attached WPF process can own native top-level windows such as the Windows
+open-file dialog. `list_windows` includes these same-process HWNDs and reports
+their `OwnerHandle`, nullable `IsModal`, and UI Automation `FrameworkId` when
+that evidence is available. A live HWND remains stable for the lifetime of its
+window; callers must not persist it after the window closes.
+
+For a known native window, `backend=Auto` routes backend-neutral inspection,
+locator-based screenshot targeting, and interaction targeting through UIA
+instead of trying the WPF agent first. Prefer stable AutomationIds and control
+types for common-dialog controls rather than localized captions. Session
+active-window selection follows a newly opened owned/modal window and returns
+to the most recent live owner or main window after it closes.
+
+Explicit handles fail with scoped errors: `window_closed` for a window that was
+observed in the session and has since closed, `window_outside_session` for an
+HWND owned by another process, and `window_uia_unavailable` when a live native
+window cannot be represented through UIA. Support is limited to
+application-owned, same-process HWNDs with usable UIA peers. OS-brokered or
+secure-desktop dialogs, cross-process windows, and owner-drawn native controls
+without useful UIA remain outside this scope.
+
 ### Desktop Interaction Policy
 
 Attaching to a process, inspecting it, and taking screenshots do not activate
@@ -514,7 +537,9 @@ common-workflow rationale plus inventory and compact-schema contract coverage.
 2. Use `list_windows` to choose among top-level windows. Call
    `set_active_window` only when foreground activation is intended. Window
    titles use native captions when available, with the UI Automation name as a
-   fallback and accepted selection alias.
+   fallback and accepted selection alias. For application-owned native dialogs,
+   use `OwnerHandle`, `IsModal`, and `FrameworkId` to preserve window context;
+   treat the HWND as valid only while that window is live.
 3. For responsive-layout evidence, use `set_window_viewport` to establish the
    exact client size and request `includeViewport` with screenshots. In the
    diagnostics profile, add `correlation` to map a small image region to
@@ -542,6 +567,9 @@ layout context inspection, require successful injection.
 - Semantic actions depend on useful WPF or UIA automation peers and patterns. A
   custom control without an actionable peer may remain inspectable but require
   a physical fallback, if the session policy permits one.
+- Native-dialog support covers only same-process HWNDs owned by the attached WPF
+  application and exposed through UIA; it does not cross process or secure
+  desktop boundaries.
 - Multi-monitor coordinates use the Windows virtual screen and may be negative.
 
 ## Troubleshooting
