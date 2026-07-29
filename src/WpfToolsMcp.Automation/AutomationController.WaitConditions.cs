@@ -249,12 +249,12 @@ public sealed partial class AutomationController
             MinWaitPollIntervalMs,
             MaxWaitPollIntervalMs);
         var stateName = GetConditionStateName(condition.Kind);
-        var windowHandle = ResolveWpfValueWaitWindowHandle(request);
-
-        var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
-        EnsureObserveStateCapability(client);
-
         var start = Stopwatch.GetTimestamp();
+        using var deadlineCts = timeoutMs > 0
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+            : null;
+        deadlineCts?.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
+        var waitCancellationToken = deadlineCts?.Token ?? cancellationToken;
         var attempts = 0;
         var failureReason = "not_attached";
         WaitForObservation? lastObservation = null;
@@ -263,11 +263,16 @@ public sealed partial class AutomationController
 
         try
         {
+            var windowHandle = ResolveWpfValueWaitWindowHandle(request);
+            var client = await EnsureAgentConnectedAsync(waitCancellationToken).ConfigureAwait(false);
+            EnsureObserveStateCapability(client);
+
             while (observation is null)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (attempts > 0 && GetElapsedMilliseconds(start) >= timeoutMs)
+                if ((timeoutMs > 0 || attempts > 0) &&
+                    GetElapsedMilliseconds(start) >= timeoutMs)
                 {
                     return CreateStructuredTimeoutResponse(
                         request,
@@ -309,7 +314,7 @@ public sealed partial class AutomationController
                             MaxValueLength: 512,
                             IncludeVisualMetadata: true,
                             VisibleOnly: false),
-                        cancellationToken).ConfigureAwait(false);
+                        waitCancellationToken).ConfigureAwait(false);
                 }
                 catch (InvalidOperationException ex) when (IsWaitableWpfNotFound(ex))
                 {
@@ -366,7 +371,21 @@ public sealed partial class AutomationController
                 var remainingMs = Math.Max(1, timeoutMs - elapsedMs);
                 await Task.Delay(
                     Math.Min(pollIntervalMs, remainingMs),
-                    cancellationToken).ConfigureAwait(false);
+                    waitCancellationToken).ConfigureAwait(false);
+            }
+
+            if (timeoutMs > 0 && GetElapsedMilliseconds(start) >= timeoutMs)
+            {
+                return CreateStructuredTimeoutResponse(
+                    request,
+                    stateName,
+                    WaitBackend.Wpf,
+                    timeoutMs,
+                    start,
+                    attempts,
+                    lastObservation,
+                    lastObservedValue,
+                    failureReason);
             }
 
             lastObservation = ToWpfWaitObservation(observation.Started.Element, windowHandle);
@@ -434,7 +453,7 @@ public sealed partial class AutomationController
                     var remainingMs = Math.Max(1, timeoutMs - elapsedMs);
                     await Task.Delay(
                         Math.Min(pollIntervalMs, remainingMs),
-                        cancellationToken).ConfigureAwait(false);
+                        waitCancellationToken).ConfigureAwait(false);
 
                     if (!IsApplicationRunning(_application))
                     {
@@ -471,7 +490,7 @@ public sealed partial class AutomationController
                         observation,
                         maxBatch: 100,
                         maxPayloadChars: 65_536,
-                        cancellationToken).ConfigureAwait(false);
+                        waitCancellationToken).ConfigureAwait(false);
                 }
                 catch (InvalidOperationException ex) when (
                     ex.Message.StartsWith("observe_state_connection_lost:", StringComparison.Ordinal))
@@ -575,6 +594,21 @@ public sealed partial class AutomationController
                         "target_element_unloaded");
                 }
             }
+        }
+        catch (OperationCanceledException) when (
+            deadlineCts?.IsCancellationRequested == true &&
+            !cancellationToken.IsCancellationRequested)
+        {
+            return CreateStructuredTimeoutResponse(
+                request,
+                stateName,
+                WaitBackend.Wpf,
+                timeoutMs,
+                start,
+                attempts,
+                lastObservation,
+                lastObservedValue,
+                failureReason);
         }
         finally
         {
@@ -946,7 +980,7 @@ public sealed partial class AutomationController
                     return TargetExited();
                 }
 
-                if (attempts > 1 && GetElapsedMilliseconds(start) >= timeoutMs)
+                if (timeoutMs > 0 && GetElapsedMilliseconds(start) >= timeoutMs)
                 {
                     return Timeout();
                 }
@@ -981,7 +1015,7 @@ public sealed partial class AutomationController
                     return TargetExited();
                 }
 
-                if (attempts > 1 && GetElapsedMilliseconds(start) >= timeoutMs)
+                if (timeoutMs > 0 && GetElapsedMilliseconds(start) >= timeoutMs)
                 {
                     return Timeout();
                 }
@@ -1055,7 +1089,7 @@ public sealed partial class AutomationController
                     return TargetExited();
                 }
 
-                if (attempts > 1 && GetElapsedMilliseconds(start) >= timeoutMs)
+                if (timeoutMs > 0 && GetElapsedMilliseconds(start) >= timeoutMs)
                 {
                     return Timeout();
                 }
@@ -1269,8 +1303,12 @@ public sealed partial class AutomationController
         {
             try
             {
-                frameworkId = TryGetFrameworkId(automation.FromHandle(hwnd).AsWindow());
-                frameworkIdAvailable = true;
+                frameworkIdAvailable = automation
+                    .FromHandle(hwnd)
+                    .AsWindow()
+                    .Properties
+                    .FrameworkId
+                    .TryGetValue(out frameworkId);
             }
             catch
             {
