@@ -48,18 +48,24 @@ public sealed partial class AutomationController
             }
 
             var backend = request.Backend;
-            long? autoWindowHandle = null;
+            long? autoPointWindowHandle = null;
             if (backend == InspectionBackend.Auto)
             {
-                autoWindowHandle = request.WindowHandle ?? ResolveWindowHandleAtPointUia(xScreen, yScreen, cancellationToken);
-                var autoWindow = FindWindowByHandle(application, automation, autoWindowHandle.Value);
+                var routingWindowHandle = request.WindowHandle;
+                if (routingWindowHandle is null)
+                {
+                    autoPointWindowHandle = ResolveWindowHandleAtPointUia(xScreen, yScreen, cancellationToken);
+                    routingWindowHandle = autoPointWindowHandle;
+                }
+
+                var autoWindow = FindWindowByHandle(application, automation, routingWindowHandle.Value);
                 backend = SelectAutoBackend(GetAutoBackendRoute(autoWindow), IsAgentConnected);
             }
 
             long windowHandleForWpf;
             if (backend == InspectionBackend.Wpf)
             {
-                var resolvedWindowHandle = autoWindowHandle ?? ResolveWindowHandleAtPointUia(xScreen, yScreen, cancellationToken);
+                var resolvedWindowHandle = autoPointWindowHandle ?? ResolveWindowHandleAtPointUia(xScreen, yScreen, cancellationToken);
                 if (request.WindowHandle is long expectedHandle && expectedHandle != resolvedWindowHandle)
                 {
                     throw new InvalidOperationException(
