@@ -545,7 +545,7 @@ public sealed partial class AutomationController
                             start,
                             attempts,
                             lastObservation,
-                        lastObservedValue);
+                            lastObservedValue);
                     }
                 }
 
