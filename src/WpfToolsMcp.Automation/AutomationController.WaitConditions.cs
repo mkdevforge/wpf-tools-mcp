@@ -97,27 +97,90 @@ public sealed partial class AutomationController
             StableMs = stableMs,
             ExpectedValue = expectedValue,
             ExpectedText = expectedText,
+            ThrowOnTimeout = false,
             Condition = null
         };
 
+        var timeoutMs = Math.Clamp(request.TimeoutMs, 0, MaxWaitTimeoutMs);
+        var stateName = GetConditionStateName(condition.Kind);
         var structuredStart = Stopwatch.GetTimestamp();
+        using var deadlineCts = timeoutMs > 0
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+            : null;
+        deadlineCts?.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
+        var waitCancellationToken = deadlineCts?.Token ?? cancellationToken;
+        var deadline = new StructuredElementWaitDeadline(
+            structuredStart,
+            cancellationToken,
+            waitCancellationToken);
+
         try
         {
-            var response = await WaitForAsync(legacyRequest, cancellationToken).ConfigureAwait(false);
-            return response with
+            var response = await WaitForAsync(
+                legacyRequest,
+                waitCancellationToken,
+                deadline).ConfigureAwait(false);
+            if (response.Succeeded &&
+                timeoutMs > 0 &&
+                GetElapsedMilliseconds(structuredStart) >= timeoutMs)
             {
-                State = GetConditionStateName(condition.Kind),
+                return CreateStructuredTimeoutResponse(
+                    request,
+                    stateName,
+                    response.BackendUsed ?? WaitBackendForRequest(request),
+                    timeoutMs,
+                    structuredStart,
+                    response.Attempts,
+                    response.LastObservation,
+                    response.LastObservedValue,
+                    "condition_met_after_timeout");
+            }
+
+            var structuredResponse = response with
+            {
+                State = stateName,
                 ReasonCode = response.Succeeded
                     ? null
                     : response.ReasonCode ?? "wait_timeout"
             };
+
+            if (!structuredResponse.Succeeded && request.ThrowOnTimeout)
+            {
+                return CreateStructuredTimeoutResponse(
+                    request,
+                    stateName,
+                    structuredResponse.BackendUsed ?? WaitBackendForRequest(request),
+                    timeoutMs,
+                    structuredStart,
+                    structuredResponse.Attempts,
+                    structuredResponse.LastObservation,
+                    structuredResponse.LastObservedValue,
+                    structuredResponse.FailureReason ?? "condition_not_met");
+            }
+
+            return structuredResponse;
+        }
+        catch (OperationCanceledException) when (
+            deadlineCts?.IsCancellationRequested == true &&
+            !cancellationToken.IsCancellationRequested)
+        {
+            return CreateStructuredTimeoutResponse(
+                request,
+                stateName,
+                WaitBackendForRequest(request),
+                timeoutMs,
+                structuredStart,
+                attempts: 0,
+                lastObservation: null,
+                lastObservedValue: CreateUnavailableObservedValue("condition_not_met"),
+                failureReason: "condition_not_met");
         }
         catch (Exception ex) when (
             ex is not OperationCanceledException &&
             !IsAttached)
         {
             return CreateTargetProcessExitedResponse(
-                GetConditionStateName(condition.Kind),
+                stateName,
                 WaitBackendForRequest(request),
                 elapsedMs: GetElapsedMilliseconds(structuredStart),
                 attempts: 0,
@@ -1697,4 +1760,15 @@ public sealed partial class AutomationController
         IReadOnlyList<ObservedWaitWindow> Matches,
         ObservedWaitWindow? LastCandidate,
         bool FrameworkMetadataUnavailable);
+
+    private static bool IsStructuredElementDeadlineCancellation(
+        StructuredElementWaitDeadline? deadline) =>
+        deadline is not null &&
+        deadline.DeadlineToken.IsCancellationRequested &&
+        !deadline.CallerToken.IsCancellationRequested;
+
+    private sealed record StructuredElementWaitDeadline(
+        long StartTimestamp,
+        CancellationToken CallerToken,
+        CancellationToken DeadlineToken);
 }

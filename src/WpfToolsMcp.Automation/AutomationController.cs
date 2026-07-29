@@ -4746,9 +4746,15 @@ public sealed partial class AutomationController : IDisposable
         }
     }
 
-    public async Task<WaitForResponse> WaitForAsync(
+    public Task<WaitForResponse> WaitForAsync(
         WaitForRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        WaitForAsync(request, cancellationToken, structuredElementDeadline: null);
+
+    private async Task<WaitForResponse> WaitForAsync(
+        WaitForRequest request,
+        CancellationToken cancellationToken,
+        StructuredElementWaitDeadline? structuredElementDeadline)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -4836,6 +4842,7 @@ public sealed partial class AutomationController : IDisposable
                     expectedValue: request.ExpectedValue,
                     expectedText: request.ExpectedText,
                     throwOnTimeout: request.ThrowOnTimeout,
+                    structuredElementDeadline,
                     cancellationToken).ConfigureAwait(false);
 
                 trace?.SetSummary($"{request.State} succeeded={response.Succeeded} attempts={response.Attempts}");
@@ -4865,6 +4872,7 @@ public sealed partial class AutomationController : IDisposable
                     expectedValue: request.ExpectedValue,
                     expectedText: request.ExpectedText,
                     throwOnTimeout: request.ThrowOnTimeout,
+                    structuredElementDeadline,
                     cancellationToken).ConfigureAwait(false);
 
                 trace?.SetSummary($"{request.State} succeeded={response.Succeeded} attempts={response.Attempts}");
@@ -4906,7 +4914,7 @@ public sealed partial class AutomationController : IDisposable
             xpathHint = request.Locator?.XPath;
         }
 
-        var start = Stopwatch.GetTimestamp();
+        var start = structuredElementDeadline?.StartTimestamp ?? Stopwatch.GetTimestamp();
         var attempts = 0;
         WaitForObservation? lastObservation = null;
         WaitObservedValue? lastObservedValue = null;
@@ -4919,7 +4927,8 @@ public sealed partial class AutomationController : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (attempts > 0 && Stopwatch.GetElapsedTime(start).TotalMilliseconds >= timeoutMs)
+            if ((timeoutMs > 0 || attempts > 0) &&
+                Stopwatch.GetElapsedTime(start).TotalMilliseconds >= timeoutMs)
             {
                 var timeoutResponse = CreateLegacyWaitTimeoutResponse(
                     request.State,
@@ -4986,7 +4995,7 @@ public sealed partial class AutomationController : IDisposable
 
             lastFailureReason = failureReason ?? lastFailureReason;
             var elapsed = Stopwatch.GetElapsedTime(start);
-            if (satisfied && (attempts == 1 || elapsed.TotalMilliseconds < timeoutMs))
+            if (satisfied && (timeoutMs == 0 || elapsed.TotalMilliseconds < timeoutMs))
             {
                 var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
                 trace?.SetSummary($"{request.State} succeeded=true attempts={attempts}");
@@ -5025,7 +5034,27 @@ public sealed partial class AutomationController : IDisposable
             }
 
             var remainingMs = Math.Max(1, timeoutMs - (int)elapsed.TotalMilliseconds);
-            await Task.Delay(Math.Min(pollIntervalMs, remainingMs), cancellationToken);
+            try
+            {
+                await Task.Delay(Math.Min(pollIntervalMs, remainingMs), cancellationToken);
+            }
+            catch (OperationCanceledException) when (
+                IsStructuredElementDeadlineCancellation(structuredElementDeadline))
+            {
+                var timeoutResponse = CreateLegacyWaitTimeoutResponse(
+                    request.State,
+                    WaitBackend.Uia,
+                    timeoutMs,
+                    start,
+                    attempts,
+                    lastObservation,
+                    lastObservedValue,
+                    lastFailureReason,
+                    request.ThrowOnTimeout);
+                trace?.SetSummary(
+                    $"{request.State} succeeded=false attempts={attempts} reason={lastFailureReason}");
+                return timeoutResponse;
+            }
         }
     }
         catch (Exception ex)
@@ -5051,6 +5080,7 @@ public sealed partial class AutomationController : IDisposable
         double? expectedValue,
         string? expectedText,
         bool throwOnTimeout,
+        StructuredElementWaitDeadline? structuredElementDeadline,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(xpath) && locator is null)
@@ -5058,9 +5088,7 @@ public sealed partial class AutomationController : IDisposable
             throw new ArgumentException("wait_for requires either an elementId (WPF handle) or a locator for backend=wpf.");
         }
 
-        var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
-
-        var start = Stopwatch.GetTimestamp();
+        var start = structuredElementDeadline?.StartTimestamp ?? Stopwatch.GetTimestamp();
         var attempts = 0;
         WaitForObservation? lastObservation = null;
         WaitObservedValue? lastObservedValue = null;
@@ -5069,25 +5097,29 @@ public sealed partial class AutomationController : IDisposable
         Rect? lastBounds = null;
         long? stableStartTimestamp = null;
 
-        string? currentXPath = string.IsNullOrWhiteSpace(xpath) ? null : NormalizeWpfXPath(xpath);
-
-        while (true)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+            string? currentXPath = string.IsNullOrWhiteSpace(xpath) ? null : NormalizeWpfXPath(xpath);
 
-            if (attempts > 0 && Stopwatch.GetElapsedTime(start).TotalMilliseconds >= timeoutMs)
+            while (true)
             {
-                return CreateLegacyWaitTimeoutResponse(
-                    stateText,
-                    WaitBackend.Wpf,
-                    timeoutMs,
-                    start,
-                    attempts,
-                    lastObservation,
-                    lastObservedValue,
-                    lastFailureReason,
-                    throwOnTimeout);
-            }
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if ((timeoutMs > 0 || attempts > 0) &&
+                    Stopwatch.GetElapsedTime(start).TotalMilliseconds >= timeoutMs)
+                {
+                    return CreateLegacyWaitTimeoutResponse(
+                        stateText,
+                        WaitBackend.Wpf,
+                        timeoutMs,
+                        start,
+                        attempts,
+                        lastObservation,
+                        lastObservedValue,
+                        lastFailureReason,
+                        throwOnTimeout);
+                }
 
             attempts++;
 
@@ -5276,7 +5308,7 @@ public sealed partial class AutomationController : IDisposable
 
             lastFailureReason = failureReason ?? lastFailureReason;
             var elapsed = Stopwatch.GetElapsedTime(start);
-            if (satisfied && (attempts == 1 || elapsed.TotalMilliseconds < timeoutMs))
+            if (satisfied && (timeoutMs == 0 || elapsed.TotalMilliseconds < timeoutMs))
             {
                 var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
                 return new WaitForResponse(
@@ -5312,6 +5344,21 @@ public sealed partial class AutomationController : IDisposable
 
             var remainingMs = Math.Max(1, timeoutMs - (int)elapsed.TotalMilliseconds);
             await Task.Delay(Math.Min(pollIntervalMs, remainingMs), cancellationToken);
+        }
+        }
+        catch (OperationCanceledException) when (
+            IsStructuredElementDeadlineCancellation(structuredElementDeadline))
+        {
+            return CreateLegacyWaitTimeoutResponse(
+                stateText,
+                WaitBackend.Wpf,
+                timeoutMs,
+                start,
+                attempts,
+                lastObservation,
+                lastObservedValue,
+                lastFailureReason,
+                throwOnTimeout);
         }
     }
 
