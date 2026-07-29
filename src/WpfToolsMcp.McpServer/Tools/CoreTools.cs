@@ -515,19 +515,26 @@ public static class CoreWpfDiagnosticsTools
 
 public static class CoreInteractionTools
 {
-    [McpServerTool(Name = "wait_for"), Description("Wait for an element state.")]
+    [McpServerTool(Name = "wait_for"), Description("Wait for an element or window to satisfy a legacy state or structured condition.")]
     public static Task<WaitForResponse> WaitFor(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
         [Description("Element locator")] CoreElementLocator? locator = null,
         [Description("Element ID")] string? elementId = null,
-        [Description("Wait state")] string state = "visible",
+        [Description("Legacy wait state (mutually exclusive with condition)")] string? state = null,
+        [Description("Structured wait condition (mutually exclusive with state)")] WaitCondition? condition = null,
         [Description("Expected text for name_contains")] string? expectedText = null,
         [Description("Expected value for value_equals")] double? expectedValue = null,
         [Description("Timeout in milliseconds")] int timeoutMs = 5000,
+        [Description("Throw on timeout; defaults to true for legacy state waits and false for structured conditions")] bool? throwOnTimeout = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
+            if (state is not null && condition is not null)
+            {
+                throw new ArgumentException("wait_for accepts either state or condition, not both.");
+            }
+
             var (automation, effectiveWindowHandle) = sessions.GetController(sessionId);
             var hasElementId = !string.IsNullOrWhiteSpace(elementId);
             var request = new WaitForRequest(
@@ -535,10 +542,14 @@ public static class CoreInteractionTools
                 ElementId: elementId,
                 WindowHandle: hasElementId ? null : effectiveWindowHandle,
                 Backend: InspectionBackend.Auto,
-                State: state,
+                State: state ?? "visible",
                 TimeoutMs: timeoutMs,
                 ExpectedValue: expectedValue,
-                ExpectedText: expectedText);
+                ExpectedText: expectedText,
+                ThrowOnTimeout: throwOnTimeout ?? (condition is null))
+            {
+                Condition = condition
+            };
 
             return automation.RunExclusiveAsync(() => automation.WaitForAsync(request, cancellationToken), cancellationToken);
         });

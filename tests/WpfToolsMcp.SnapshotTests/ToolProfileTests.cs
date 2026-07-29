@@ -314,6 +314,87 @@ public sealed class ToolProfileTests
     }
 
     [Test]
+    public async Task Wait_for_exposes_discoverable_structured_condition_schemas_in_both_profiles()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var core = await McpTestContext.StartAsync(serverExe, toolProfile: "core");
+        await using var diagnostics = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+
+        var coreWait = (await core.ListToolsAsync()).Single(tool => tool.Name == "wait_for");
+        var diagnosticsWait = (await diagnostics.ListToolsAsync()).Single(tool => tool.Name == "wait_for");
+        var expectedConditionKinds = Enum.GetNames<WaitConditionKind>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var expectedComparisons = Enum.GetNames<WaitComparison>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        var expectedScalarKinds = Enum.GetNames<WaitScalarKind>().OrderBy(value => value, StringComparer.Ordinal).ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(GetInputPropertyNames(coreWait), Is.EqualTo(
+                new[]
+                {
+                    "condition",
+                    "elementId",
+                    "expectedText",
+                    "expectedValue",
+                    "locator",
+                    "sessionId",
+                    "state",
+                    "throwOnTimeout",
+                    "timeoutMs"
+                }));
+            Assert.That(GetInputPropertyNames(diagnosticsWait), Is.EqualTo(
+                new[]
+                {
+                    "backend",
+                    "condition",
+                    "elementId",
+                    "expectedText",
+                    "expectedValue",
+                    "locator",
+                    "pollIntervalMs",
+                    "sessionId",
+                    "stableMs",
+                    "state",
+                    "throwOnTimeout",
+                    "timeoutMs",
+                    "windowHandle"
+                }));
+
+            foreach (var waitTool in new[] { coreWait, diagnosticsWait })
+            {
+                Assert.That(GetInputObjectPropertyNames(waitTool, "condition"), Is.EqualTo(
+                    new[] { "comparison", "dataContextPath", "expected", "holdForMs", "kind", "propertyName", "window" }));
+                Assert.That(GetInputObjectRequiredPropertyNames(waitTool, "condition"), Is.EqualTo(new[] { "kind" }));
+                Assert.That(GetInputObjectEnumValues(waitTool, "condition", "kind"), Is.EqualTo(expectedConditionKinds));
+                Assert.That(GetInputObjectEnumValues(waitTool, "condition", "comparison"), Is.EqualTo(expectedComparisons));
+                Assert.That(GetInputNestedObjectPropertyNames(waitTool, "condition", "expected"), Is.EqualTo(
+                    new[] { "booleanValue", "kind", "numberValue", "stringValue" }));
+                Assert.That(GetInputNestedObjectRequiredPropertyNames(waitTool, "condition", "expected"), Is.EqualTo(new[] { "kind" }));
+                Assert.That(GetInputNestedObjectEnumValues(waitTool, "condition", "expected", "kind"), Is.EqualTo(expectedScalarKinds));
+                Assert.That(GetInputNestedObjectPropertyNames(waitTool, "condition", "window"), Is.EqualTo(
+                    new[] { "frameworkId", "handle", "ownerHandle", "title", "titleContains" }));
+            }
+        });
+    }
+
+    [TestCase("core")]
+    [TestCase("diagnostics")]
+    public async Task Wait_for_rejects_legacy_state_combined_with_structured_condition(string profile)
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: profile);
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            _ = await mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
+            {
+                ["sessionId"] = "unused",
+                ["state"] = "visible",
+                ["condition"] = new Dictionary<string, object?> { ["kind"] = "Visible" }
+            }));
+
+        Assert.That(exception!.Message, Does.Contain("wait_for accepts either state or condition, not both."));
+    }
+
+    [Test]
     public async Task Core_profile_exposes_explicit_session_lifecycle_schemas()
     {
         var serverExe = McpServerPaths.FindMcpServerExecutable();
@@ -962,6 +1043,101 @@ public sealed class ToolProfileTests
             .Select(property => property.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static string[] GetInputObjectRequiredPropertyNames(McpClientTool tool, string inputPropertyName)
+    {
+        var schema = tool.JsonSchema;
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var inputProperties) ||
+            inputProperties.ValueKind != JsonValueKind.Object ||
+            !inputProperties.TryGetProperty(inputPropertyName, out var inputProperty) ||
+            inputProperty.ValueKind != JsonValueKind.Object ||
+            !inputProperty.TryGetProperty("required", out var required) ||
+            required.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return GetSortedStringValues(required);
+    }
+
+    private static string[] GetInputNestedObjectPropertyNames(
+        McpClientTool tool,
+        string inputPropertyName,
+        string nestedPropertyName)
+    {
+        if (!TryGetInputNestedObjectSchema(tool, inputPropertyName, nestedPropertyName, out var nestedObject) ||
+            !nestedObject.TryGetProperty("properties", out var nestedProperties) ||
+            nestedProperties.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return nestedProperties
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string[] GetInputNestedObjectRequiredPropertyNames(
+        McpClientTool tool,
+        string inputPropertyName,
+        string nestedPropertyName)
+    {
+        if (!TryGetInputNestedObjectSchema(tool, inputPropertyName, nestedPropertyName, out var nestedObject) ||
+            !nestedObject.TryGetProperty("required", out var required) ||
+            required.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return GetSortedStringValues(required);
+    }
+
+    private static string[] GetInputNestedObjectEnumValues(
+        McpClientTool tool,
+        string inputPropertyName,
+        string nestedPropertyName,
+        string valuePropertyName)
+    {
+        if (!TryGetInputNestedObjectSchema(tool, inputPropertyName, nestedPropertyName, out var nestedObject) ||
+            !nestedObject.TryGetProperty("properties", out var nestedProperties) ||
+            nestedProperties.ValueKind != JsonValueKind.Object ||
+            !nestedProperties.TryGetProperty(valuePropertyName, out var valueProperty) ||
+            valueProperty.ValueKind != JsonValueKind.Object ||
+            !valueProperty.TryGetProperty("enum", out var values) ||
+            values.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return GetSortedStringValues(values);
+    }
+
+    private static bool TryGetInputNestedObjectSchema(
+        McpClientTool tool,
+        string inputPropertyName,
+        string nestedPropertyName,
+        out JsonElement nestedObject)
+    {
+        var schema = tool.JsonSchema;
+        if (schema.ValueKind == JsonValueKind.Object &&
+            schema.TryGetProperty("properties", out var inputProperties) &&
+            inputProperties.ValueKind == JsonValueKind.Object &&
+            inputProperties.TryGetProperty(inputPropertyName, out var inputProperty) &&
+            inputProperty.ValueKind == JsonValueKind.Object &&
+            inputProperty.TryGetProperty("properties", out var inputObjectProperties) &&
+            inputObjectProperties.ValueKind == JsonValueKind.Object &&
+            inputObjectProperties.TryGetProperty(nestedPropertyName, out nestedObject) &&
+            nestedObject.ValueKind == JsonValueKind.Object)
+        {
+            return true;
+        }
+
+        nestedObject = default;
+        return false;
     }
 
     private static string[] GetInputEnumValues(McpClientTool tool, string inputPropertyName)
