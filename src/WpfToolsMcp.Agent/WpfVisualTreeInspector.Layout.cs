@@ -145,13 +145,15 @@ internal static partial class WpfVisualTreeInspector
     public static GetLayoutContextResponse GetLayoutContext(
         string ownerId,
         GetLayoutContextRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int maxResolutionNodes = MaxLayoutResolutionNodes)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
 
         var maxAncestors = Math.Clamp(request.MaxAncestors, 0, MaxLayoutAncestors);
         var maxSiblings = Math.Clamp(request.MaxSiblings, 0, MaxLayoutSiblings);
         var maxGridDefinitions = Math.Clamp(request.MaxGridDefinitions, 0, MaxLayoutGridDefinitions);
+        maxResolutionNodes = Math.Clamp(maxResolutionNodes, 1, MaxLayoutResolutionNodes);
 
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
@@ -168,7 +170,7 @@ internal static partial class WpfVisualTreeInspector
             includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
-            maxNodes: MaxLayoutResolutionNodes,
+            maxNodes: maxResolutionNodes,
             cancellationToken);
 
         var chain = BuildXPathChainForElement(
@@ -176,7 +178,7 @@ internal static partial class WpfVisualTreeInspector
             window,
             resolved.Element,
             visibleOnly: false,
-            maxNodes: MaxLayoutResolutionNodes,
+            maxNodes: maxResolutionNodes,
             cancellationToken);
         if (chain.Count == 0 || !ReferenceEquals(chain[^1].Element, resolved.Element))
         {

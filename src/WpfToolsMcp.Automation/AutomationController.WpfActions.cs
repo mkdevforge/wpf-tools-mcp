@@ -241,7 +241,8 @@ public sealed partial class AutomationController
         bool autoScroll,
         CancellationToken cancellationToken,
         bool fullyVisible = false,
-        bool throwIfScrollFailed = false)
+        bool throwIfScrollFailed = false,
+        bool allowHandleRecovery = true)
     {
         // First try: resolve even if outside viewport (still "visible" in WPF terms).
         var resolved = await ResolveWpfElementRefAsync(
@@ -251,7 +252,8 @@ public sealed partial class AutomationController
             includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+            cancellationToken: cancellationToken,
+            allowHandleRecovery: allowHandleRecovery).ConfigureAwait(false);
 
         var bounds = resolved.Bounds;
         if (bounds is null || bounds.Width <= 0 || bounds.Height <= 0)
@@ -289,7 +291,8 @@ public sealed partial class AutomationController
                 includeOffViewport: true,
                 interactiveOnly: false,
                 interactiveMode: InteractiveMode.Heuristic,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+                cancellationToken: cancellationToken,
+                allowHandleRecovery: allowHandleRecovery).ConfigureAwait(false);
 
             bounds = resolved.Bounds;
             if (bounds is null || bounds.Width <= 0 || bounds.Height <= 0)
@@ -314,7 +317,8 @@ public sealed partial class AutomationController
         bool includeOffViewport,
         bool interactiveOnly,
         InteractiveMode interactiveMode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowHandleRecovery = true)
     {
         if (!string.IsNullOrWhiteSpace(handle.WpfAgentElementId))
         {
@@ -335,9 +339,21 @@ public sealed partial class AutomationController
             {
                 return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
             }
-            catch (InvalidOperationException ex) when (IsWpfAgentStaleOrNotFound(ex))
+            catch (InvalidOperationException ex) when (allowHandleRecovery && IsWpfAgentStaleOrNotFound(ex))
             {
             }
+            catch (InvalidOperationException ex) when (IsWpfAgentStaleOrNotFound(ex))
+            {
+                throw new InvalidOperationException(
+                    "stale_element: identity_changed for the pinned WPF element. Call resolve_element again.",
+                    ex);
+            }
+        }
+
+        if (!allowHandleRecovery)
+        {
+            throw new InvalidOperationException(
+                "stale_element: identity_unverifiable for the pinned WPF element. Call resolve_element again.");
         }
 
         return await ResolveWpfElementRefAsync(

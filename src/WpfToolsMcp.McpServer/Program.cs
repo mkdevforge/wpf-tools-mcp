@@ -24,7 +24,10 @@ builder.Services.AddSingleton<SubscriptionManager>();
 
 var mcpBuilder = builder.Services
     .AddMcpServer(options =>
-        options.Filters.ListToolsFilters.Add(WaitToolSchema.CreateListToolsFilter()))
+    {
+        options.Filters.ListToolsFilters.Add(WaitToolSchema.CreateListToolsFilter());
+        options.Filters.ListToolsFilters.Add(DiagnosticSnapshotToolSchema.CreateListToolsFilter());
+    })
     .WithStdioServerTransport();
 var toolSerializerOptions = new JsonSerializerOptions(McpJsonUtilities.DefaultOptions)
 {

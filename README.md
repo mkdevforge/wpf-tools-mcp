@@ -52,8 +52,8 @@ agent workflows:
 
 | Profile | Tools | Purpose |
 |---|---:|---|
-| `core` (default) | 30 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 53 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `core` (default) | 31 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
+| `diagnostics` | 54 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Enable the full profile with a command argument:
 
@@ -81,7 +81,7 @@ The `core` profile exposes:
   `set_active_window`. `close_session` remains as a compatibility path.
 - **Inspection:** `take_screenshot`, `get_visual_tree`, `find_elements`,
   `resolve_element`, `get_element_properties`, `get_uia_locators`,
-  `get_uia_tree`.
+  `get_uia_tree`, `capture_diagnostic_snapshot`.
 - **Interaction and synchronization:** `click_element`, `invoke`, `type_text`,
   `send_keys`, `set_value`, `select_item`, `scroll_to_element`, `drag`,
   `wait_for`.
@@ -101,6 +101,48 @@ The `diagnostics` profile additionally exposes:
 
 Its expanded `take_screenshot` schema also exposes capture controls and the
 opt-in screenshot-correlation workflow described below.
+
+### Coherent Diagnostic Snapshots
+
+`capture_diagnostic_snapshot` reduces repeated orchestration without exposing a
+general scripting surface. A call selects one to eight unique sections from
+`VisualTree`, `UiaProperties`, `WpfProperties`, `Layout`, `Bindings`,
+`DataContext`, `BindingErrors`, and `Screenshot`. Supply at most one of
+`locator` or `elementId`; omitting both targets the pinned window. A
+`WpfProperties` section requires an explicit `propertyNames` allowlist.
+
+The target is resolved once and the session remains exclusively locked for the
+whole capture. Requested WPF sections run in one `DispatcherPriority.Send`
+callback on the target window's dispatcher. UIA evidence and the rendered
+screenshot necessarily run outside that dispatcher turn. Every section
+therefore reports its evidence source, schema, capture group, UTC timestamps,
+offsets, and one of `Success`, `Unavailable`, `Truncated`, or `Failed`.
+`Consistency.WpfSectionsSingleDispatcherTurn` records the WPF guarantee;
+`CrossBackendAtomic` remains false for multi-phase evidence, and
+`TimingSkewMs` reports the observed span rather than presenting different
+frames as simultaneous.
+
+The default shared budget is depth 3, 25 items, 200 scanned nodes, 1,000
+characters per evidence value, and 40,000 serialized evidence characters.
+Hard limits are depth 6, 100 items, 1,000 nodes, 2,000 characters per evidence
+value, and 100,000 evidence characters. Structural limits apply wherever a
+section exposes that dimension; for UIA property values they also bound nested
+collection depth and item count. The value limit covers strings inside section
+data and section messages. Shared target metadata, the target's reusable
+element ID and XPath, and screenshot paths remain exact rather than being
+rewritten. The payload limit covers section `Data`, not that common context
+metadata.
+
+A call also has a 10-second deadline, configurable from 100 ms through 30
+seconds. Later evidence that cannot fit the remaining total payload budget is
+omitted with `Truncated/maxPayloadChars`; other requested sections still retain
+independent results. Screenshot evidence is a file-backed PNG with viewport
+conditions, never inline Base64, and capture does not auto-scroll the target.
+
+The snapshot is deliberately read-only. Short interaction sequences have a
+different side-effect, retry, and policy lifecycle and are deferred to a
+separate follow-up rather than accepted as arbitrary steps here. The decision
+record is [docs/decisions/0001-coherent-diagnostic-snapshots.md](docs/decisions/0001-coherent-diagnostic-snapshots.md).
 
 ### WPF Layout Context
 
@@ -568,6 +610,7 @@ complete controls live in the `diagnostics` profile when exposing them in
 
 | Tool | Default response budget | Expanded evidence | Limit metadata |
 |---|---|---|---|
+| `capture_diagnostic_snapshot` | 1-8 explicitly selected sections; applicable section structures use depth 3, 25 items, and 200 nodes; section evidence strings use 1,000 characters; section `Data` shares 40,000 characters | Raise limits up to depth 6, 100 items, 1,000 nodes, 2,000 characters per evidence string, and 100,000 section-data characters | Exact shared target identity and timing; per-section source, schema, capture group, `Status`, `Code`, `PayloadChars`, and timing offsets |
 | `take_screenshot` correlation (`diagnostics`) | Per backend: 8 candidates while scanning at most 10,000 nodes; no ancestor chains | Set `maxCandidates` (1-25), `maxNodes` (1-200,000), `includeAncestors`, and `maxAncestors` (0-20); use `backend=Both` for combined WPF and UIA evidence | Per backend: `ReturnedCandidates`, `DiscoveredCandidates`, `ScannedNodes`, `ScanComplete`, `Truncated`, `TruncatedReason`, `DirectHitIndex`, `HasOverlaps`; aggregate `Ambiguous` |
 | `get_visual_tree` | Depth 4, at most 500 nodes, minimal fields | Set `depth`, `maxNodes`, `preset`, or `fields` in `diagnostics` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_uia_tree` | Depth 4, at most 200 nodes | Increase `depth` or `maxNodes` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
@@ -605,9 +648,11 @@ common-workflow rationale plus inventory and compact-schema contract coverage.
    exact client size and request `includeViewport` with screenshots. In the
    diagnostics profile, add `correlation` to map a small image region to
    bounded WPF/UIA candidates and an annotated artifact.
-4. Inspect with `get_visual_tree` or `find_elements`, use
-   `get_layout_context` for WPF spacing/allocation evidence, then retain an
-   `elementId` from `resolve_element` for follow-up calls.
+4. Inspect with `get_visual_tree` or `find_elements`, then retain an `elementId`
+   from `resolve_element` for follow-up calls. Use
+   `capture_diagnostic_snapshot` when several property, binding, layout,
+   DataContext, tree, or screenshot sections must describe one bounded capture;
+   use `get_layout_context` alone for focused WPF spacing/allocation evidence.
 5. Interact, wait for the expected state, and inspect again to verify the
    result.
 6. Call `detach_session` when inspection is finished. Use `close_app` or

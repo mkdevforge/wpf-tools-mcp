@@ -793,7 +793,8 @@ public sealed partial class AutomationController
         Window window,
         ITreeWalker rawWalker,
         string elementId,
-        out string xpathUsed)
+        out string xpathUsed,
+        bool requireStableIdentity = false)
     {
         var handle = RequireHandle(elementId);
         if (handle.Backend != InspectionBackend.Uia)
@@ -810,12 +811,26 @@ public sealed partial class AutomationController
             if (handle.UiaRuntimeId is { Length: > 0 } storedRuntimeId)
             {
                 var actual = TryGetRuntimeId(resolved);
-                if (actual is not null && !actual.SequenceEqual(storedRuntimeId))
+                if (actual is null || !actual.SequenceEqual(storedRuntimeId))
                 {
+                    if (requireStableIdentity)
+                    {
+                        throw new InvalidOperationException(
+                            $"stale_element: identity_changed for '{elementId}'. Call resolve_element again.");
+                    }
+
                     // UIA runtime ids can legitimately change for templated/virtualized elements.
                     // Prefer "healing" the handle by updating the stored runtime id as long as the XPath still resolves.
-                    _elementHandles.TryUpdateUiaRuntimeId(elementId, actual);
+                    if (actual is not null)
+                    {
+                        _elementHandles.TryUpdateUiaRuntimeId(elementId, actual);
+                    }
                 }
+            }
+            else if (requireStableIdentity)
+            {
+                throw new InvalidOperationException(
+                    $"stale_element: identity_unverifiable for '{elementId}'. Call resolve_element again.");
             }
 
             return resolved;

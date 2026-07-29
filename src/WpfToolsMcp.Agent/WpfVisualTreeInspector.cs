@@ -3300,10 +3300,19 @@ internal static partial class WpfVisualTreeInspector
     public static GetBindingInfoResponse GetBindingInfo(
         string ownerId,
         GetBindingInfoRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        GetBindingInfo(ownerId, request, cancellationToken, visibleOnly: true);
+
+    private static GetBindingInfoResponse GetBindingInfo(
+        string ownerId,
+        GetBindingInfoRequest request,
+        CancellationToken cancellationToken,
+        bool visibleOnly,
+        int maxNodes = 200_000)
     {
         var maxProperties = Math.Clamp(request.MaxProperties, 1, 50_000);
         var valueFormat = string.IsNullOrWhiteSpace(request.ValueFormat) ? "string" : request.ValueFormat;
+        maxNodes = Math.Clamp(maxNodes, 1, 200_000);
 
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
@@ -3317,11 +3326,11 @@ internal static partial class WpfVisualTreeInspector
             request.Locator,
             request.ElementId,
             request.WindowHandle,
-            visibleOnly: true,
+            visibleOnly,
             includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
-            maxNodes: 200_000,
+            maxNodes,
             cancellationToken);
 
         var element = resolved.Element;
@@ -4500,11 +4509,20 @@ internal static partial class WpfVisualTreeInspector
     public static GetDataContextResponse GetDataContext(
         string ownerId,
         GetDataContextRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        GetDataContext(ownerId, request, cancellationToken, visibleOnly: true);
+
+    private static GetDataContextResponse GetDataContext(
+        string ownerId,
+        GetDataContextRequest request,
+        CancellationToken cancellationToken,
+        bool visibleOnly,
+        int maxNodes = 200_000)
     {
         var maxDepth = Math.Clamp(request.MaxDepth, 0, 25);
         var maxPropertiesPerObject = Math.Clamp(request.MaxPropertiesPerObject, 1, 5000);
         var maxStringLength = Math.Clamp(request.MaxStringLength, 0, 200_000);
+        maxNodes = Math.Clamp(maxNodes, 1, 200_000);
 
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
@@ -4518,11 +4536,11 @@ internal static partial class WpfVisualTreeInspector
             request.Locator,
             request.ElementId,
             request.WindowHandle,
-            visibleOnly: true,
+            visibleOnly,
             includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
-            maxNodes: 200_000,
+            maxNodes,
             cancellationToken);
 
         object? dataContext = null;
@@ -4617,7 +4635,15 @@ internal static partial class WpfVisualTreeInspector
     public static GetComputedPropertiesResponse GetComputedProperties(
         string ownerId,
         GetComputedPropertiesRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        GetComputedProperties(ownerId, request, cancellationToken, visibleOnly: true);
+
+    private static GetComputedPropertiesResponse GetComputedProperties(
+        string ownerId,
+        GetComputedPropertiesRequest request,
+        CancellationToken cancellationToken,
+        bool visibleOnly,
+        int maxNodes = 200_000)
     {
         var includeSources = request.IncludeSources;
         var includeDefault = request.IncludeDefault;
@@ -4631,6 +4657,7 @@ internal static partial class WpfVisualTreeInspector
         var provenancePropertyCapApplied = includeProvenance && requestedMaxProperties > maxProvenanceProperties;
         var maxProvenanceCandidates = Math.Clamp(request.MaxProvenanceCandidates, 0, 50);
         var valueFormat = string.IsNullOrWhiteSpace(request.ValueFormat) ? "string" : request.ValueFormat;
+        maxNodes = Math.Clamp(maxNodes, 1, 200_000);
 
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
@@ -4644,11 +4671,11 @@ internal static partial class WpfVisualTreeInspector
             request.Locator,
             request.ElementId,
             request.WindowHandle,
-            visibleOnly: true,
+            visibleOnly,
             includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
-            maxNodes: 200_000,
+            maxNodes,
             cancellationToken);
 
         var element = resolved.Element;

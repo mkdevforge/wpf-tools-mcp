@@ -110,7 +110,7 @@ The MCP server manages both channels in Phase 2. Backend-neutral inspection tool
 ## MCP Tools
 
 The tables below describe the full `diagnostics` profile. The default `core`
-profile intentionally exposes a smaller 30-tool surface with compact schemas;
+profile intentionally exposes a smaller 31-tool surface with compact schemas;
 see `README.md` for the current profile split and configuration.
 
 ### Phase 1 — Inspection (FlaUI / UIA)
@@ -129,6 +129,7 @@ see `README.md` for the current profile split and configuration.
 | `get_element_properties` | Inspect a single element via UIA | Bounded UIA properties, supported patterns, current values, and property-count/truncation metadata. The summary preset is the default; diagnostics can request the full preset with an explicit limit. Property and pattern values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, and share a 20,000-character serialized-value budget. XPaths over 2,000 characters are explicitly omitted rather than truncated. |
 | `get_uia_locators` | Export stable UIA locator recommendations for a WPF or UIA element | WPF/UIA identity, ranked locators, and FlaUI snippets |
 | `get_uia_tree` | Return a bounded UIA automation tree for a window or subtree | UIA identity, paths, and children |
+| `capture_diagnostic_snapshot` | Capture an explicit bounded set of tree, UIA property, WPF property, layout, binding, DataContext, binding-error, and screenshot evidence for one pinned target | Shared session/process/window/element context; a single-dispatcher WPF capture group; timestamped UIA/screenshot phases; per-section success, unavailable, truncated, or failed results |
 
 ### Phase 1 — Interaction (WPF / UIA)
 
@@ -589,6 +590,7 @@ The MCP tool surface is extended — new tools are added and existing inspection
 #### P2-M2 — Deep diagnostics
 - New tool: `get_data_context` with configurable serialization depth and cycle detection
 - New tool: `get_layout_context` with compact default budgets and expanded diagnostics controls for WPF-only relational layout evidence
+- New tool: `capture_diagnostic_snapshot` for bounded, read-only composite evidence. Requested WPF sections share one target-window dispatcher turn; UIA and screenshot phases report unavoidable timing skew instead of claiming cross-backend atomicity.
 - Planned `get_styles` tool (shipped as `get_style_chain` and `get_template_info`)
 - Separate BindingErrors and CustomControls test applications exercising Snoop-specific capabilities
 - Graceful fallback for backend-neutral inspection; WPF-only diagnostics report injection failures directly
