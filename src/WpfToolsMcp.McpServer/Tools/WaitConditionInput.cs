@@ -17,6 +17,9 @@ namespace WpfToolsMcp.McpServer.Tools;
 [JsonDerivedType(typeof(WindowClosedWaitConditionInput), nameof(WaitConditionKind.WindowClosed))]
 public abstract record WaitConditionInput
 {
+    internal virtual long? WindowHandle => null;
+    internal virtual IReadOnlyList<long> ExternalWindowHandles => Array.Empty<long>();
+
     internal abstract WaitCondition ToContract();
 }
 
@@ -106,6 +109,10 @@ public sealed record DataContextValueWaitConditionInput(
 public sealed record WindowOpenWaitConditionInput(
     WaitWindowSelector Window) : WaitConditionInput
 {
+    internal override long? WindowHandle => Window.Handle;
+    internal override IReadOnlyList<long> ExternalWindowHandles =>
+        WaitWindowSelectorHandles.GetExternalWindowHandles(Window);
+
     internal override WaitCondition ToContract() =>
         new(WaitConditionKind.WindowOpen, Window: Window);
 }
@@ -114,6 +121,20 @@ public sealed record WindowOpenWaitConditionInput(
 public sealed record WindowClosedWaitConditionInput(
     WaitWindowSelector Window) : WaitConditionInput
 {
+    internal override long? WindowHandle => Window.Handle;
+    internal override IReadOnlyList<long> ExternalWindowHandles =>
+        WaitWindowSelectorHandles.GetExternalWindowHandles(Window);
+
     internal override WaitCondition ToContract() =>
         new(WaitConditionKind.WindowClosed, Window: Window);
+}
+
+file static class WaitWindowSelectorHandles
+{
+    internal static IReadOnlyList<long> GetExternalWindowHandles(WaitWindowSelector window) =>
+        new long?[] { window.Handle, window.OwnerHandle }
+            .Where(handle => handle.HasValue)
+            .Select(handle => handle.GetValueOrDefault())
+            .Distinct()
+            .ToArray();
 }

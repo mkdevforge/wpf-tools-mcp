@@ -20,13 +20,52 @@ public sealed record LaunchAppResponse(
 public sealed record AttachToAppRequest(
     int? Pid = null,
     string? ProcessName = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SessionId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ProcessInstanceId = null);
 
 public sealed record AttachToAppResponse(
     string SessionId,
     int Pid,
     string ProcessName,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InteractionPolicy? InteractionPolicy = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProcessInstanceId { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AttachRecoveryInfo? Recovery { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GetActiveWindowResponse? ActiveWindow { get; init; }
+}
+
+public sealed record AttachRecoveryInfo(
+    string PreviousSessionId,
+    string SuccessorSessionId,
+    int PreviousPid,
+    bool WindowHandlesInvalidated,
+    bool ElementIdsInvalidated,
+    bool SubscriptionsCleared);
+
+public sealed record ProcessCandidateInfo(
+    int Index,
+    string ProcessInstanceId,
+    int Pid,
+    string ProcessName,
+    string StartTimeUtc,
+    long MainWindowHandle,
+    string MainWindowTitle);
+
+public sealed record ProcessSelectionAmbiguity(
+    string Code,
+    string RequestedProcessName,
+    int DiscoveredCandidates,
+    int ReturnedCandidates,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason,
+    IReadOnlyList<ProcessCandidateInfo> Candidates,
+    string Recovery);
 
 public sealed record InteractionPolicy(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? AllowForegroundActivation = null,

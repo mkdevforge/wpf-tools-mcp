@@ -27,7 +27,7 @@ public sealed partial class AutomationController
 
         ValidateStructuredWaitDoesNotMixLegacyArguments(request);
 
-        return condition.Kind switch
+        var response = condition.Kind switch
         {
             WaitConditionKind.DependencyPropertyValue or WaitConditionKind.DataContextValue =>
                 await WaitForWpfValueConditionAsync(request, condition, cancellationToken).ConfigureAwait(false),
@@ -35,6 +35,18 @@ public sealed partial class AutomationController
                 await WaitForWindowConditionAsync(request, condition, cancellationToken).ConfigureAwait(false),
             _ => await WaitForElementConditionAsync(request, condition, cancellationToken).ConfigureAwait(false)
         };
+
+        if (response.LastObservation?.WindowHandle is long windowHandle)
+        {
+            TrackOrRejectExternalWindowHandle(windowHandle);
+        }
+
+        if (response.LastObservation?.OwnerHandle is long ownerHandle)
+        {
+            TrackOrRejectExternalWindowHandle(ownerHandle);
+        }
+
+        return response;
     }
 
     private static void ValidateStructuredWaitDoesNotMixLegacyArguments(WaitForRequest request)

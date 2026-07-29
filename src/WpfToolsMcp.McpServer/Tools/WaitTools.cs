@@ -32,7 +32,10 @@ public static class WaitTools
                 throw new ArgumentException("wait_for accepts either state or condition, not both.");
             }
 
-            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var (automation, effectiveWindowHandle) = sessions.GetController(
+                sessionId,
+                condition?.WindowHandle ?? windowHandle,
+                condition?.ExternalWindowHandles);
             var hasElementId = !string.IsNullOrWhiteSpace(elementId);
             var request = new WaitForRequest(
                 Locator: locator,

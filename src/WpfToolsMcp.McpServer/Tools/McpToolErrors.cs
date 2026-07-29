@@ -78,6 +78,64 @@ internal static class McpToolErrors
         }
     }
 
+    public static Task<CallToolResult> RunAttachToAppAsync(
+        Func<Task<AttachToAppResponse>> action,
+        [CallerMemberName] string toolName = "") =>
+        RunProcessSelectionAsync(action, toolName);
+
+    public static Task<CallToolResult> RunLaunchAppAsync(
+        Func<Task<LaunchAppResponse>> action,
+        [CallerMemberName] string toolName = "") =>
+        RunProcessSelectionAsync(action, toolName);
+
+    private static async Task<CallToolResult> RunProcessSelectionAsync<TResponse>(
+        Func<Task<TResponse>> action,
+        string toolName)
+    {
+        try
+        {
+            var response = await action().ConfigureAwait(false);
+            var structuredContent = JsonSerializer.SerializeToNode(
+                response,
+                McpJsonUtilities.DefaultOptions);
+            return new CallToolResult
+            {
+                Content =
+                [
+                    new TextContentBlock
+                    {
+                        Text = structuredContent?.ToJsonString(McpJsonUtilities.DefaultOptions) ?? "null"
+                    }
+                ],
+                StructuredContent = structuredContent
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (McpException)
+        {
+            throw;
+        }
+        catch (ProcessSelectionAmbiguityException ex)
+        {
+            var tool = string.IsNullOrWhiteSpace(toolName) ? "unknown" : toolName;
+            return new CallToolResult
+            {
+                IsError = true,
+                Content = [new TextContentBlock { Text = $"tool={tool}: {ex.Message}" }],
+                StructuredContent = JsonSerializer.SerializeToNode(
+                    ex.Ambiguity,
+                    McpJsonUtilities.DefaultOptions)
+            };
+        }
+        catch (Exception ex)
+        {
+            throw CreateMcpException(ex, toolName);
+        }
+    }
+
     private static McpException CreateMcpException(Exception ex, string toolName)
     {
         var baseException = ex.GetBaseException();
@@ -122,6 +180,16 @@ internal static class McpToolErrors
             "no_hit_at_point" => first,
             "invalid_request" => first,
             "ambiguous_element" => first,
+            "ambiguous_process" => first,
+            "stale_process_candidate" => first,
+            "stale_session" => first,
+            "stale_window" => first,
+            "session_replacement_in_progress" => first,
+            "target_process_still_running" => first,
+            "process_not_found" => first,
+            "process_identity_unavailable" => first,
+            "process_state_unavailable" => first,
+            "active_window_unavailable" => first,
             "interaction_policy_blocked" => first,
             "screenshot_viewport_unstable" => first,
             "viewport_conditions_unstable" => first,

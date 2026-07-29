@@ -156,7 +156,7 @@ see `README.md` for the current profile split and configuration.
 | Tool | Description | Parameters |
 |---|---|---|
 | `launch_app` | Start a WPF application and create a session | Executable path, optional arguments, working directory, interaction policy |
-| `attach_to_app` | Attach to an already-running process without activating it | Process name or PID, interaction policy |
+| `attach_to_app` | Attach to one unambiguous process without activating it, or replace an exited session with a fully initialized successor | Process name, PID, or candidate `processInstanceId`; optional exited `sessionId`; interaction policy |
 | `detach_session` | Remove inspection state and release client resources without stopping the application | `sessionId` |
 | `close_app` | Request a graceful application close, remove the session, and report request/process outcomes separately | `sessionId` + timeout |
 | `terminate_app` | Forcefully terminate the application, remove the session, and report the observed process outcome | `sessionId` + timeout |
@@ -173,6 +173,28 @@ attempt, and observed process exit. The deprecated `Closed` field mirrors
 historical `Closed = true` response after session removal. Detach also reports
 whether its before/after process-state probes succeeded so an unobservable state
 is not reported as a confirmed exit.
+
+A session represents exactly one process instance, keyed by PID plus process
+start time. Process-name attachment returns structured candidates rather than
+silently choosing when multiple live instances match. Candidate retries use an
+opaque `processInstanceId` so PID reuse or candidate exit fails as
+`stale_process_candidate` without falling through to another process.
+The `launch_app` existing-instance fallback uses the same structured ambiguity
+result instead of choosing an existing process by recency.
+
+Replacing an exited session creates a fresh controller, session ID, and active
+window history. The successor is fully attached and its main window is pinned
+before the predecessor is atomically retired. Predecessor subscriptions are
+stopped after that registry commit and before the response is returned, so a
+failed pre-commit replacement does not remove them. The durable interaction
+policy is inherited unless explicitly overridden. Retired session IDs remain
+as bounded tombstones and report
+`stale_session: process_replaced` with the successor ID; every prior HWND and
+element ID is therefore explicitly stale and must be reacquired. The successor
+also recognizes transferred predecessor identities and reports
+`stale_window: process_replaced` or `stale_element: process_replaced` when one
+is reused directly. Ambiguous or failed preparation is atomic and leaves the
+predecessor unchanged.
 
 ### Desktop Interaction Policy
 
@@ -405,6 +427,9 @@ large app with scenario pages:
   Grid allocation, dedicated spacer columns, splitter ownership, implicit
   cells, empty and bounded clipping, transforms, z-order, and comparable
   window-DIP/physical-screen bounds.
+- `WpfToolsMcp.TestApp.LifecycleProbe`: deterministic process exit, same-name
+  multi-instance candidate reporting, successor-session recovery, stable UIA
+  identities, graceful-close veto, and child-process lifecycle coverage.
 - `WpfToolsMcp.TestApp.Dialogs`: WPF modal windows plus a deterministic native
   open-file dialog with owner/modal metadata, UIA semantics, and lifecycle
   restoration.
@@ -434,8 +459,9 @@ test project. It builds and launches the focused WPF fixtures and starts the
 real stdio MCP server. Coverage includes:
 
 - tool-profile composition and compact-schema contracts;
-- session lifecycle, restart/reconnect, active-window recovery, and element
-  handle recovery;
+- session lifecycle, MCP-server reconnect, target-process replacement,
+  same-name candidate ambiguity, process-instance selection, active-window
+  recovery, and stale session/window/element identity reporting;
 - UIA and WPF tree inspection, locator export, properties, bindings,
   DataContext, computed-property provenance, layout context, styles, templates,
   and coverage diagnostics;

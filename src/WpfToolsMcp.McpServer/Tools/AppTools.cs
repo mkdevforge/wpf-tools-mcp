@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using WpfToolsMcp.Automation;
 using WpfToolsMcp.Contracts;
@@ -9,8 +10,8 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class AppTools
 {
-    [McpServerTool(Name = "launch_app"), Description("Start a WPF application.")]
-    public static Task<LaunchAppResponse> LaunchApp(
+    [McpServerTool(Name = "launch_app"), Description("Start a WPF application. Existing-instance fallback returns structured candidates when ambiguous.")]
+    public static Task<CallToolResult> LaunchApp(
         SessionManager sessions,
         [Description("Executable path")] string exePath,
         [Description("Optional arguments")] string[]? args = null,
@@ -19,7 +20,7 @@ public static class AppTools
         [Description("If launch cannot resolve a main window, try attaching to an existing instance")] bool reuseExistingInstance = true,
         [Description("Session interaction policy")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default) =>
-        McpToolErrors.RunAsync(() =>
+        McpToolErrors.RunLaunchAppAsync(() =>
             sessions.LaunchAppAsync(
                 new LaunchAppRequest(
                     exePath,
@@ -30,22 +31,33 @@ public static class AppTools
                     interactionPolicy),
                 cancellationToken));
 
-    [McpServerTool(Name = "attach_to_app"), Description("Attach to an already running process.")]
-    public static Task<AttachToAppResponse> AttachToApp(
+    [McpServerTool(Name = "attach_to_app"), Description("Attach to one unambiguous process, or replace an exited session while preserving durable policy. Ambiguous names return structured candidates.")]
+    public static Task<CallToolResult> AttachToApp(
         SessionManager sessions,
+        SubscriptionManager subscriptions,
         [Description("Process ID")] int? pid = null,
         [Description("Process name (supports dotted names and optional .exe suffix)")] string? processName = null,
+        [Description("Opaque process instance ID returned by an ambiguous_process candidate")] string? processInstanceId = null,
+        [Description("Exited session to replace; omit all target selectors to reuse its process name")] string? sessionId = null,
         [Description("Session interaction policy")] InteractionPolicy? interactionPolicy = null,
         CancellationToken cancellationToken = default)
     {
-        if (pid is not null && !string.IsNullOrWhiteSpace(processName))
+        sessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId.Trim();
+        var selectors = (pid is not null ? 1 : 0) +
+                        (!string.IsNullOrWhiteSpace(processName) ? 1 : 0) +
+                        (!string.IsNullOrWhiteSpace(processInstanceId) ? 1 : 0);
+        if (selectors > 1 || (string.IsNullOrWhiteSpace(sessionId) && selectors != 1))
         {
-            throw new ArgumentException("Provide either pid or processName, not both.");
+            throw new ArgumentException(
+                "Provide exactly one of pid, processName, or processInstanceId; an exited sessionId may omit the target selector.");
         }
 
-        return McpToolErrors.RunAsync(() =>
+        return McpToolErrors.RunAttachToAppAsync(() =>
             sessions.AttachToAppAsync(
-                new AttachToAppRequest(pid, processName, interactionPolicy),
+                new AttachToAppRequest(pid, processName, interactionPolicy, sessionId, processInstanceId),
+                string.IsNullOrWhiteSpace(sessionId)
+                    ? null
+                    : () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
                 cancellationToken));
     }
 

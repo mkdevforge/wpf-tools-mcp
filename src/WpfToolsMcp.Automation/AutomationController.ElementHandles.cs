@@ -124,6 +124,12 @@ public sealed partial class AutomationController
         {
             var id = elementId.Trim();
             var release = _elementHandles.Release(id);
+            if (!release.Released && IsRetiredElementId(id))
+            {
+                throw new InvalidOperationException(
+                    $"stale_element: process_replaced for '{id}'. Call resolve_element again in the successor session.");
+            }
+
             if (!string.IsNullOrWhiteSpace(release.WpfAgentElementIdToRelease))
             {
                 try
@@ -653,6 +659,12 @@ public sealed partial class AutomationController
     {
         if (!_elementHandles.TryGet(elementId, out var handle))
         {
+            if (IsRetiredElementId(elementId))
+            {
+                throw new InvalidOperationException(
+                    $"stale_element: process_replaced for '{elementId}'. Call resolve_element again in the successor session.");
+            }
+
             throw new InvalidOperationException($"Unknown elementId '{elementId}'. Call resolve_element again.");
         }
 
@@ -1175,6 +1187,16 @@ public sealed partial class AutomationController
                 _lru.Clear();
                 _lruNodes.Clear();
                 _wpfAgentHandleReferenceCounts.Clear();
+            }
+        }
+
+        public (IReadOnlyList<string> ElementIds, IReadOnlyList<long> WindowHandles) SnapshotIdentities()
+        {
+            lock (_sync)
+            {
+                return (
+                    _entries.Keys.ToArray(),
+                    _entries.Values.Select(entry => entry.WindowHandle).Distinct().ToArray());
             }
         }
 
