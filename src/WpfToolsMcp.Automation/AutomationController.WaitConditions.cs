@@ -85,7 +85,8 @@ public sealed partial class AutomationController
 
         if (condition.Kind != WaitConditionKind.BoundsStable && condition.HoldForMs is not null)
         {
-            throw new ArgumentException("condition.holdForMs is supported by BoundsStable and value conditions only.");
+            throw new ArgumentException(
+                "condition.holdForMs is supported by BoundsStable and WPF property/DataContext value conditions only.");
         }
 
         ValidateElementConditionComparison(condition);
