@@ -293,6 +293,32 @@ public sealed partial class AutomationController
                     failureReason = "not_attached";
                     lastObservedValue = CreateUnavailableObservedValue(failureReason);
                 }
+                catch (Exception ex) when (
+                    ex is not OperationCanceledException &&
+                    !IsApplicationRunning(_application))
+                {
+                    return CreateTargetProcessExitedResponse(
+                        stateName,
+                        WaitBackend.Wpf,
+                        GetElapsedMilliseconds(start),
+                        attempts,
+                        lastObservation,
+                        lastObservedValue);
+                }
+                catch (Exception ex) when (
+                    ex is not OperationCanceledException &&
+                    !client.IsConnected)
+                {
+                    return CreateStructuredFailureResponse(
+                        stateName,
+                        WaitBackend.Wpf,
+                        start,
+                        attempts,
+                        lastObservation,
+                        lastObservedValue,
+                        "agent_connection_lost",
+                        "agent_connection_lost");
+                }
 
                 if (observation is not null)
                 {
@@ -439,7 +465,7 @@ public sealed partial class AutomationController
 
                 drainImmediately = poll.HasMore;
 
-                if (poll.DroppedSinceLastPoll > 0)
+                if (poll.DroppedSinceLastPoll > 0 || poll.CoalescedSinceLastPoll > 0)
                 {
                     hold.Reset();
                     currentSatisfied = false;
@@ -559,6 +585,11 @@ public sealed partial class AutomationController
         ref string failureReason,
         ref bool currentSatisfied)
     {
+        if (observationEvent.CoalescedChangeCount > 0)
+        {
+            hold.Reset();
+        }
+
         lastObservedValue = WaitConditionEvaluator.FromObserveStateValue(observationEvent.NewValue);
         var evaluation = WaitConditionEvaluator.Evaluate(lastObservedValue, comparison, expected);
         currentSatisfied = evaluation.Satisfied;
