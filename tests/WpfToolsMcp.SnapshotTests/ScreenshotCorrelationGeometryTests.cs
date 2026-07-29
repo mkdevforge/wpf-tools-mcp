@@ -91,6 +91,56 @@ public sealed class ScreenshotCorrelationGeometryTests
     }
 
     [Test]
+    public void Image_point_selected_from_ancestor_clipped_region_round_trips_inside_the_rendered_area()
+    {
+        var capturedBounds = new Rect(100, 200, 150, 90);
+        var targetBounds = new Rect(190, 220, 90, 40);
+        var ancestorClip = new Rect(170, 200, 45, 80);
+        var nominalCapturedTarget = ScreenshotCorrelationGeometry.Intersect(targetBounds, capturedBounds)!;
+        var nominalCenter = new ScreenshotCorrelationPoint(
+            nominalCapturedTarget.X + nominalCapturedTarget.Width / 2,
+            nominalCapturedTarget.Y + nominalCapturedTarget.Height / 2);
+        var renderedRegion = ScreenshotCorrelationGeometry.Intersect(nominalCapturedTarget, ancestorClip)!;
+
+        var imageRegion = ScreenshotCorrelationGeometry.MapScreenRegionToImage(
+            renderedRegion,
+            imageWidth: 100,
+            imageHeight: 60,
+            capturedBounds: capturedBounds)!;
+        var imagePoint = new Rect(
+            imageRegion.X + imageRegion.Width / 2,
+            imageRegion.Y + imageRegion.Height / 2,
+            1,
+            1);
+        var mappedPointRegion = ScreenshotCorrelationGeometry.MapImageRegionToScreen(
+            imagePoint,
+            imageWidth: 100,
+            imageHeight: 60,
+            capturedBounds: capturedBounds);
+        var mappedPoint = ScreenshotCorrelationGeometry.GetCanonicalScreenPoint(mappedPointRegion);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                ScreenshotCorrelationGeometry.ContainsPoint(ancestorClip, nominalCenter.X, nominalCenter.Y),
+                Is.False,
+                "Centering only the target/client intersection reproduces the clipped-pixel bug.");
+            Assert.That(
+                ScreenshotCorrelationGeometry.ContainsPoint(renderedRegion, mappedPoint.X, mappedPoint.Y),
+                Is.True);
+            Assert.That(
+                ScreenshotCorrelationGeometry.ContainsPoint(targetBounds, mappedPoint.X, mappedPoint.Y),
+                Is.True);
+            Assert.That(
+                ScreenshotCorrelationGeometry.ContainsPoint(capturedBounds, mappedPoint.X, mappedPoint.Y),
+                Is.True);
+            Assert.That(
+                ScreenshotCorrelationGeometry.ContainsPoint(ancestorClip, mappedPoint.X, mappedPoint.Y),
+                Is.True);
+        });
+    }
+
+    [Test]
     public void Screen_region_outside_capture_has_no_image_mapping()
     {
         var mapped = ScreenshotCorrelationGeometry.MapScreenRegionToImage(

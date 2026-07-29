@@ -172,6 +172,12 @@ public sealed class ScreenshotCorrelationTests
                 Does.Contain("Correlation_FrontElement"),
                 DescribeCandidates(wpf.Candidates));
             Assert.That(
+                wpf.Candidates.Where(candidate =>
+                    candidate.Element.AutomationId is "Correlation_BackElement" or "Correlation_FrontElement")
+                    .All(candidate => candidate.MatchKind == ScreenshotCorrelationMatchKind.RenderedHit),
+                Is.True,
+                DescribeCandidates(wpf.Candidates));
+            Assert.That(
                 correlation.Backends.SelectMany(result => result.Candidates)
                     .Where(candidate => candidate.Ancestors is not null)
                     .All(candidate => candidate.Ancestors!.Count <= 3),
@@ -232,10 +238,6 @@ public sealed class ScreenshotCorrelationTests
             Assert.That(
                 visibleWpf.Candidates.Single(candidate => candidate.Index == visibleWpf.DirectHitIndex).Element.AutomationId,
                 Is.EqualTo("Correlation_ClippedElement"));
-            Assert.That(
-                visibleWpf.Candidates.Single(candidate =>
-                    candidate.Element.AutomationId == "Correlation_ClippedDecoration").MatchKind,
-                Is.EqualTo(ScreenshotCorrelationMatchKind.RenderedHit));
             Assert.That(visibleCorrelation.ScreenPointPhysicalPixels, Is.Not.Null);
             Assert.That(clippedAwayCorrelation.ScreenPointPhysicalPixels, Is.Not.Null);
             Assert.That(
@@ -251,6 +253,7 @@ public sealed class ScreenshotCorrelationTests
     public async Task Element_capture_reports_clipping_and_preserves_full_capture_context()
     {
         var clipped = await ResolveAsync("Correlation_ClippedElement", "wpf");
+        var clipHost = await ResolveAsync("Correlation_ClipHost", "wpf");
         var baselinePath = CreateArtifactPath("clipped-element-baseline");
         var baseline = await _mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
         {
@@ -267,16 +270,34 @@ public sealed class ScreenshotCorrelationTests
         });
 
         Assert.That(baseline.WasClipped, Is.True, "The fixture target must protrude beyond the client capture area.");
-        var visibleScreenRegion = ScreenshotCorrelationGeometry.Intersect(
+        var visibleWithinHost = ScreenshotCorrelationGeometry.Intersect(
             clipped.Element.Bounds!,
+            clipHost.Element.Bounds!);
+        Assert.That(visibleWithinHost, Is.Not.Null);
+        var visibleScreenRegion = ScreenshotCorrelationGeometry.Intersect(
+            visibleWithinHost!,
             baseline.CapturedBounds);
         Assert.That(visibleScreenRegion, Is.Not.Null);
-        var imageRegion = ScreenshotCorrelationGeometry.MapScreenRegionToImage(
-            CenterRegion(visibleScreenRegion!, width: 1, height: 1),
+        var visibleImageRegion = ScreenshotCorrelationGeometry.MapScreenRegionToImage(
+            visibleScreenRegion!,
             baseline.Width,
             baseline.Height,
             baseline.CapturedBounds);
-        Assert.That(imageRegion, Is.Not.Null);
+        Assert.That(visibleImageRegion, Is.Not.Null);
+        var imagePoint = CenterRegion(visibleImageRegion!, width: 1, height: 1);
+        var roundTripScreenRegion = ScreenshotCorrelationGeometry.MapImageRegionToScreen(
+            imagePoint,
+            baseline.Width,
+            baseline.Height,
+            baseline.CapturedBounds);
+        var roundTripScreenPoint = ScreenshotCorrelationGeometry.GetCanonicalScreenPoint(roundTripScreenRegion);
+        Assert.That(
+            ScreenshotCorrelationGeometry.ContainsPoint(
+                visibleScreenRegion!,
+                roundTripScreenPoint.X,
+                roundTripScreenPoint.Y),
+            Is.True,
+            "The selected image pixel must map back inside the target's rendered sliver.");
 
         var response = await _mcp.CallToolAsync<TakeScreenshotResponse>("take_screenshot", new Dictionary<string, object?>
         {
@@ -292,8 +313,8 @@ public sealed class ScreenshotCorrelationTests
             ["outputPath"] = CreateArtifactPath("clipped-element-correlated"),
             ["correlation"] = new Dictionary<string, object?>
             {
-                ["x"] = imageRegion!.X,
-                ["y"] = imageRegion.Y,
+                ["x"] = imagePoint.X,
+                ["y"] = imagePoint.Y,
                 ["width"] = 1,
                 ["height"] = 1,
                 ["backend"] = "wpf",

@@ -98,11 +98,7 @@
                             Canvas.Left="122"
                             Canvas.Top="42"
                             Width="110"
-                            Height="60">
-                        <Border AutomationProperties.AutomationId="Correlation_ClippedDecoration"
-                                IsHitTestVisible="False"
-                                Background="Transparent" />
-                    </Button>
+                            Height="60" />
                 </Canvas>
             </Border>
 
