@@ -189,7 +189,7 @@ public sealed partial class AutomationController
                 elapsedMs: GetElapsedMilliseconds(structuredStart),
                 attempts: 0,
                 lastObservation: null,
-                lastObservedValue: null);
+                lastObservedValue: CreateUnavailableObservedValue("condition_not_observed"));
         }
     }
 

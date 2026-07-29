@@ -5056,6 +5056,22 @@ public sealed partial class AutomationController : IDisposable
                 $"{request.State} succeeded=false attempts={attempts} reason={lastFailureReason}");
             return timeoutResponse;
         }
+        catch (Exception ex) when (
+            structuredElementDeadline is not null &&
+            ex is not OperationCanceledException &&
+            !IsApplicationRunning(_application))
+        {
+            var targetExitedResponse = CreateTargetProcessExitedResponse(
+                request.State,
+                WaitBackend.Uia,
+                GetElapsedMilliseconds(start),
+                attempts,
+                lastObservation,
+                lastObservedValue);
+            trace?.SetSummary(
+                $"{request.State} succeeded=false attempts={attempts} reason=target_process_exited");
+            return targetExitedResponse;
+        }
     }
         catch (Exception ex)
         {
@@ -5360,6 +5376,19 @@ public sealed partial class AutomationController : IDisposable
                 lastObservedValue,
                 lastFailureReason,
                 throwOnTimeout);
+        }
+        catch (Exception ex) when (
+            structuredElementDeadline is not null &&
+            ex is not OperationCanceledException &&
+            !IsApplicationRunning(_application))
+        {
+            return CreateTargetProcessExitedResponse(
+                stateText,
+                WaitBackend.Wpf,
+                GetElapsedMilliseconds(start),
+                attempts,
+                lastObservation,
+                lastObservedValue);
         }
         catch (Exception ex) when (
             structuredElementDeadline is not null &&
