@@ -549,7 +549,7 @@ public sealed class StateObservationTests
             path: "Text",
             expected: "degraded",
             timeoutMs: 5_000,
-            pollIntervalMs: 250);
+            pollIntervalMs: 2_000);
         await WaitForMarkerAsync("ordered-complete", TimeSpan.FromSeconds(5), _testCts.Token);
 
         Assert.Multiple(() =>
