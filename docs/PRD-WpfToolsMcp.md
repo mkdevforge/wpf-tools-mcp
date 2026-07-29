@@ -143,7 +143,7 @@ see `README.md` for the current profile split and configuration.
 | `invoke` | Invoke through WPF-native or UIA semantic patterns | Locator |
 | `scroll_to_element` | Scroll a container to bring an element into view | Locator of the target element |
 | `drag` | Send physical pointer input from an element to another element or screen coordinates | Source locator/elementId + target locator/elementId or `toX/toY` |
-| `wait_for` | Wait for an element to satisfy a state | Locator/elementId + state + timeout |
+| `wait_for` | Wait for a typed element, WPF value, or same-process window condition; compatibility string states remain supported | Locator/elementId or window selector + advertised condition + bounded timeout; returns backend, reason code, and last observed value |
 | `get_active_window` | Get the active window for this session | `sessionId` |
 | `set_active_window` | Bring a window to the foreground and set it as the session’s active window | `sessionId` + window handle or title |
 | `set_window_bounds` | Move/resize a window by setting its bounds (outer window rectangle) | `sessionId` + optional `windowHandle` + `x/y/width/height` |
@@ -220,6 +220,40 @@ This support is deliberately narrower than general Windows automation. The
 native window must belong to the attached WPF process and expose useful UIA.
 Brokered system pickers, secure-desktop surfaces, cross-process dialogs, and
 owner-drawn controls without UIA are not inferred to be part of the session.
+
+### Wait Condition Contract
+
+The advertised `wait_for.condition` object replaces undiscoverable free-form
+state expansion while preserving all historical state strings. It includes
+typed element conditions (`Attached`, `Visible`, `Enabled`, `Actionable`,
+`BoundsStable`, `NumericValueEquals`, and `NameContains`), WPF
+`DependencyPropertyValue` and `DataContextValue` comparisons, and same-process
+`WindowOpen`/`WindowClosed` selectors. A request supplies either `state` or
+`condition`, never both. MCP calls default to throwing on a legacy timeout and
+returning a structured result for a typed timeout.
+
+WPF value operands are closed scalar values (`String`, `Number`, `Boolean`, or
+`Null`), not expressions. String comparison is ordinal, numeric values must be
+finite, and no coercion or caller-supplied code is evaluated. The WPF
+agent resolves the allowlisted dependency property or dotted DataContext path
+once and uses change notifications. Held comparisons use the observation
+timeline and are reset by a mismatch or delivery gap.
+
+`BoundsStable` observes only exact element bounds (`x`, `y`, `width`, and
+`height`) for the requested hold duration. Pixel equality, animation quiescence,
+and whole-render stability are outside this contract. Generic UIA child counts
+are also excluded: virtualization makes realized-child counts different from
+application collection counts. Callers should expose or observe a bounded
+application scalar such as `Items.Count` through DataContext or a dependency
+property.
+
+Timeout evidence includes `BackendUsed`, `ElapsedMs`, `Attempts`, stable
+`ReasonCode`/`FailureReason` values, `LastObservation`, and
+`LastObservedValue`. Process exit, agent connection loss, and WPF target unload
+are terminal and distinguishable from timeout. Effective timeouts are clamped
+to 0-60,000 ms, poll intervals to 25-2,000 ms, and hold durations are restricted
+to 0-5,000 ms. WPF comparisons reuse bounded target-side event queues; UIA
+element and Win32 window checks use bounded polling.
 
 ### Deterministic Viewport Contract
 

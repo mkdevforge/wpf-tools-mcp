@@ -243,6 +243,59 @@ therefore best effort.
 Locator resolution is also bounded: `maxNodes` defaults to 5,000 and is capped
 at 20,000. Reusing a resolved `elementId` avoids that scan entirely.
 
+### Typed Wait Conditions
+
+`wait_for` accepts either a compatibility `state` string or a structured
+`condition`; the two forms are mutually exclusive. Existing states remain
+available: `attached`, `visible`, `enabled`, `actionable`, `stable`,
+`value_equals`, and `name_contains`. Structured conditions advertise the same
+element checks as `Attached`, `Visible`, `Enabled`, `Actionable`,
+`BoundsStable`, `NumericValueEquals`, and `NameContains`, and add WPF value and
+window lifecycle checks.
+
+WPF `DependencyPropertyValue` and `DataContextValue` conditions observe a named
+property or dotted DataContext path without evaluating caller-supplied code.
+Expected values are explicitly typed as `String`, `Number`, `Boolean`, or
+`Null`. Comparisons support `Equals`, `NotEquals`, string `Contains`, and the
+four ordered numeric comparisons. For example:
+
+```json
+{
+  "sessionId": "session-id",
+  "locator": { "automationId": "StatusText" },
+  "condition": {
+    "kind": "DataContextValue",
+    "dataContextPath": "Operation.Status",
+    "comparison": "Equals",
+    "expected": { "kind": "String", "stringValue": "Complete" },
+    "holdForMs": 100
+  },
+  "timeoutMs": 5000
+}
+```
+
+These WPF value waits use the target-side change-notification machinery rather
+than repeatedly walking or serializing the visual tree. The structured
+`WindowOpen` and `WindowClosed` conditions sample visible, same-process
+top-level HWNDs by handle, exact/partial title, owner, or framework. An exact
+handle close wait tracks that HWND until it is destroyed; title-only close
+waits mean that no visible matching window remains.
+
+`BoundsStable` means the element's exact `x`, `y`, `width`, and `height` remain
+unchanged for `holdForMs` (or the compatibility `stableMs`). It does not claim
+pixel, animation, or whole-render stability. A generic UIA collection-count
+condition is intentionally excluded because virtualized controls expose only
+realized children. Observe an application-owned scalar such as the
+`Items.Count` DataContext path or a dedicated dependency property instead.
+
+Structured MCP waits return timeouts rather than throwing by default. Results
+include `backendUsed`, `elapsedMs`, `attempts`, `reasonCode`, the evaluation
+`failureReason`, and `lastObservedValue`; target exit and WPF element unload
+have distinct reason codes. Legacy waits retain their throwing default. The
+effective timeout is bounded to 0-60 seconds, polling to 25-2,000 ms, and
+`holdForMs` to 0-5,000 ms. Queues and event batches remain bounded as described
+under live WPF state observation.
+
 ### Application-Owned Native Dialogs
 
 An attached WPF process can own native top-level windows such as the Windows
