@@ -182,22 +182,18 @@ public sealed class MinimalInteractionSnapshots
             var result = await _mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
             {
                 ["sessionId"] = _sessionId,
-                ["backend"] = "uia",
                 ["locator"] = new Dictionary<string, object?>
                 {
-                    ["automationId"] = "ClickStatus"
+                    ["nameContains"] = "Clicks:"
                 },
-                ["condition"] = new Dictionary<string, object?>
-                {
-                    ["kind"] = WaitConditionKind.Visible.ToString()
-                },
+                ["state"] = "visible",
                 ["timeoutMs"] = 0,
             });
 
             Assert.Multiple(() =>
             {
                 Assert.That(result.Succeeded, Is.True);
-                Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Uia));
+                Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Wpf));
                 Assert.That(result.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
                 Assert.That(result.LastObservedValue?.Value?.GetValue<bool>(), Is.True);
             });
@@ -219,12 +215,84 @@ public sealed class MinimalInteractionSnapshots
             var result = await _mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
             {
                 ["sessionId"] = _sessionId,
-                ["backend"] = "uia",
                 ["locator"] = new Dictionary<string, object?>
                 {
-                    ["automationId"] = "ClickStatus"
+                    ["nameContains"] = "Clicks:"
                 },
-                ["condition"] = new Dictionary<string, object?>
+                ["state"] = "name_contains",
+                ["expectedText"] = "Clicks: 999",
+                ["timeoutMs"] = 0,
+                ["throwOnTimeout"] = false,
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Succeeded, Is.False);
+                Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Wpf));
+                Assert.That(result.ReasonCode, Is.EqualTo("wait_timeout"));
+                Assert.That(result.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+                Assert.That(result.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("Clicks: 0"));
+            });
+
+            var defaultTimeout = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            {
+                _ = await _mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _sessionId,
+                    ["locator"] = new Dictionary<string, object?>
+                    {
+                        ["nameContains"] = "Clicks:"
+                    },
+                    ["state"] = "name_contains",
+                    ["expectedText"] = "Clicks: 999",
+                    ["timeoutMs"] = 0
+                });
+            });
+            Assert.That(defaultTimeout!.Message, Does.Contain("timeout"));
+
+            await Verifier.Verify(ToStableStructuredWait(result));
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task Structured_wait_for_visible_reports_uia_evidence()
+    {
+        await LaunchMinimalAppAsync();
+        try
+        {
+            var result = await CallStructuredUiaWaitAsync(
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = WaitConditionKind.Visible.ToString()
+                },
+                timeoutMs: 0);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Succeeded, Is.True);
+                Assert.That(result.State, Is.EqualTo("visible"));
+                Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Uia));
+                Assert.That(result.LastObservedValue?.Value?.GetValue<bool>(), Is.True);
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task Structured_wait_for_name_timeout_returns_actual_uia_value()
+    {
+        await LaunchMinimalAppAsync();
+        try
+        {
+            var result = await CallStructuredUiaWaitAsync(
+                new Dictionary<string, object?>
                 {
                     ["kind"] = WaitConditionKind.NameContains.ToString(),
                     ["comparison"] = WaitComparison.Contains.ToString(),
@@ -234,25 +302,36 @@ public sealed class MinimalInteractionSnapshots
                         ["stringValue"] = "Clicks: 999"
                     }
                 },
-                ["timeoutMs"] = 0,
-            });
+                timeoutMs: 0);
 
             Assert.Multiple(() =>
             {
                 Assert.That(result.Succeeded, Is.False);
                 Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Uia));
                 Assert.That(result.ReasonCode, Is.EqualTo("wait_timeout"));
-                Assert.That(result.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
                 Assert.That(result.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("Clicks: 0"));
             });
-
-            await Verifier.Verify(ToStableStructuredWait(result));
         }
         finally
         {
             await CloseAppAsync();
         }
     }
+
+    private Task<WaitForResponse> CallStructuredUiaWaitAsync(
+        Dictionary<string, object?> condition,
+        int timeoutMs) =>
+        _mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["backend"] = "uia",
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "ClickStatus"
+            },
+            ["condition"] = condition,
+            ["timeoutMs"] = timeoutMs
+        });
 
     private static object ToStableStructuredWait(WaitForResponse response) => new
     {

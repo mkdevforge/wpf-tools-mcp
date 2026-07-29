@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json.Nodes;
 using FlaUI.Core.AutomationElements;
@@ -13,6 +14,9 @@ public sealed partial class AutomationController
     private const int MinWaitPollIntervalMs = 25;
     private const int MaxWaitPollIntervalMs = 2_000;
     private const int MaxWaitHoldMs = 5_000;
+    private const int MaxWaitDesktopWindowsScanned = 2_048;
+    private const int MaxWaitWindowCandidates = 128;
+    private const int MaxWaitWindowFrameworkProbes = 16;
 
     private async Task<WaitForResponse> WaitForConditionAsync(
         WaitForRequest request,
@@ -258,6 +262,21 @@ public sealed partial class AutomationController
             while (observation is null)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                if (attempts > 0 && GetElapsedMilliseconds(start) >= timeoutMs)
+                {
+                    return CreateStructuredTimeoutResponse(
+                        request,
+                        stateName,
+                        WaitBackend.Wpf,
+                        timeoutMs,
+                        start,
+                        attempts,
+                        lastObservation,
+                        lastObservedValue,
+                        failureReason);
+                }
+
                 attempts++;
 
                 if (!IsApplicationRunning(_application))
@@ -339,7 +358,11 @@ public sealed partial class AutomationController
                         failureReason);
                 }
 
-                await Task.Delay(pollIntervalMs, cancellationToken).ConfigureAwait(false);
+                var elapsedMs = GetElapsedMilliseconds(start);
+                var remainingMs = Math.Max(1, timeoutMs - elapsedMs);
+                await Task.Delay(
+                    Math.Min(pollIntervalMs, remainingMs),
+                    cancellationToken).ConfigureAwait(false);
             }
 
             lastObservation = ToWpfWaitObservation(observation.Started.Element, windowHandle);
@@ -461,6 +484,31 @@ public sealed partial class AutomationController
                         lastObservedValue,
                         reasonCode,
                         reasonCode);
+                }
+
+                if (!IsApplicationRunning(_application))
+                {
+                    return CreateTargetProcessExitedResponse(
+                        stateName,
+                        WaitBackend.Wpf,
+                        GetElapsedMilliseconds(start),
+                        attempts,
+                        lastObservation,
+                        lastObservedValue);
+                }
+
+                if (GetElapsedMilliseconds(start) >= timeoutMs)
+                {
+                    return CreateStructuredTimeoutResponse(
+                        request,
+                        stateName,
+                        WaitBackend.Wpf,
+                        timeoutMs,
+                        start,
+                        attempts,
+                        lastObservation,
+                        lastObservedValue,
+                        failureReason);
                 }
 
                 drainImmediately = poll.HasMore;
@@ -663,7 +711,8 @@ public sealed partial class AutomationController
         {
             WaitForState.Attached => BooleanObservedValue(true),
             WaitForState.Visible => node.IsVisible is bool isVisible
-                ? BooleanObservedValue(isVisible)
+                ? BooleanObservedValue(
+                    isVisible && node.Bounds is { Width: > 0, Height: > 0 })
                 : CreateUnavailableObservedValue("visible_unknown"),
             WaitForState.Enabled => node.IsEnabled is bool isEnabled
                 ? BooleanObservedValue(isEnabled)
@@ -708,8 +757,14 @@ public sealed partial class AutomationController
         IReadOnlyList<ComputedPropertyInfo> properties,
         string? expectedText)
     {
+        var propertyCandidates = new[] { "Text", "Content", "Header", "Name" }
+            .Select(propertyName => properties.FirstOrDefault(property =>
+                string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))?.Value)
+            .Where(value => value is not null)
+            .Cast<string>()
+            .ToArray();
         var candidates = new[] { node.Name }
-            .Concat(properties.Select(property => property.Value))
+            .Concat(propertyCandidates)
             .Where(value => value is not null)
             .Cast<string>()
             .ToArray();
@@ -723,7 +778,9 @@ public sealed partial class AutomationController
             }
         }
 
-        return candidates.FirstOrDefault() is { } first
+        return propertyCandidates.FirstOrDefault() is { } firstProperty
+            ? StringObservedValue(firstProperty)
+            : candidates.FirstOrDefault() is { } first
             ? StringObservedValue(first)
             : CreateUnavailableObservedValue("value_unavailable");
     }
@@ -825,27 +882,71 @@ public sealed partial class AutomationController
         WaitForObservation? lastObservation = null;
         WaitObservedValue? lastObservedValue = null;
         var automation = EnsureAutomation();
+        var failureReason = condition.Kind == WaitConditionKind.WindowOpen
+            ? "window_not_open"
+            : "window_still_open";
+        WaitWindowIdentity? exactIdentity = null;
+        var exactSelectorValidated = false;
+
+        WaitForResponse Timeout() => CreateStructuredTimeoutResponse(
+            request,
+            stateName,
+            WaitBackend.Win32,
+            timeoutMs,
+            start,
+            attempts,
+            lastObservation,
+            lastObservedValue,
+            failureReason);
+
+        WaitForResponse TargetExited() => CreateTargetProcessExitedResponse(
+            stateName,
+            WaitBackend.Win32,
+            GetElapsedMilliseconds(start),
+            attempts,
+            lastObservation,
+            lastObservedValue);
 
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (attempts > 0 && GetElapsedMilliseconds(start) >= timeoutMs)
+            {
+                return Timeout();
+            }
+
             attempts++;
 
             if (!IsApplicationRunning(_application))
             {
-                return CreateTargetProcessExitedResponse(
-                    stateName,
-                    WaitBackend.Win32,
-                    GetElapsedMilliseconds(start),
-                    attempts,
-                    lastObservation,
-                    lastObservedValue);
+                return TargetExited();
             }
 
             if (condition.Kind == WaitConditionKind.WindowOpen)
             {
-                var matches = ObserveWaitWindows(processId, selector, automation);
-                var current = matches.FirstOrDefault();
+                var scan = ObserveWaitWindows(processId, selector, automation);
+                var current = scan.Matches.FirstOrDefault();
+                if (current is null && scan.LastCandidate is not null)
+                {
+                    lastObservation = ToWaitObservation(scan.LastCandidate);
+                    lastObservedValue = ToWindowObservedValue(scan.LastCandidate);
+                }
+
+                failureReason = scan.FrameworkMetadataUnavailable
+                    ? "window_framework_unavailable"
+                    : "window_not_open";
+
+                if (!IsApplicationRunning(_application))
+                {
+                    return TargetExited();
+                }
+
+                if (attempts > 1 && GetElapsedMilliseconds(start) >= timeoutMs)
+                {
+                    return Timeout();
+                }
+
                 if (current is not null)
                 {
                     lastObservation = ToWaitObservation(current);
@@ -859,53 +960,115 @@ public sealed partial class AutomationController
                         lastObservedValue);
                 }
 
-                lastObservedValue = CreateUnavailableObservedValue("window_not_open");
+                lastObservedValue ??= CreateUnavailableObservedValue(failureReason);
+            }
+            else if (selector.Handle is long handle)
+            {
+                var requiresFramework = !string.IsNullOrWhiteSpace(selector.FrameworkId);
+                var current = ObserveWaitWindow(
+                    new IntPtr(handle),
+                    processId,
+                    automation,
+                    requireVisible: false,
+                    includeFrameworkId: requiresFramework && !exactSelectorValidated);
+
+                if (!IsApplicationRunning(_application))
+                {
+                    return TargetExited();
+                }
+
+                if (attempts > 1 && GetElapsedMilliseconds(start) >= timeoutMs)
+                {
+                    return Timeout();
+                }
+
+                if (current is null)
+                {
+                    return CreateStructuredSuccessResponse(
+                        stateName,
+                        WaitBackend.Win32,
+                        start,
+                        attempts,
+                        lastObservation,
+                        CreateUnavailableObservedValue("window_closed"));
+                }
+
+                if (exactIdentity is null)
+                {
+                    exactIdentity = current.Identity;
+                    if (!MatchesNativeWindowSelector(current, selector))
+                    {
+                        throw CreateWindowSelectorMismatchException(handle);
+                    }
+                }
+                else if (!SameWaitWindowIdentity(exactIdentity, current.Identity))
+                {
+                    return CreateStructuredSuccessResponse(
+                        stateName,
+                        WaitBackend.Win32,
+                        start,
+                        attempts,
+                        lastObservation,
+                        CreateUnavailableObservedValue("window_closed"));
+                }
+
+                if (!exactSelectorValidated)
+                {
+                    if (requiresFramework && !current.FrameworkIdAvailable)
+                    {
+                        failureReason = "window_framework_unavailable";
+                    }
+                    else if (requiresFramework && !MatchesFrameworkSelector(current, selector))
+                    {
+                        throw CreateWindowSelectorMismatchException(handle);
+                    }
+                    else
+                    {
+                        exactSelectorValidated = true;
+                        failureReason = "window_still_open";
+                    }
+                }
+
+                lastObservation = ToWaitObservation(current);
+                lastObservedValue = ToWindowObservedValue(current);
             }
             else
             {
-                if (selector.Handle is long handle)
+                var scan = ObserveWaitWindows(processId, selector, automation);
+                var current = scan.Matches.FirstOrDefault();
+                if (current is null && scan.LastCandidate is not null)
                 {
-                    var current = ObserveWaitWindow(
-                        new IntPtr(handle),
-                        processId,
-                        automation,
-                        requireVisible: false);
-                    if (current is null)
-                    {
-                        return CreateStructuredSuccessResponse(
-                            stateName,
-                            WaitBackend.Win32,
-                            start,
-                            attempts,
-                            lastObservation,
-                            CreateUnavailableObservedValue("window_closed"));
-                    }
-
-                    if (attempts == 1 && !MatchesWindowSelector(current, selector))
-                    {
-                        throw new InvalidOperationException(
-                            $"window_selector_mismatch: live HWND {handle} does not match the additional " +
-                            "title, owner, or framework selector fields.");
-                    }
-
-                    lastObservation = ToWaitObservation(current);
-                    lastObservedValue = ToWindowObservedValue(current);
+                    lastObservation = ToWaitObservation(scan.LastCandidate);
+                    lastObservedValue = ToWindowObservedValue(scan.LastCandidate);
                 }
-                else
-                {
-                    var matches = ObserveWaitWindows(processId, selector, automation);
-                    var current = matches.FirstOrDefault();
-                    if (current is null)
-                    {
-                        return CreateStructuredSuccessResponse(
-                            stateName,
-                            WaitBackend.Win32,
-                            start,
-                            attempts,
-                            lastObservation,
-                            CreateUnavailableObservedValue("window_closed"));
-                    }
 
+                failureReason = scan.FrameworkMetadataUnavailable
+                    ? "window_framework_unavailable"
+                    : "window_still_open";
+
+                if (!IsApplicationRunning(_application))
+                {
+                    return TargetExited();
+                }
+
+                if (attempts > 1 && GetElapsedMilliseconds(start) >= timeoutMs)
+                {
+                    return Timeout();
+                }
+
+                if (current is null && !scan.FrameworkMetadataUnavailable)
+                {
+                    return CreateStructuredSuccessResponse(
+                        stateName,
+                        WaitBackend.Win32,
+                        start,
+                        attempts,
+                        lastObservation,
+                        CreateUnavailableObservedValue("window_closed"));
+                }
+
+                if (current is not null)
+                {
                     lastObservation = ToWaitObservation(current);
                     lastObservedValue = ToWindowObservedValue(current);
                 }
@@ -914,32 +1077,13 @@ public sealed partial class AutomationController
             var elapsedMs = GetElapsedMilliseconds(start);
             if (elapsedMs >= timeoutMs)
             {
-                var failureReason = condition.Kind == WaitConditionKind.WindowOpen
-                    ? "window_not_open"
-                    : "window_still_open";
-                var response = new WaitForResponse(
-                    Succeeded: false,
-                    State: stateName,
-                    ElapsedMs: elapsedMs,
-                    Attempts: attempts,
-                    LastObservation: lastObservation,
-                    FailureReason: failureReason)
-                {
-                    BackendUsed = WaitBackend.Win32,
-                    ReasonCode = "wait_timeout",
-                    LastObservedValue = lastObservedValue
-                };
-
-                if (request.ThrowOnTimeout)
-                {
-                    throw new InvalidOperationException(
-                        $"timeout: wait_for condition='{stateName}' after {timeoutMs}ms ({failureReason}).");
-                }
-
-                return response;
+                return Timeout();
             }
 
-            await Task.Delay(pollIntervalMs, cancellationToken).ConfigureAwait(false);
+            var remainingMs = Math.Max(1, timeoutMs - elapsedMs);
+            await Task.Delay(
+                Math.Min(pollIntervalMs, remainingMs),
+                cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -988,30 +1132,99 @@ public sealed partial class AutomationController
         }
     }
 
-    private IReadOnlyList<ObservedWaitWindow> ObserveWaitWindows(
+    private static InvalidOperationException CreateWindowSelectorMismatchException(long handle) =>
+        new(
+            $"window_selector_mismatch: live HWND {handle} does not match the additional " +
+            "title, owner, or framework selector fields.");
+
+    private WindowMatchScan ObserveWaitWindows(
         int processId,
         WaitWindowSelector selector,
         FlaUI.UIA3.UIA3Automation automation)
     {
-        var windows = new List<ObservedWaitWindow>();
+        var matches = new List<ObservedWaitWindow>();
+        ObservedWaitWindow? lastCandidate = null;
+        var frameworkMetadataUnavailable = false;
+        var frameworkProbes = 0;
 
-        foreach (var hwnd in EnumerateVisibleTopLevelWindowHandles(processId))
+        IReadOnlyList<IntPtr> handles;
+        if (selector.Handle is long handle)
         {
-            var observed = ObserveWaitWindow(hwnd, processId, automation, requireVisible: true);
-            if (observed is not null && MatchesWindowSelector(observed, selector))
+            handles = [new IntPtr(handle)];
+        }
+        else
+        {
+            var handleScan = EnumerateBoundedVisibleWaitWindowHandles(processId);
+            if (handleScan.Truncated)
             {
-                windows.Add(observed);
+                throw new InvalidOperationException(
+                    $"wait_window_scan_limit: window sampling exceeded {MaxWaitDesktopWindowsScanned} " +
+                    $"desktop HWNDs or {MaxWaitWindowCandidates} same-process candidates.");
             }
+
+            handles = handleScan.Handles;
         }
 
-        return windows;
+        foreach (var hwnd in handles)
+        {
+            var observed = ObserveWaitWindow(
+                hwnd,
+                processId,
+                automation,
+                requireVisible: true,
+                includeFrameworkId: false);
+            if (observed is null || !MatchesNativeWindowSelector(observed, selector))
+            {
+                continue;
+            }
+
+            lastCandidate = observed;
+            if (!string.IsNullOrWhiteSpace(selector.FrameworkId))
+            {
+                frameworkProbes++;
+                if (frameworkProbes > MaxWaitWindowFrameworkProbes)
+                {
+                    throw new InvalidOperationException(
+                        $"wait_window_framework_probe_limit: more than {MaxWaitWindowFrameworkProbes} " +
+                        "native candidates require UI Automation framework inspection.");
+                }
+
+                observed = ObserveWaitWindow(
+                    hwnd,
+                    processId,
+                    automation,
+                    requireVisible: true,
+                    includeFrameworkId: true);
+                if (observed is null)
+                {
+                    continue;
+                }
+
+                lastCandidate = observed;
+                if (!observed.FrameworkIdAvailable)
+                {
+                    frameworkMetadataUnavailable = true;
+                    continue;
+                }
+
+                if (!MatchesFrameworkSelector(observed, selector))
+                {
+                    continue;
+                }
+            }
+
+            matches.Add(observed);
+        }
+
+        return new WindowMatchScan(matches, lastCandidate, frameworkMetadataUnavailable);
     }
 
     private static ObservedWaitWindow? ObserveWaitWindow(
         IntPtr hwnd,
         int processId,
         FlaUI.UIA3.UIA3Automation automation,
-        bool requireVisible)
+        bool requireVisible,
+        bool includeFrameworkId)
     {
         if (hwnd == IntPtr.Zero ||
             !IsWindow(hwnd) ||
@@ -1020,7 +1233,7 @@ public sealed partial class AutomationController
             return null;
         }
 
-        GetWindowThreadProcessId(hwnd, out var actualProcessId);
+        var threadId = GetWindowThreadProcessId(hwnd, out var actualProcessId);
         if (actualProcessId != processId)
         {
             return null;
@@ -1028,6 +1241,7 @@ public sealed partial class AutomationController
 
         var title = GetWindowTitleForWait(hwnd);
         var ownerHandle = TryGetOwnerHandle(hwnd);
+        var isVisible = IsWindowVisible(hwnd);
         Rect? bounds = null;
         if (GetWindowRect(hwnd, out var nativeBounds) &&
             nativeBounds.Width > 0 &&
@@ -1041,21 +1255,81 @@ public sealed partial class AutomationController
         }
 
         string? frameworkId = null;
-        try
+        var frameworkIdAvailable = false;
+        if (includeFrameworkId)
         {
-            frameworkId = TryGetFrameworkId(automation.FromHandle(hwnd).AsWindow());
-        }
-        catch
-        {
+            try
+            {
+                frameworkId = TryGetFrameworkId(automation.FromHandle(hwnd).AsWindow());
+                frameworkIdAvailable = true;
+            }
+            catch
+            {
+            }
         }
 
         return new ObservedWaitWindow(
             hwnd.ToInt64(),
+            threadId,
+            GetNativeWindowClassName(hwnd),
             title,
             ownerHandle,
             frameworkId,
+            frameworkIdAvailable,
             bounds,
-            IsWindowEnabled(hwnd));
+            IsWindowEnabled(hwnd),
+            isVisible);
+    }
+
+    private static WaitWindowHandleScan EnumerateBoundedVisibleWaitWindowHandles(int processId)
+    {
+        var handles = new List<IntPtr>();
+        var desktopWindowsScanned = 0;
+        var truncated = false;
+
+        EnumWindows(
+            (hwnd, _) =>
+            {
+                desktopWindowsScanned++;
+                if (desktopWindowsScanned > MaxWaitDesktopWindowsScanned)
+                {
+                    truncated = true;
+                    return false;
+                }
+
+                try
+                {
+                    GetWindowThreadProcessId(hwnd, out var actualProcessId);
+                    if (actualProcessId != processId || !IsWindowVisible(hwnd))
+                    {
+                        return true;
+                    }
+
+                    if (handles.Count >= MaxWaitWindowCandidates)
+                    {
+                        truncated = true;
+                        return false;
+                    }
+
+                    handles.Add(hwnd);
+                }
+                catch
+                {
+                }
+
+                return true;
+            },
+            IntPtr.Zero);
+
+        return new WaitWindowHandleScan(handles, truncated);
+    }
+
+    private static string GetNativeWindowClassName(IntPtr hwnd)
+    {
+        var buffer = new StringBuilder(256);
+        return GetNativeWindowClassNameCore(hwnd, buffer, buffer.Capacity) > 0
+            ? buffer.ToString()
+            : string.Empty;
     }
 
     private static string GetWindowTitleForWait(IntPtr hwnd)
@@ -1079,7 +1353,7 @@ public sealed partial class AutomationController
         }
     }
 
-    private static bool MatchesWindowSelector(
+    private static bool MatchesNativeWindowSelector(
         ObservedWaitWindow window,
         WaitWindowSelector selector)
     {
@@ -1105,12 +1379,33 @@ public sealed partial class AutomationController
             return false;
         }
 
-        return string.IsNullOrWhiteSpace(selector.FrameworkId) ||
-               string.Equals(
-                   window.FrameworkId,
-                   selector.FrameworkId,
-                   StringComparison.OrdinalIgnoreCase);
+        return true;
     }
+
+    private static bool MatchesFrameworkSelector(
+        ObservedWaitWindow window,
+        WaitWindowSelector selector) =>
+        string.IsNullOrWhiteSpace(selector.FrameworkId) ||
+        string.Equals(
+            window.FrameworkId,
+            selector.FrameworkId,
+            StringComparison.OrdinalIgnoreCase);
+
+    internal static bool SameWaitWindowIdentity(
+        WaitWindowIdentity expected,
+        WaitWindowIdentity actual) =>
+        expected.Handle == actual.Handle &&
+        expected.ThreadId == actual.ThreadId &&
+        expected.OwnerHandle == actual.OwnerHandle &&
+        (string.IsNullOrEmpty(expected.ClassName) ||
+         string.IsNullOrEmpty(actual.ClassName) ||
+         string.Equals(expected.ClassName, actual.ClassName, StringComparison.Ordinal));
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetClassNameW")]
+    private static extern int GetNativeWindowClassNameCore(
+        IntPtr hwnd,
+        StringBuilder className,
+        int maxCount);
 
     private static WaitForObservation ToWaitObservation(ObservedWaitWindow window) =>
         new(
@@ -1118,7 +1413,7 @@ public sealed partial class AutomationController
             Name: window.Title,
             Bounds: window.Bounds,
             IsEnabled: window.IsEnabled,
-            IsOffscreen: false)
+            IsOffscreen: !window.IsVisible)
         {
             WindowHandle = window.Handle,
             OwnerHandle = window.OwnerHandle,
@@ -1279,11 +1574,34 @@ public sealed partial class AutomationController
             : WaitBackend.Uia;
     }
 
+    internal sealed record WaitWindowIdentity(
+        long Handle,
+        uint ThreadId,
+        string ClassName,
+        long? OwnerHandle);
+
     private sealed record ObservedWaitWindow(
         long Handle,
+        uint ThreadId,
+        string ClassName,
         string Title,
         long? OwnerHandle,
         string? FrameworkId,
+        bool FrameworkIdAvailable,
         Rect? Bounds,
-        bool IsEnabled);
+        bool IsEnabled,
+        bool IsVisible)
+    {
+        public WaitWindowIdentity Identity { get; } =
+            new(Handle, ThreadId, ClassName, OwnerHandle);
+    }
+
+    private sealed record WaitWindowHandleScan(
+        IReadOnlyList<IntPtr> Handles,
+        bool Truncated);
+
+    private sealed record WindowMatchScan(
+        IReadOnlyList<ObservedWaitWindow> Matches,
+        ObservedWaitWindow? LastCandidate,
+        bool FrameworkMetadataUnavailable);
 }

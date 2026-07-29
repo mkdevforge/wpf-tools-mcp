@@ -42,6 +42,13 @@
                     HorizontalAlignment="Left"
                     Click="OpenNativeFileDialog_Click" />
 
+            <Button AutomationProperties.AutomationId="Dialogs_OpenNativeFileDialogDelayed"
+                    Content="Open native file dialog after delay"
+                    Width="240"
+                    Margin="0,0,0,12"
+                    HorizontalAlignment="Left"
+                    Click="OpenNativeFileDialogDelayed_Click" />
+
             <TextBlock x:Name="DialogsStatus"
                        AutomationProperties.AutomationId="Dialogs_Status"
                        Text="Dialog: (none)"

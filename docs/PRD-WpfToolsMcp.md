@@ -233,8 +233,10 @@ typed element conditions (`Attached`, `Visible`, `Enabled`, `Actionable`,
 returning a structured result for a typed timeout.
 
 WPF value operands are closed scalar values (`String`, `Number`, `Boolean`, or
-`Null`), not expressions. String comparison is ordinal, numeric values must be
-finite, and no coercion or caller-supplied code is evaluated. The WPF
+`Null`), not expressions. Their string comparison is ordinal, numeric values
+must be finite, and no coercion or caller-supplied code is evaluated. The
+element-oriented `NameContains` condition retains the compatibility
+case-insensitive match. The WPF
 agent resolves the allowlisted dependency property or dotted DataContext path
 once and uses change notifications. Held comparisons use the observation
 timeline and are reset by a mismatch or delivery gap.
@@ -254,6 +256,17 @@ are terminal and distinguishable from timeout. Effective timeouts are clamped
 to 0-60,000 ms, poll intervals to 25-2,000 ms, and hold durations are restricted
 to 0-5,000 ms. WPF comparisons reuse bounded target-side event queues; UIA
 element and Win32 window checks use bounded polling.
+
+Each Win32 sample stops after 2,048 desktop HWNDs or 128 same-process visible
+candidates. Native handle, title, and owner filters run before UIA, and at most
+16 prefiltered candidates may require a framework-ID probe. A limit produces an
+explicit scan/probe error instead of a partial absence result.
+
+An exact-handle close wait captures a best-effort native identity from the HWND,
+owning thread, window class, and owner. A different identity at the same numeric
+handle counts as replacement of the original window. Windows provides no HWND
+generation token, so immediate reuse on the same thread with the same class and
+owner cannot be distinguished and is conservatively treated as still open.
 
 ### Deterministic Viewport Contract
 

@@ -4,13 +4,11 @@
   ElapsedMs: -1,
   Attempts: -1,
   Observation: {
-    Type: Text,
-    AutomationId: ClickStatus,
-    Name: Clicks: 0,
-    IsEnabled: true,
-    IsOffscreen: false
+    Type: TextBlock,
+    Name: ClickStatus,
+    IsEnabled: true
   },
-  BackendUsed: Uia,
+  BackendUsed: Wpf,
   LastObservedValue: {
     State: Value,
     Value: true,

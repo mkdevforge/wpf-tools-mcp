@@ -4,14 +4,12 @@
   ElapsedMs: -1,
   Attempts: -1,
   Observation: {
-    Type: Text,
-    AutomationId: ClickStatus,
-    Name: Clicks: 0,
-    IsEnabled: true,
-    IsOffscreen: false
+    Type: TextBlock,
+    Name: ClickStatus,
+    IsEnabled: true
   },
   FailureReason: name_mismatch,
-  BackendUsed: Uia,
+  BackendUsed: Wpf,
   ReasonCode: wait_timeout,
   LastObservedValue: {
     State: Value,

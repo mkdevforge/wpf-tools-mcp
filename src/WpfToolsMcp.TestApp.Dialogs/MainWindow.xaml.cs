@@ -36,6 +36,20 @@ public partial class MainWindow : Window
         _ = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(ShowNativeFileDialog));
     }
 
+    private void OpenNativeFileDialogDelayed_Click(object sender, RoutedEventArgs e)
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(350)
+        };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            ShowNativeFileDialog();
+        };
+        timer.Start();
+    }
+
     private void ShowNativeFileDialog()
     {
         var dialog = new OpenFileDialog

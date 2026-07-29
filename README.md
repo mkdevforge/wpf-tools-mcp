@@ -256,8 +256,9 @@ window lifecycle checks.
 WPF `DependencyPropertyValue` and `DataContextValue` conditions observe a named
 property or dotted DataContext path without evaluating caller-supplied code.
 Expected values are explicitly typed as `String`, `Number`, `Boolean`, or
-`Null`. Comparisons support `Equals`, `NotEquals`, string `Contains`, and the
-four ordered numeric comparisons. For example:
+`Null`. Comparisons support `Equals`, `NotEquals`, ordinal string `Contains`,
+and the four ordered numeric comparisons. The element-oriented `NameContains`
+condition retains the legacy case-insensitive matching behavior. For example:
 
 ```json
 {
@@ -278,8 +279,12 @@ These WPF value waits use the target-side change-notification machinery rather
 than repeatedly walking or serializing the visual tree. The structured
 `WindowOpen` and `WindowClosed` conditions sample visible, same-process
 top-level HWNDs by handle, exact/partial title, owner, or framework. An exact
-handle close wait tracks that HWND until it is destroyed; title-only close
-waits mean that no visible matching window remains.
+handle close wait captures the HWND, owning thread, native class, and owner as
+a best-effort live identity; a different identity at the same numeric handle is
+treated as replacement. Windows exposes no HWND generation token, so an
+immediate same-thread reuse with the same class and owner is indistinguishable
+and conservatively remains open. Title-only close waits mean that no visible
+matching window remains.
 
 `BoundsStable` means the element's exact `x`, `y`, `width`, and `height` remain
 unchanged for `holdForMs` (or the compatibility `stableMs`). It does not claim
@@ -294,7 +299,9 @@ include `backendUsed`, `elapsedMs`, `attempts`, `reasonCode`, the evaluation
 have distinct reason codes. Legacy waits retain their throwing default. The
 effective timeout is bounded to 0-60 seconds, polling to 25-2,000 ms, and
 `holdForMs` to 0-5,000 ms. Queues and event batches remain bounded as described
-under live WPF state observation.
+under live WPF state observation. Each window sample stops at 2,048 desktop
+HWNDs or 128 same-process candidates, and probes UIA framework metadata for at
+most 16 native-prefiltered candidates; exceeding a scan limit fails explicitly.
 
 ### Application-Owned Native Dialogs
 
