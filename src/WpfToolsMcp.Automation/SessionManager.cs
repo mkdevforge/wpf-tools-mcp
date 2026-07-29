@@ -253,6 +253,21 @@ internal sealed class SessionWindowSelectionHistory
             SelectionSource.Explicit,
             automaticModalIdentity: null);
 
+    internal SessionWindowSelection RecordFallbackIfEmpty(long handle, string? title)
+    {
+        lock (_reconciliationSync)
+        {
+            var active = GetActive();
+            if (active.Handle != 0)
+            {
+                return active;
+            }
+
+            RecordSelection(handle, title, preserveAsFallback: true);
+            return GetActive();
+        }
+    }
+
     internal void RecordAutomaticOwner(long handle, string? title)
         => Record(
             handle,
@@ -491,6 +506,9 @@ public sealed class SessionManager : IDisposable
 
         public void RecordWindowSelection(long handle, string title, bool preserveAsFallback = false) =>
             _windowSelections.RecordSelection(handle, title, preserveAsFallback);
+
+        public SessionWindowSelection RecordFallbackWindowIfEmpty(long handle, string title) =>
+            _windowSelections.RecordFallbackIfEmpty(handle, title);
 
         public SessionWindowSelection GetActiveWindow() => _windowSelections.GetActive();
 
@@ -818,9 +836,8 @@ public sealed class SessionManager : IDisposable
                 }
 
                 var window = await session.Controller.GetWindowMetadataAsync(cancellationToken: cancellationToken);
-                session.RecordWindowSelection(window.Handle, window.Title, preserveAsFallback: true);
-
-                var result = new GetActiveWindowResponse(window.Handle, window.Title);
+                var fallback = session.RecordFallbackWindowIfEmpty(window.Handle, window.Title);
+                var result = new GetActiveWindowResponse(fallback.Handle, fallback.Title);
                 trace?.SetSummary($"handle={result.Handle} title={result.Title}");
                 return result;
             }

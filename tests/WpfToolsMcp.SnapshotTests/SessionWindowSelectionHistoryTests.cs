@@ -147,6 +147,24 @@ public sealed class SessionWindowSelectionHistoryTests
     }
 
     [Test]
+    public void RecordFallbackIfEmpty_does_not_overwrite_a_newer_modal_selection()
+    {
+        var history = new SessionWindowSelectionHistory();
+        history.RecordAutomaticModal(
+            200,
+            "Dialog",
+            new SessionAutomaticModalIdentity(OwnerHandle: 100, RootOwnerHandle: 100));
+
+        var selected = history.RecordFallbackIfEmpty(100, "Main");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(selected, Is.EqualTo(new SessionWindowSelection(200, "Dialog")));
+            Assert.That(history.GetActive(), Is.EqualTo(selected));
+        });
+    }
+
+    [Test]
     public void Reconcile_selects_the_enabled_nested_modal_then_restores_each_owner()
     {
         var history = new SessionWindowSelectionHistory();

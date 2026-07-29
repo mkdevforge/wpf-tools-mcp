@@ -17,6 +17,11 @@ public sealed class DialogsSnapshots
         DateTime StartTimeUtc,
         string ExecutablePath);
 
+    private sealed record TrackedLaunch(
+        int Pid,
+        string ExpectedExecutablePath,
+        LaunchedProcessIdentity? VerifiedProcess);
+
     private const string MainWindowTitle = "WPF Tools MCP Dialogs TestApp";
     private const string DialogTitle = "WPF Tools MCP Confirm Dialog";
     private const string NativeDialogTitle = "WPF Tools MCP Native Open Dialog";
@@ -28,7 +33,7 @@ public sealed class DialogsSnapshots
 
     private McpTestContext _mcp = null!;
     private string _sessionId = "";
-    private readonly Dictionary<string, LaunchedProcessIdentity> _launchedProcesses = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, TrackedLaunch> _launchedProcesses = new(StringComparer.Ordinal);
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -91,12 +96,21 @@ public sealed class DialogsSnapshots
         }
 
         var launch = await _mcp.CallToolAsync<LaunchAppResponse>("launch_app", arguments);
+        var trackedLaunch = new TrackedLaunch(
+            launch.Pid,
+            Path.GetFullPath(exePath),
+            VerifiedProcess: null);
+        _launchedProcesses[launch.SessionId] = trackedLaunch;
         try
         {
-            _launchedProcesses[launch.SessionId] = CaptureProcessIdentity(launch.Pid, exePath);
+            _launchedProcesses[launch.SessionId] = trackedLaunch with
+            {
+                VerifiedProcess = CaptureProcessIdentity(launch.Pid, exePath)
+            };
         }
         catch (Exception identityError)
         {
+            Exception? cleanupError = null;
             try
             {
                 var close = await _mcp.CallToolAsync<CloseAppResponse>("close_session", new Dictionary<string, object?>
@@ -105,13 +119,22 @@ public sealed class DialogsSnapshots
                     ["force"] = true,
                     ["timeoutMs"] = 2000
                 });
-                if (!close.ProcessExited)
+                if (close.ProcessExited)
                 {
-                    throw new AssertionException(
+                    _launchedProcesses.Remove(launch.SessionId);
+                }
+                else
+                {
+                    cleanupError = new AssertionException(
                         $"Unverified dialogs test process {launch.Pid} did not exit during launch rollback.");
                 }
             }
-            catch (Exception cleanupError)
+            catch (Exception ex)
+            {
+                cleanupError = ex;
+            }
+
+            if (cleanupError is not null)
             {
                 throw new AggregateException(
                     "Failed to capture and roll back a dialogs test process.",
@@ -144,7 +167,7 @@ public sealed class DialogsSnapshots
     private async Task CloseAppAsync(string? sessionId)
     {
         if (string.IsNullOrWhiteSpace(sessionId) ||
-            !_launchedProcesses.TryGetValue(sessionId, out var processIdentity))
+            !_launchedProcesses.TryGetValue(sessionId, out var trackedLaunch))
         {
             return;
         }
@@ -165,10 +188,19 @@ public sealed class DialogsSnapshots
         }
         finally
         {
-            if (!processExited && !TryTerminateProcess(processIdentity, out var failure))
+            if (!processExited && trackedLaunch.VerifiedProcess is null)
             {
                 throw new AssertionException(
-                    $"Failed to terminate dialogs test process {processIdentity.Pid} " +
+                    $"Dialogs test process {trackedLaunch.Pid} for session '{sessionId}' did not exit, " +
+                    $"and its identity could not be verified for safe termination. " +
+                    $"Expected executable: '{trackedLaunch.ExpectedExecutablePath}'.");
+            }
+
+            if (!processExited &&
+                !TryTerminateProcess(trackedLaunch.VerifiedProcess!, out var failure))
+            {
+                throw new AssertionException(
+                    $"Failed to terminate dialogs test process {trackedLaunch.Pid} " +
                     $"for session '{sessionId}': {failure}");
             }
 
