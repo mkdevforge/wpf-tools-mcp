@@ -232,6 +232,7 @@ internal sealed class SessionWindowSelectionHistory
         SessionAutomaticModalIdentity? AutomaticModalIdentity);
 
     private const int DefaultCapacity = 16;
+    private readonly object _reconciliationSync = new();
     private readonly object _sync = new();
     private readonly int _capacity;
     private readonly List<Entry> _entries = [];
@@ -283,48 +284,51 @@ internal sealed class SessionWindowSelectionHistory
             return;
         }
 
-        lock (_sync)
+        lock (_reconciliationSync)
         {
-            var existingIndex = _entries.FindIndex(entry => entry.Handle == handle);
-            var existing = existingIndex >= 0 ? _entries[existingIndex] : null;
-            var wasPreserved = existing?.PreserveAsFallback == true;
-            if (existingIndex >= 0)
+            lock (_sync)
             {
-                _entries.RemoveAt(existingIndex);
-            }
+                var existingIndex = _entries.FindIndex(entry => entry.Handle == handle);
+                var existing = existingIndex >= 0 ? _entries[existingIndex] : null;
+                var wasPreserved = existing?.PreserveAsFallback == true;
+                if (existingIndex >= 0)
+                {
+                    _entries.RemoveAt(existingIndex);
+                }
 
-            var effectiveSource = source;
-            var effectiveIdentity = automaticModalIdentity;
-            if (source != SelectionSource.Explicit && existing?.Source == SelectionSource.Explicit)
-            {
-                effectiveSource = SelectionSource.Explicit;
-                effectiveIdentity = null;
-            }
-            var normalizedTitle = title ?? "";
-            if (normalizedTitle.Length == 0 && existing is not null)
-            {
-                normalizedTitle = existing.Title;
-            }
+                var effectiveSource = source;
+                var effectiveIdentity = automaticModalIdentity;
+                if (source != SelectionSource.Explicit && existing?.Source == SelectionSource.Explicit)
+                {
+                    effectiveSource = SelectionSource.Explicit;
+                    effectiveIdentity = null;
+                }
+                var normalizedTitle = title ?? "";
+                if (normalizedTitle.Length == 0 && existing is not null)
+                {
+                    normalizedTitle = existing.Title;
+                }
 
-            var entry = new Entry(
-                handle,
-                normalizedTitle,
-                preserveAsFallback || wasPreserved,
-                effectiveSource,
-                effectiveIdentity);
-            _entries.Add(entry);
+                var entry = new Entry(
+                    handle,
+                    normalizedTitle,
+                    preserveAsFallback || wasPreserved,
+                    effectiveSource,
+                    effectiveIdentity);
+                _entries.Add(entry);
 
-            while (_entries.Count > _capacity)
-            {
-                var evictionIndex = _entries.FindIndex(
-                    startIndex: 0,
-                    count: _entries.Count - 1,
-                    match: candidate => !candidate.PreserveAsFallback);
-                _entries.RemoveAt(evictionIndex >= 0 ? evictionIndex : 0);
+                while (_entries.Count > _capacity)
+                {
+                    var evictionIndex = _entries.FindIndex(
+                        startIndex: 0,
+                        count: _entries.Count - 1,
+                        match: candidate => !candidate.PreserveAsFallback);
+                    _entries.RemoveAt(evictionIndex >= 0 ? evictionIndex : 0);
+                }
+
+                _active = new SessionWindowSelection(entry.Handle, entry.Title);
+                _revision++;
             }
-
-            _active = new SessionWindowSelection(entry.Handle, entry.Title);
-            _revision++;
         }
     }
 
@@ -396,6 +400,20 @@ internal sealed class SessionWindowSelectionHistory
                 _revision++;
                 return _active;
             }
+        }
+    }
+
+    internal SessionWindowSelection ObserveAndReconcile(
+        Func<SessionTopLevelWindowGraph> observeWindowGraph,
+        Func<long, bool> isWindowValid)
+    {
+        ArgumentNullException.ThrowIfNull(observeWindowGraph);
+        ArgumentNullException.ThrowIfNull(isWindowValid);
+
+        lock (_reconciliationSync)
+        {
+            var windowGraph = observeWindowGraph();
+            return SessionWindowReconciler.Reconcile(this, isWindowValid, windowGraph);
         }
     }
 }
@@ -477,9 +495,9 @@ public sealed class SessionManager : IDisposable
         public SessionWindowSelection GetActiveWindow() => _windowSelections.GetActive();
 
         public SessionWindowSelection ReconcileActiveWindow(
-            Func<long, bool> isWindowValid,
-            SessionTopLevelWindowGraph windowGraph) =>
-            SessionWindowReconciler.Reconcile(_windowSelections, isWindowValid, windowGraph);
+            Func<SessionTopLevelWindowGraph> observeWindowGraph,
+            Func<long, bool> isWindowValid) =>
+            _windowSelections.ObserveAndReconcile(observeWindowGraph, isWindowValid);
 
         public bool IsEnding
         {
@@ -985,12 +1003,9 @@ public sealed class SessionManager : IDisposable
     }
 
     private static SessionWindowSelection ReconcileActiveWindow(SessionState session)
-    {
-        var windowGraph = ObserveTopLevelWindows(session.Pid);
-        return session.ReconcileActiveWindow(
-            handle => IsWindowHandleValid(handle, session.Pid),
-            windowGraph);
-    }
+        => session.ReconcileActiveWindow(
+            () => ObserveTopLevelWindows(session.Pid),
+            handle => IsWindowHandleValid(handle, session.Pid));
 
     private static SessionTopLevelWindowGraph ObserveTopLevelWindows(int expectedPid)
     {

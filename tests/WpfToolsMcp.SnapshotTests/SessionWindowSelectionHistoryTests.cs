@@ -87,6 +87,66 @@ public sealed class SessionWindowSelectionHistoryTests
     }
 
     [Test]
+    public async Task ObserveAndReconcile_serializes_snapshot_observation_and_application()
+    {
+        var history = new SessionWindowSelectionHistory();
+        history.RecordSelection(100, "Main", preserveAsFallback: true);
+        var modalGraph = Graph(
+            Window(100, "Main", isEnabled: false, zOrder: 1),
+            Window(200, "Dialog", ownerHandle: 100, zOrder: 0));
+        var ownerGraph = Graph(Window(100, "Main", zOrder: 0));
+        var firstObservationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondAttemptStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondObservationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var releaseFirstObservation = new ManualResetEventSlim();
+
+        var first = Task.Run(() => history.ObserveAndReconcile(
+            () =>
+            {
+                firstObservationEntered.SetResult();
+                _ = releaseFirstObservation.Wait(TimeSpan.FromSeconds(5));
+                return modalGraph;
+            },
+            modalGraph.ContainsWindow));
+
+        await firstObservationEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var second = Task.Run(() =>
+        {
+            secondAttemptStarted.SetResult();
+            return history.ObserveAndReconcile(
+                () =>
+                {
+                    secondObservationEntered.SetResult();
+                    return ownerGraph;
+                },
+                ownerGraph.ContainsWindow);
+        });
+
+        bool secondObservationWasBlocked;
+        try
+        {
+            await secondAttemptStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await Task.Delay(50);
+            secondObservationWasBlocked = !secondObservationEntered.Task.IsCompleted;
+        }
+        finally
+        {
+            releaseFirstObservation.Set();
+        }
+
+        var firstResult = await first.WaitAsync(TimeSpan.FromSeconds(2));
+        var secondResult = await second.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(secondObservationWasBlocked, Is.True);
+            Assert.That(firstResult, Is.EqualTo(new SessionWindowSelection(200, "Dialog")));
+            Assert.That(secondResult, Is.EqualTo(new SessionWindowSelection(100, "Main")));
+            Assert.That(history.GetActive(), Is.EqualTo(secondResult));
+        });
+    }
+
+    [Test]
     public void Reconcile_selects_the_enabled_nested_modal_then_restores_each_owner()
     {
         var history = new SessionWindowSelectionHistory();
