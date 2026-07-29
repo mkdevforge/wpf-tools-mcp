@@ -69,5 +69,5 @@ internal sealed class InteractionEffectTracker
             MouseInput,
             KeyboardInput,
             CursorMoved,
-            KeyboardFocusChanged);
+            KeyboardFocusChanged ? true : null);
 }

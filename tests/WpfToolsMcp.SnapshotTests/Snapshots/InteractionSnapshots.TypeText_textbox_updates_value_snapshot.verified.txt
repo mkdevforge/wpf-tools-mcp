@@ -8,7 +8,9 @@
       MouseInput: false,
       KeyboardInput: false,
       CursorMoved: false
-    }
+    },
+    ForegroundFocusRequired: false,
+    PhysicalInputRequired: false
   },
   Value: Hello from tests
 }

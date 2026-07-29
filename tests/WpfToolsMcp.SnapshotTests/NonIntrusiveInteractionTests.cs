@@ -1168,7 +1168,7 @@ public sealed class NonIntrusiveInteractionTests
         Assert.That(effects.MouseInput, Is.False);
         Assert.That(effects.KeyboardInput, Is.False);
         Assert.That(effects.CursorMoved, Is.False);
-        Assert.That(effects.KeyboardFocusChanged, Is.False);
+        Assert.That(effects.KeyboardFocusChanged, Is.Null);
     }
 
     private static void AssertPhysicalFallbackEffects(InteractionEffects? effects)
@@ -1180,7 +1180,7 @@ public sealed class NonIntrusiveInteractionTests
         Assert.That(effects.MouseInput, Is.True);
         Assert.That(effects.KeyboardInput, Is.False);
         Assert.That(effects.CursorMoved, Is.True);
-        Assert.That(effects.KeyboardFocusChanged, Is.False);
+        Assert.That(effects.KeyboardFocusChanged, Is.Null);
     }
 
     private static void AssertKeyboardOnlyEffects(InteractionEffects? effects)

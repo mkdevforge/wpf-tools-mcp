@@ -39,7 +39,7 @@ public sealed record InteractionEffects(
     bool MouseInput = false,
     bool KeyboardInput = false,
     bool CursorMoved = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool KeyboardFocusChanged = false);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? KeyboardFocusChanged = null);
 
 public sealed record CloseAppRequest(bool Force = false, int TimeoutMs = 5000);
 

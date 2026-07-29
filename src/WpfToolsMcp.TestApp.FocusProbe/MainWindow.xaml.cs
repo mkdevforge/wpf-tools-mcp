@@ -89,6 +89,13 @@ public partial class MainWindow : Window
             }
 
             e.Handled = true;
+            return;
+        }
+
+        if (key is Key.Enter or Key.Escape or Key.Tab or
+            Key.Left or Key.Up or Key.Right or Key.Down)
+        {
+            e.Handled = true;
         }
     }
 

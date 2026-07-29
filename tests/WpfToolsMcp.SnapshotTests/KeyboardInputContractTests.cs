@@ -115,9 +115,7 @@ public sealed class KeyboardInputContractTests
         var response = new SendKeysResponse(
             Sent: true,
             MethodUsed: "keyboard",
-            Effects: new InteractionEffects(
-                KeyboardInput: true,
-                KeyboardFocusChanged: false),
+            Effects: new InteractionEffects(KeyboardInput: true),
             ForegroundFocusRequired: true,
             PhysicalInputRequired: true);
 
@@ -133,7 +131,7 @@ public sealed class KeyboardInputContractTests
             Assert.That(roundTrip!.ForegroundFocusRequired, Is.True);
             Assert.That(roundTrip.PhysicalInputRequired, Is.True);
             Assert.That(roundTrip.Effects!.KeyboardInput, Is.True);
-            Assert.That(roundTrip.Effects.KeyboardFocusChanged, Is.False);
+            Assert.That(roundTrip.Effects.KeyboardFocusChanged, Is.Null);
             Assert.That(json, Does.Not.Contain("\"KeyboardFocusChanged\""));
             Assert.That(changedFocusJson, Does.Contain("\"KeyboardFocusChanged\":true"));
         });

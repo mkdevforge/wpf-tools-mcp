@@ -283,7 +283,7 @@ Interaction responses report what the tool actually did in `Effects`:
 | `MouseInput` | Sent physical mouse input. |
 | `KeyboardInput` | Sent physical keyboard input. |
 | `CursorMoved` | Moved the system pointer. |
-| `KeyboardFocusChanged` | Changed the element holding keyboard focus. Omitted when false. |
+| `KeyboardFocusChanged` | Changed the element holding keyboard focus. Present only when a change was observed. |
 
 Where available, `MethodUsed` provides the more specific mechanism. These
 fields describe MCP automation, not arbitrary side effects of the invoked
