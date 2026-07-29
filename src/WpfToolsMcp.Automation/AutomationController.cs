@@ -9529,13 +9529,87 @@ public sealed partial class AutomationController : IDisposable
                 Y: bounds.Top,
                 Width: bounds.Width,
                 Height: bounds.Height),
-            IsVisible: !window.IsOffscreen,
-            IsEnabled: window.IsEnabled)
+            IsVisible: GetWindowVisibility(window, handle),
+            IsEnabled: GetWindowEnabled(window, handle))
         {
             OwnerHandle = ownerHandle,
             IsModal = TryGetModalState(window, ownerHandle),
             FrameworkId = TryGetFrameworkId(window)
         };
+    }
+
+    private static bool GetWindowVisibility(Window window, IntPtr handle) =>
+        ResolveWindowVisibility(
+            TryGetNativeWindowVisibility(handle),
+            () => window.IsOffscreen);
+
+    private static bool GetWindowEnabled(Window window, IntPtr handle) =>
+        ResolveWindowEnabled(
+            TryGetNativeWindowEnabled(handle),
+            () => window.IsEnabled);
+
+    private static bool? TryGetNativeWindowVisibility(IntPtr handle)
+    {
+        if (!OperatingSystem.IsWindows() || handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            return IsWindowVisible(handle);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool? TryGetNativeWindowEnabled(IntPtr handle)
+    {
+        if (!OperatingSystem.IsWindows() || handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            return IsWindowEnabled(handle);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal static bool ResolveWindowVisibility(
+        bool? nativeIsVisible,
+        Func<bool> getProviderIsOffscreen)
+    {
+        ArgumentNullException.ThrowIfNull(getProviderIsOffscreen);
+
+        if (nativeIsVisible is bool isVisible)
+        {
+            return isVisible;
+        }
+
+        // Top-level discovery already filters to visible HWNDs. If a provider omits
+        // IsOffscreen, retain that evidence instead of failing the whole projection.
+        return SafeGetBool(getProviderIsOffscreen) is not true;
+    }
+
+    internal static bool ResolveWindowEnabled(
+        bool? nativeIsEnabled,
+        Func<bool> getProviderIsEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(getProviderIsEnabled);
+
+        if (nativeIsEnabled is bool isEnabled)
+        {
+            return isEnabled;
+        }
+
+        return SafeGetBool(getProviderIsEnabled) ?? false;
     }
 
     private static long? TryGetOwnerHandle(IntPtr handle)
