@@ -802,6 +802,8 @@ public sealed partial class AutomationController
         bool includeUnset = false,
         int maxProperties = 500,
         string valueFormat = "string",
+        bool includeProvenance = false,
+        int maxProvenanceCandidates = 20,
         CancellationToken cancellationToken = default)
     {
         var trace = BeginTraceSpan("get_computed_properties");
@@ -810,27 +812,45 @@ public sealed partial class AutomationController
         var target = PrepareWpfAgentTarget("get_computed_properties", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
+        var capabilities = includeProvenance ? GetAgentCapabilities(client) : null;
+        var preparedPropertyNames = includeProvenance
+            ? PrepareProvenancePropertyNamesForAgent(propertyNames)
+            : (Names: propertyNames, TruncatedReason: (string?)null);
         var request = new GetComputedPropertiesRequest(
             WindowHandle: target.WindowHandle,
             Locator: target.Locator,
             ElementId: target.AgentElementId,
-            PropertyNames: propertyNames,
+            PropertyNames: preparedPropertyNames.Names,
             IncludeSources: includeSources,
             IncludeDefault: includeDefault,
             IncludeUnset: includeUnset,
             MaxProperties: maxProperties,
-            ValueFormat: valueFormat);
+            ValueFormat: valueFormat,
+            IncludeProvenance: includeProvenance,
+            MaxProvenanceCandidates: maxProvenanceCandidates);
 
         var fallbackRequest = target.RecoveryLocator is null
             ? null
             : request with { Locator = target.RecoveryLocator, ElementId = null };
-        var response = await CallWpfAgentTargetAsync<GetComputedPropertiesResponse>(
-            client,
-            "wpf/get_computed_properties",
-            request,
-            fallbackRequest,
-            target,
-            cancellationToken);
+        var response = await CallGetComputedPropertiesWhenSupportedAsync(
+            includeProvenance,
+            capabilities,
+            () => CallWpfAgentTargetAsync<GetComputedPropertiesResponse>(
+                client,
+                "wpf/get_computed_properties",
+                request,
+                fallbackRequest,
+                target,
+                cancellationToken));
+        if (preparedPropertyNames.TruncatedReason is not null)
+        {
+            response = response with
+            {
+                Truncated = true,
+                TruncatedReason = preparedPropertyNames.TruncatedReason
+            };
+        }
+
         response = response with
         {
             Element = await StripAgentElementIdAsync(
@@ -850,6 +870,54 @@ public sealed partial class AutomationController
         {
             trace?.Dispose();
         }
+    }
+
+    internal static (IReadOnlyList<string>? Names, string? TruncatedReason)
+        PrepareProvenancePropertyNamesForAgent(IReadOnlyList<string>? propertyNames)
+    {
+        if (propertyNames is null)
+        {
+            return (null, null);
+        }
+
+        const int maxPropertyNames = 100;
+        const int maxPropertyNameLength = 512;
+        var count = Math.Min(propertyNames.Count, maxPropertyNames);
+        var names = new List<string>(count);
+        var propertyNameLengthTruncated = false;
+        for (var i = 0; i < count; i++)
+        {
+            var rawName = propertyNames[i] ?? string.Empty;
+            propertyNameLengthTruncated |= rawName.Length > maxPropertyNameLength;
+            var boundedName = TruncateAgentRequestText(rawName, maxPropertyNameLength).Trim();
+            if (boundedName.Length > 0)
+            {
+                names.Add(boundedName);
+            }
+        }
+
+        var truncatedReason = propertyNames.Count > maxPropertyNames
+            ? "maxProvenancePropertyNames"
+            : propertyNameLengthTruncated
+                ? "maxProvenancePropertyNameLength"
+                : null;
+        return (names, truncatedReason);
+    }
+
+    private static string TruncateAgentRequestText(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        var length = maxLength - 3;
+        if (length > 0 && char.IsHighSurrogate(value[length - 1]))
+        {
+            length--;
+        }
+
+        return value[..length] + "...";
     }
 
     public async Task<GetLayoutContextResponse> GetLayoutContextAsync(
@@ -1186,7 +1254,7 @@ public sealed partial class AutomationController
         return await client.CallAsync<GetPathToElementResponse>("wpf/get_path", request, cancellationToken);
     }
 
-    private static async Task<AgentCapabilitiesResponse> VerifyAgentAndGetCapabilitiesAsync(
+    internal static async Task<AgentCapabilitiesResponse> VerifyAgentAndGetCapabilitiesAsync(
         AgentClient client,
         CancellationToken cancellationToken)
     {
@@ -1235,6 +1303,26 @@ public sealed partial class AutomationController
                capabilities.Capabilities.Contains(AgentProtocolCapabilities.GetLayoutContext, StringComparer.Ordinal)
             ? call()
             : Task.FromException<T>(CreateGetLayoutContextCapabilityException());
+    }
+
+    internal static InvalidOperationException CreateComputedPropertyProvenanceCapabilityException() =>
+        new(
+            "agent_capability_unavailable: get_computed_properties with includeProvenance=true requires the current WPF agent. " +
+            "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
+
+    internal static Task<T> CallGetComputedPropertiesWhenSupportedAsync<T>(
+        bool includeProvenance,
+        AgentCapabilitiesResponse? capabilities,
+        Func<Task<T>> call)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+        return !includeProvenance ||
+               capabilities is not null &&
+               capabilities.Capabilities.Contains(
+                   AgentProtocolCapabilities.GetComputedPropertyProvenance,
+                   StringComparer.Ordinal)
+            ? call()
+            : Task.FromException<T>(CreateComputedPropertyProvenanceCapabilityException());
     }
 
     private AgentCapabilitiesResponse? GetAgentCapabilities(AgentClient client)

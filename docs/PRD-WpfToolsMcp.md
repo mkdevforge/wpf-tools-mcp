@@ -301,6 +301,12 @@ large app with scenario pages:
 - `WpfToolsMcp.TestApp.ObservationProbe`: ordered short-lived dependency-property
   and DataContext transitions, queue pressure, truncation, primary/secondary
   dispatcher routing, and lifecycle cleanup.
+- `WpfToolsMcp.TestApp.ProvenanceProbe`: local, metadata-default, inherited,
+  bound, explicit/implicit/theme-styled, static/dynamic/ambiguous-resource,
+  template-triggered, animated, and coerced dependency-property origins, plus
+  bounded priority/multi-binding, element/ancestor/application/merged resource
+  scopes, deferred BAML, unsafe resource-key, and truncated-value evidence
+  cases.
 - `WpfToolsMcp.TestApp.BindingErrors`: binding and DataContext diagnostics.
 - `WpfToolsMcp.TestApp.BrokenAutomation`: controls with missing UIA peers.
 - `WpfToolsMcp.TestApp.CustomControls`: user controls and templated controls.
@@ -340,7 +346,8 @@ real stdio MCP server. Coverage includes:
 - session lifecycle, restart/reconnect, active-window recovery, and element
   handle recovery;
 - UIA and WPF tree inspection, locator export, properties, bindings,
-  DataContext, layout context, styles, templates, and coverage diagnostics;
+  DataContext, computed-property provenance, layout context, styles, templates,
+  and coverage diagnostics;
 - clicks, invocation, typing, value setting, selection, drag, scrolling, and
   waits;
 - screenshots, annotations, highlighting, deterministic viewport sizing and
@@ -380,6 +387,26 @@ Current build, focused-test, full-test, and smoke commands are documented in
 - **Snoop.Core contains UI code.** `Snoop.Core.dll` is not a clean inspection library — it includes Snoop's WPF windows, views, and controls. We reference the assembly but only call inspection-oriented types. This means a larger-than-necessary dependency; a future optimization could extract only the needed classes, but this is not worth doing upfront.
 - **`PropertyInformation` is a DependencyObject.** Snoop's primary inspection class sets up WPF bindings to keep property values live-updated for its UI grid. The agent must wrap these in plain DTOs and avoid leaking `PropertyInformation` instances across the named pipe boundary.
 - **Binding detail is best effort.** The .NET 8 agent inspects `BindingExpression` status and available validation errors without rewriting bindings. Some failures expose a non-active status without a detailed error message.
+- **Property provenance has explicit evidence tiers.** Public WPF value-source
+  flags, binding state, animation base values, and metadata facts can be exact.
+  Style, template, and resource contributors are bounded candidates when WPF
+  does not expose a winner. Static-resource origin, inheritance provider,
+  animation clock, and pre-coercion value remain unavailable rather than being
+  inferred. Theme-style and dynamic-resource details use guarded implementation
+  access and degrade per section if that access changes. Bounded resource
+  candidate scans read existing `FrameworkElement`/`FrameworkContentElement`
+  uncommon fields and `Style`/`FrameworkTemplate`/`Application` backing fields
+  (holding the WPF application resource lock where required), then inspect raw
+  dictionary storage. They never call lazy `Resources` getters, copy an
+  unbounded key set, or inflate deferred values; their scan evidence remains
+  best effort even when the bounded scope scan completes. Missing or changed
+  internal storage access makes only the resource section incomplete.
+- **Provenance request and rendering work is bounded.** Opt-in calls inspect at
+  most 100 explicit property names, bound each name before the agent pipe, and
+  cap `MissingPropertyNames` accordingly. Effective values use an explicit
+  allowlist of invariant WPF formatters; arbitrary application `ToString()` is
+  never invoked. A safely formatted default or animation value is exact only
+  when it is complete; bounded text is best effort with `maxStringLength`.
 - **DataContext change notifications are best effort.** Live state observation uses WPF bindings so dependency properties and `INotifyPropertyChanged` paths are event-driven. Plain CLR properties that emit no notification do not produce changes; the tool does not add invasive target polling.
 - **Live observation work is capped across subscriptions.** Each subscription has bounded watches and queues, and the server admits at most eight live or completed-retained property subscription handles per session and 64 per server process. Completed handles free capacity on explicit unsubscribe or idle-grace retirement.
 - **Live state observation requires a live WPF window source.** Explicit window handles are resolved to their owning `HwndSource` before traversal, including windows on secondary UI dispatchers; non-WPF or already-destroyed handles fail without attaching handlers.
@@ -456,6 +483,9 @@ The MCP tool surface is extended — new tools are added and existing inspection
 - `get_visual_tree` upgraded: returns real WPF visual tree with actual CLR types, Visibility, DataContext type (falls back to UIA tree if agent not injected)
 - Planned tool: `get_logical_tree` (not shipped as a separate public tool)
 - Planned `get_element_properties` dependency-property upgrade (shipped instead as `get_computed_properties`)
+- `get_computed_properties` structured provenance (shipped as an opt-in,
+  capability-gated diagnostics extension with bounded scan work and explicit
+  exact/best-effort/unavailable evidence)
 - New tool: `get_binding_info` — per-element binding details (path, source, mode, converter, status, error)
 - New tool: `get_binding_errors` — broken and non-active bindings across the tree
 - Snapshot tests for all upgraded/new inspection tools

@@ -27,6 +27,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\WpfToolsMcp.Contracts\WpfToolsMcp.Contracts.csproj" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.AgentProtocol\WpfToolsMcp.AgentProtocol.csproj" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.Agent\WpfToolsMcp.Agent.csproj" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.Automation\WpfToolsMcp.Automation.csproj" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.McpServer\WpfToolsMcp.McpServer.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp\WpfToolsMcp.TestApp.csproj" ReferenceOutputAssembly="false" />
@@ -41,6 +42,7 @@
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.LifecycleProbe\WpfToolsMcp.TestApp.LifecycleProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.LayoutProbe\WpfToolsMcp.TestApp.LayoutProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.ObservationProbe\WpfToolsMcp.TestApp.ObservationProbe.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.ProvenanceProbe\WpfToolsMcp.TestApp.ProvenanceProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Scroll\WpfToolsMcp.TestApp.Scroll.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.Tabs\WpfToolsMcp.TestApp.Tabs.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.TreeView\WpfToolsMcp.TestApp.TreeView.csproj" ReferenceOutputAssembly="false" />

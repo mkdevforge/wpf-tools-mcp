@@ -48,6 +48,9 @@ internal static class TestAppPaths
     public static string FindObservationProbeTestAppExecutable() =>
         FindExecutable("WpfToolsMcp.TestApp.ObservationProbe", "WpfToolsMcp.TestApp.ObservationProbe");
 
+    public static string FindProvenanceProbeTestAppExecutable() =>
+        FindExecutable("WpfToolsMcp.TestApp.ProvenanceProbe", "WpfToolsMcp.TestApp.ProvenanceProbe");
+
     public static string FindDataGridTestAppExecutable() => FindExecutable("WpfToolsMcp.TestApp.DataGrid", "WpfToolsMcp.TestApp.DataGrid");
 
     public static string FindDialogsTestAppExecutable() => FindExecutable("WpfToolsMcp.TestApp.Dialogs", "WpfToolsMcp.TestApp.Dialogs");

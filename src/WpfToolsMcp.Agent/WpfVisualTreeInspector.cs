@@ -4431,7 +4431,14 @@ internal static partial class WpfVisualTreeInspector
         var includeSources = request.IncludeSources;
         var includeDefault = request.IncludeDefault;
         var includeUnset = request.IncludeUnset;
-        var maxProperties = Math.Clamp(request.MaxProperties, 1, 50_000);
+        var includeProvenance = request.IncludeProvenance;
+        var requestedMaxProperties = Math.Clamp(request.MaxProperties, 1, 50_000);
+        const int maxProvenanceProperties = 100;
+        var maxProperties = includeProvenance
+            ? Math.Min(requestedMaxProperties, maxProvenanceProperties)
+            : requestedMaxProperties;
+        var provenancePropertyCapApplied = includeProvenance && requestedMaxProperties > maxProvenanceProperties;
+        var maxProvenanceCandidates = Math.Clamp(request.MaxProvenanceCandidates, 0, 50);
         var valueFormat = string.IsNullOrWhiteSpace(request.ValueFormat) ? "string" : request.ValueFormat;
 
         var window = ResolveWindow(request.WindowHandle);
@@ -4458,10 +4465,21 @@ internal static partial class WpfVisualTreeInspector
 
         var elementRef = BuildElementRefWpf(ownerId, element, xpath, FindReturnFields.Standard);
 
-        var propertyNames = request.PropertyNames?
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p.Trim())
-            .ToArray();
+        string[]? propertyNames;
+        string? propertyNameTruncatedReason = null;
+        if (includeProvenance && request.PropertyNames is { } requestedPropertyNames)
+        {
+            var preparedPropertyNames = PrepareProvenancePropertyNames(requestedPropertyNames);
+            propertyNames = preparedPropertyNames.Names;
+            propertyNameTruncatedReason = preparedPropertyNames.TruncatedReason;
+        }
+        else
+        {
+            propertyNames = request.PropertyNames?
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Trim())
+                .ToArray();
+        }
 
         var properties = new HashSet<DependencyProperty>(GetDependencyPropertiesCached(element.GetType()));
         try
@@ -4478,8 +4496,8 @@ internal static partial class WpfVisualTreeInspector
 
         var computed = new List<ComputedPropertyInfo>();
         var warnings = new List<string>();
-        var truncated = false;
-        string? truncatedReason = null;
+        var truncated = propertyNameTruncatedReason is not null;
+        string? truncatedReason = propertyNameTruncatedReason;
 
         const int maxValueLength = 2000;
 
@@ -4493,7 +4511,9 @@ internal static partial class WpfVisualTreeInspector
                 if (computed.Count >= maxProperties)
                 {
                     truncated = true;
-                    truncatedReason = "maxProperties";
+                    truncatedReason ??= provenancePropertyCapApplied
+                        ? "maxProvenanceProperties"
+                        : "maxProperties";
                     break;
                 }
 
@@ -4503,7 +4523,14 @@ internal static partial class WpfVisualTreeInspector
                     continue;
                 }
 
-                computed.Add(BuildComputedPropertyInfo(element, dp, valueFormat, includeSources, maxValueLength));
+                computed.Add(BuildComputedPropertyInfo(
+                    element,
+                    dp,
+                    valueFormat,
+                    includeSources,
+                    includeProvenance,
+                    maxProvenanceCandidates,
+                    maxValueLength));
             }
 
             return new GetComputedPropertiesResponse(
@@ -4524,7 +4551,9 @@ internal static partial class WpfVisualTreeInspector
             if (computed.Count >= maxProperties)
             {
                 truncated = true;
-                truncatedReason = "maxProperties";
+                truncatedReason ??= provenancePropertyCapApplied
+                    ? "maxProvenanceProperties"
+                    : "maxProperties";
                 break;
             }
 
@@ -4570,7 +4599,14 @@ internal static partial class WpfVisualTreeInspector
                 }
             }
 
-            computed.Add(BuildComputedPropertyInfo(element, property, valueFormat, includeSources, maxValueLength));
+            computed.Add(BuildComputedPropertyInfo(
+                element,
+                property,
+                valueFormat,
+                includeSources,
+                includeProvenance,
+                maxProvenanceCandidates,
+                maxValueLength));
         }
 
         return new GetComputedPropertiesResponse(
@@ -4580,6 +4616,38 @@ internal static partial class WpfVisualTreeInspector
             TruncatedReason: truncatedReason,
             MissingPropertyNames: null,
             Warnings: warnings.Count > 0 ? warnings : null);
+    }
+
+    internal readonly record struct PreparedProvenancePropertyNames(
+        string[] Names,
+        string? TruncatedReason);
+
+    internal static PreparedProvenancePropertyNames PrepareProvenancePropertyNames(
+        IReadOnlyList<string> propertyNames)
+    {
+        const int maxPropertyNames = 100;
+        const int maxPropertyNameLength = 512;
+
+        var count = Math.Min(propertyNames.Count, maxPropertyNames);
+        var names = new List<string>(count);
+        var propertyNameLengthTruncated = false;
+        for (var i = 0; i < count; i++)
+        {
+            var rawName = propertyNames[i] ?? string.Empty;
+            propertyNameLengthTruncated |= rawName.Length > maxPropertyNameLength;
+            var name = TruncateProvenanceText(rawName, maxPropertyNameLength).Trim();
+            if (name.Length > 0)
+            {
+                names.Add(name);
+            }
+        }
+
+        var truncatedReason = propertyNames.Count > maxPropertyNames
+            ? "maxProvenancePropertyNames"
+            : propertyNameLengthTruncated
+                ? "maxProvenancePropertyNameLength"
+                : null;
+        return new PreparedProvenancePropertyNames(names.ToArray(), truncatedReason);
     }
 
     public static GetStyleChainResponse GetStyleChain(
@@ -4861,20 +4929,28 @@ internal static partial class WpfVisualTreeInspector
         DependencyProperty property,
         string valueFormat,
         bool includeSources,
+        bool includeProvenance,
+        int maxProvenanceCandidates,
         int maxStringLength)
     {
-        var ownerType = property.OwnerType.FullName ?? property.OwnerType.Name;
+        var ownerType = includeProvenance
+            ? GetTypeName(property.OwnerType) ?? "unknown"
+            : property.OwnerType.FullName ?? property.OwnerType.Name;
         string? value = null;
         string? valueType = null;
 
         try
         {
             var rawValue = element.GetValue(property);
-            value = FormatValueForBinding(rawValue, valueFormat, maxStringLength);
+            value = includeProvenance
+                ? FormatSafeProvenanceValue(rawValue, valueFormat, maxStringLength)
+                : FormatValueForBinding(rawValue, valueFormat, maxStringLength);
 
             if (rawValue is not null && !ReferenceEquals(rawValue, DependencyProperty.UnsetValue))
             {
-                valueType = rawValue.GetType().FullName ?? rawValue.GetType().Name;
+                valueType = includeProvenance
+                    ? GetTypeName(rawValue)
+                    : rawValue.GetType().FullName ?? rawValue.GetType().Name;
             }
         }
         catch
@@ -4911,10 +4987,14 @@ internal static partial class WpfVisualTreeInspector
                 if (expression is BindingExpression be)
                 {
                     var binding = be.ParentBinding;
-                    path = binding.Path?.Path;
+                    path = includeProvenance && binding.Path?.Path is { } boundedPath
+                        ? TruncateProvenanceText(boundedPath, maxStringLength)
+                        : binding.Path?.Path;
                     mode = binding.Mode.ToString();
                     updateSourceTrigger = binding.UpdateSourceTrigger.ToString();
-                    converter = binding.Converter?.GetType().FullName;
+                    converter = includeProvenance
+                        ? GetTypeName(binding.Converter)
+                        : binding.Converter?.GetType().FullName;
                 }
                 else if (expression is MultiBindingExpression mbe)
                 {
@@ -4922,7 +5002,9 @@ internal static partial class WpfVisualTreeInspector
                     bindingKind = "MultiBinding";
                     mode = binding.Mode.ToString();
                     updateSourceTrigger = binding.UpdateSourceTrigger.ToString();
-                    converter = binding.Converter?.GetType().FullName;
+                    converter = includeProvenance
+                        ? GetTypeName(binding.Converter)
+                        : binding.Converter?.GetType().FullName;
                 }
                 else if (expression is PriorityBindingExpression)
                 {
@@ -4934,8 +5016,28 @@ internal static partial class WpfVisualTreeInspector
         {
         }
 
+        DependencyPropertyProvenance? provenance = null;
+        if (includeProvenance)
+        {
+            try
+            {
+                provenance = BuildDependencyPropertyProvenance(
+                    element,
+                    property,
+                    valueFormat,
+                    maxStringLength,
+                    maxProvenanceCandidates);
+            }
+            catch
+            {
+                provenance = CreateUnavailableDependencyPropertyProvenance();
+            }
+        }
+
         return new ComputedPropertyInfo(
-            Name: property.Name,
+            Name: includeProvenance
+                ? TruncateProvenanceText(property.Name, 512)
+                : property.Name,
             OwnerType: ownerType,
             Value: value,
             ValueType: valueType,
@@ -4945,7 +5047,8 @@ internal static partial class WpfVisualTreeInspector
             Path: path,
             Mode: mode,
             UpdateSourceTrigger: updateSourceTrigger,
-            Converter: converter);
+            Converter: converter,
+            Provenance: provenance);
     }
 
     private static bool TryResolvePropertyByName(

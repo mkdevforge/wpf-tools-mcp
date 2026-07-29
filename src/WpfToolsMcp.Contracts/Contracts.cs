@@ -1080,7 +1080,9 @@ public sealed record GetComputedPropertiesRequest(
     bool IncludeDefault = false,
     bool IncludeUnset = false,
     int MaxProperties = 500,
-    string ValueFormat = "string");
+    string ValueFormat = "string",
+    bool IncludeProvenance = false,
+    int MaxProvenanceCandidates = 20);
 
 public sealed record ComputedPropertyInfo(
     string Name,
@@ -1093,7 +1095,203 @@ public sealed record ComputedPropertyInfo(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Path = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Mode = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UpdateSourceTrigger = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Converter = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Converter = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DependencyPropertyProvenance? Provenance = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ProvenanceEvidenceKind
+{
+    Exact,
+    BestEffort,
+    Unavailable
+}
+
+public sealed record ProvenanceEvidence(
+    ProvenanceEvidenceKind Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason = null);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum DependencyPropertyBaseValueSource
+{
+    Unknown,
+    Default,
+    Inherited,
+    DefaultStyle,
+    DefaultStyleTrigger,
+    Style,
+    TemplateTrigger,
+    StyleTrigger,
+    ImplicitStyleReference,
+    ParentTemplate,
+    ParentTemplateTrigger,
+    Local
+}
+
+public sealed record DependencyPropertyValueSourceProvenance(
+    DependencyPropertyBaseValueSource BaseValueSource,
+    bool IsExpression,
+    bool IsAnimated,
+    bool IsCoerced,
+    bool IsCurrent,
+    ProvenanceEvidence Evidence);
+
+public sealed record BindingChildProvenance(
+    int Index,
+    string Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Path = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceKind = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceSummary = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DataItemSummary = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResolvedSourceSummary = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResolvedSourcePropertyName = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Mode = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? EffectiveMode = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UpdateSourceTrigger = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? EffectiveUpdateSourceTrigger = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Converter = null,
+    string Status = "Unknown",
+    bool HasError = false,
+    bool HasValidationError = false);
+
+public sealed record BindingProvenance(
+    string Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Path,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceKind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourceSummary,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DataItemSummary,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResolvedSourceSummary,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResolvedSourcePropertyName,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Mode,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? EffectiveMode,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UpdateSourceTrigger,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? EffectiveUpdateSourceTrigger,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Converter,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Status,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? HasError,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? HasValidationError,
+    IReadOnlyList<BindingChildProvenance> Children,
+    int ReturnedChildren,
+    int DiscoveredChildren,
+    bool ScanComplete,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ActiveChildIndex,
+    bool ActiveChildOutsideReturnedRange,
+    ProvenanceEvidence Evidence);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum StyleProvenanceKind
+{
+    Unknown,
+    Explicit,
+    Implicit,
+    Theme
+}
+
+public sealed record PropertyContributorCandidate(
+    string Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DeclaringType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TargetName,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Value,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Conditions,
+    ProvenanceEvidence Evidence);
+
+public sealed record StylePropertyProvenance(
+    StyleProvenanceKind Kind,
+    ProvenanceEvidence KindEvidence,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TargetType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResourceKey,
+    ProvenanceEvidence ResourceKeyEvidence,
+    IReadOnlyList<string> BasedOnTargetTypes,
+    IReadOnlyList<PropertyContributorCandidate> Candidates,
+    int ReturnedCandidates,
+    int DiscoveredCandidates,
+    int ScannedDeclarations,
+    bool ScanComplete,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason,
+    ProvenanceEvidence ParticipationEvidence,
+    ProvenanceEvidence StyleDetailsEvidence,
+    ProvenanceEvidence ContributorEvidence);
+
+public sealed record ResourceCandidateProvenance(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Key,
+    string Scope,
+    ProvenanceEvidence Evidence);
+
+public sealed record ResourcePropertyProvenance(
+    string ReferenceKind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Key,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Scope,
+    IReadOnlyList<ResourceCandidateProvenance> Candidates,
+    int ReturnedCandidates,
+    int DiscoveredCandidates,
+    int ScanAttempts,
+    int ScannedDictionaries,
+    int ScannedEntries,
+    bool ScanComplete,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason,
+    ProvenanceEvidence ScanEvidence,
+    ProvenanceEvidence KeyEvidence,
+    ProvenanceEvidence ScopeEvidence,
+    ProvenanceEvidence OriginEvidence);
+
+public sealed record TemplatePropertyProvenance(
+    string Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TemplateType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TargetType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TemplatedParentType,
+    IReadOnlyList<PropertyContributorCandidate> Candidates,
+    int ReturnedCandidates,
+    int DiscoveredCandidates,
+    int ScannedDeclarations,
+    bool ScanComplete,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason,
+    ProvenanceEvidence ParticipationEvidence,
+    ProvenanceEvidence TemplateDetailsEvidence,
+    ProvenanceEvidence ContributorEvidence);
+
+public sealed record InheritancePropertyProvenance(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? MetadataInherits,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ProviderSummary,
+    ProvenanceEvidence ParticipationEvidence,
+    ProvenanceEvidence ProviderEvidence);
+
+public sealed record AnimationPropertyProvenance(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BaseValue,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? BaseValueType,
+    ProvenanceEvidence BaseValueEvidence,
+    ProvenanceEvidence OriginEvidence);
+
+public sealed record CoercionPropertyProvenance(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Callback,
+    ProvenanceEvidence CallbackEvidence,
+    ProvenanceEvidence PreCoercionValueEvidence);
+
+public sealed record DefaultMetadataPropertyProvenance(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DefaultValue,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DefaultValueType,
+    ProvenanceEvidence DefaultValueEvidence,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MetadataType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsEffectiveValueSource,
+    ProvenanceEvidence EffectiveValueSourceEvidence,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Inherits,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? BindsTwoWayByDefault,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DefaultUpdateSourceTrigger,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsAnimationProhibited,
+    ProvenanceEvidence Evidence);
+
+public sealed record DependencyPropertyProvenance(
+    DependencyPropertyValueSourceProvenance ValueSource,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BindingProvenance? Binding,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StylePropertyProvenance? Style,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ResourcePropertyProvenance? Resource,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TemplatePropertyProvenance? Template,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InheritancePropertyProvenance? Inheritance,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] AnimationPropertyProvenance? Animation,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CoercionPropertyProvenance? Coercion,
+    DefaultMetadataPropertyProvenance DefaultMetadata);
 
 public sealed record GetComputedPropertiesResponse(
     ElementRef Element,

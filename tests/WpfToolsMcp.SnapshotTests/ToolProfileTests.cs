@@ -186,6 +186,27 @@ public sealed class ToolProfileTests
     }
 
     [Test]
+    public async Task Property_provenance_controls_are_diagnostics_only()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var core = await McpTestContext.StartAsync(serverExe, toolProfile: "core");
+        await using var diagnostics = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+
+        var coreTools = (await core.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var diagnosticTools = (await diagnostics.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var coreInputs = GetInputPropertyNames(coreTools["get_computed_properties"]);
+        var diagnosticInputs = GetInputPropertyNames(diagnosticTools["get_computed_properties"]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(coreInputs, Does.Not.Contain("includeProvenance"));
+            Assert.That(coreInputs, Does.Not.Contain("maxProvenanceCandidates"));
+            Assert.That(diagnosticInputs, Does.Contain("includeProvenance"));
+            Assert.That(diagnosticInputs, Does.Contain("maxProvenanceCandidates"));
+        });
+    }
+
+    [Test]
     public async Task Core_profile_exposes_explicit_session_lifecycle_schemas()
     {
         var serverExe = McpServerPaths.FindMcpServerExecutable();
