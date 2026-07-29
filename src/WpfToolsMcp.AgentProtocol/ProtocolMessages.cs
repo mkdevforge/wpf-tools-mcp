@@ -19,6 +19,7 @@ public static class AgentProtocolCapabilities
     public const string ResolveElementDetailed = "wpf/resolve_element_detailed";
     public const string FindElementsDiscoveryCounts = "wpf/find_elements:discovery-counts";
     public const string GetLayoutContext = "wpf/get_layout_context";
+    public const string CaptureDiagnosticSnapshot = "wpf/capture_diagnostic_snapshot:v1";
     public const string GetComputedPropertyProvenance = "wpf/get_computed_properties:provenance-v1";
     public const string CorrelateScreenshotRegion = "wpf/correlate_screenshot_region:v1";
     public const string SetValueTextModes = "wpf/set_value:text-modes-v1";
@@ -30,6 +31,7 @@ public static class AgentProtocolCapabilities
         ResolveElementDetailed,
         FindElementsDiscoveryCounts,
         GetLayoutContext,
+        CaptureDiagnosticSnapshot,
         GetComputedPropertyProvenance,
         CorrelateScreenshotRegion,
         SetValueTextModes,

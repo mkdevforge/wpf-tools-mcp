@@ -394,6 +394,25 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case AgentProtocolCapabilities.CaptureDiagnosticSnapshot:
+                    {
+                        var typedRequest = request.Params?.Deserialize<CaptureWpfDiagnosticSnapshotRequest>(JsonOptions)
+                            ?? throw new InvalidOperationException("Missing request params.");
+                        var dispatcher = WpfVisualTreeInspector.ResolveObservationDispatcher(
+                            typedRequest.WindowHandle);
+
+                        return await RunOnDispatcherAsync(dispatcher, () =>
+                        {
+                            var response = WpfVisualTreeInspector.CaptureDiagnosticSnapshot(
+                                ownerId,
+                                typedRequest,
+                                cancellationToken);
+                            return new AgentResponse(
+                                request.Id,
+                                Ok: true,
+                                Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                        }, request.Id, cancellationToken);
+                    }
                 case "wpf/observe_state_start":
                     {
                         var typedRequest = request.Params?.Deserialize<ObserveStateStartRequest>(JsonOptions)
