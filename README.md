@@ -102,6 +102,37 @@ The `diagnostics` profile additionally exposes:
 Its expanded `take_screenshot` schema also exposes capture controls and the
 opt-in screenshot-correlation workflow described below.
 
+### Backend Status and Failures
+
+`list_sessions` is passive and observational. It reports current process,
+attachment, and backend state and may verify or reconnect to an already-running
+WPF agent, but it never injects the agent or initializes the WPF backend. An
+explicit WPF operation initializes the backend when required; core inspection
+routes do so only when their automatic-injection path is enabled.
+
+`BackendCapabilities` remains the compatibility list of confirmed-ready
+backends. Each `BackendCapabilityStates` entry reports `ready`, `unavailable`,
+or `not_initialized` and can include a structured `FailureInfo` when a backend
+is unavailable:
+
+| Field | Meaning |
+|---|---|
+| `Code` | Stable lower-snake-case failure identifier. Branch on this rather than parsing `Detail`. |
+| `Stage` | Stable phase: `process_discovery`, `attachment`, `architecture_detection`, `injection`, `pipe_connection`, `protocol`, or `target_shutdown`. |
+| `Detail` | Sanitized, human-readable summary. |
+| `Retryable` / `RetryAfterMs` | Optional retry guidance; an omitted value means no claim is made. |
+| `RecoveryActions` | Optional machine-readable next steps such as `retry`, `use_uia`, `reattach`, `restart_target`, `match_elevation`, `use_supported_architecture`, `repair_installation`, or `select_process_instance`. |
+
+When `backend=Auto` uses UIA for `get_visual_tree`, `find_elements`, or
+`resolve_element`, the response includes structured `Fallback` metadata:
+`FromBackend`, `ToBackend`, `Attempted`, `Available`, `Used`, and an optional
+`FailureInfo`. Tree and search responses also retain their text warning for
+compatibility; callers should use `Fallback` for machine decisions.
+
+Public actionable errors and trace entries use the sanitized failure contract.
+They do not expose raw filesystem paths, injector stdout or stderr, or
+target-side stack traces; those diagnostics remain internal to the server.
+
 ### Coherent Diagnostic Snapshots
 
 `capture_diagnostic_snapshot` reduces repeated orchestration without exposing a
@@ -701,9 +732,11 @@ returned `processInstanceId` explicitly. Continue with the successor
 inspection or interaction.
 
 In the core profile, inspection tools that support both backends prefer the WPF
-agent and fall back when a UIA equivalent exists. Tree and search responses
-include fallback warnings. WPF-only tools, such as binding, DataContext, and
-layout context inspection, require successful injection.
+agent and fall back when a UIA equivalent exists. When auto tree, search, or
+resolve uses UIA as that fallback, the response includes structured fallback
+metadata; tree and search also keep their compatibility warnings. WPF-only
+tools, such as binding, DataContext, and layout context inspection, require
+successful injection.
 
 ## Limitations
 
@@ -734,16 +767,16 @@ nonzero exit.
 
 The launcher inherits Windows error-mode flags that suppress system fault
 dialogs; the MCP server's original error mode is restored immediately after
-the child starts. A normal nonzero exit is reported with captured stdout and
-stderr plus the launcher path, PID, duration, and signed decimal/hex exit code.
-Exit `0xE0434352` is identified as an unhandled CLR exception. Cancellation or
-timeout requests termination of the entire launcher process tree, boundedly
-waits for the launcher, and reports the same context with the termination
-outcome and bounded output. Regression coverage independently verifies that
-both a fixture launcher and its recorded child exit after cleanup. A gated
-GitHub Actions test also exercises a real unhandled fixture exit; local runs
-skip that test before starting the process, and the fixture itself requires a
-second dedicated opt-in token before its crash mode can run.
+the child starts. The runner captures bounded stdout, stderr, and process
+context internally so nonzero exits can be classified and cleaned up. Public
+MCP errors and traces expose only the sanitized failure contract, never the
+launcher path, captured output, or a target-side stack trace. Cancellation or
+timeout requests termination of the entire launcher process tree and boundedly
+waits for it. Regression coverage independently verifies that both a fixture
+launcher and its recorded child exit after cleanup. A gated GitHub Actions test
+also exercises a real unhandled fixture exit; local runs skip that test before
+starting the process, and the fixture itself requires a second dedicated
+opt-in token before its crash mode can run.
 
 The default injector timeout is 15 seconds. Set
 `WPF_TOOLS_MCP_INJECTOR_TIMEOUT_MS` to a positive millisecond value to change

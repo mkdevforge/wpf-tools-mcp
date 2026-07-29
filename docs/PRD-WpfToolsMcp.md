@@ -161,7 +161,7 @@ see `README.md` for the current profile split and configuration.
 | `close_app` | Request a graceful application close, remove the session, and report request/process outcomes separately | `sessionId` + timeout |
 | `terminate_app` | Forcefully terminate the application, remove the session, and report the observed process outcome | `sessionId` + timeout |
 | `close_session` | Compatibility path for the historical close-with-optional-force behavior | `sessionId` + optional force and timeout |
-| `list_sessions` | List active sessions, effective interaction policies, and confirmed backend capability state | None |
+| `list_sessions` | Passively observe active sessions, effective interaction policies, and confirmed backend capability state without initializing WPF; unavailable backend states can include `FailureInfo` | None |
 
 Session removal, a graceful close request, force termination, and observed
 process exit are distinct lifecycle facts. Normal inspection cleanup uses
@@ -195,6 +195,13 @@ also recognizes transferred predecessor identities and reports
 `stale_window: process_replaced` or `stale_element: process_replaced` when one
 is reused directly. Ambiguous or failed preparation is atomic and leaves the
 predecessor unchanged.
+
+`list_sessions` may verify or reconnect to an already-running WPF agent, but it
+does not inject one. WPF initialization occurs only for an explicit WPF
+operation or an inspection path whose automatic-injection behavior is enabled.
+`BackendCapabilities` lists only confirmed-ready backends;
+`BackendCapabilityStates` distinguishes `ready`, `unavailable`, and
+`not_initialized`, with an optional structured failure for unavailable states.
 
 ### Desktop Interaction Policy
 
@@ -346,7 +353,20 @@ a complete scan.
 
 ### Phase 2 — Upgraded inspection (Snoop, in-process)
 
-Phase 2 enriches existing tools and adds new ones. When the Snoop agent is available, inspection tools can return deeper WPF-native data. Backend-neutral tools fall back to UIA where an equivalent exists; WPF-only diagnostics return a clear injection or connection error.
+Phase 2 enriches existing tools and adds new ones. When the Snoop agent is
+available, inspection tools can return deeper WPF-native data. Backend-neutral
+tools fall back to UIA where an equivalent exists. UIA fallbacks in auto tree,
+search, and resolve responses include structured WPF-to-UIA metadata, while
+tree and search retain compatibility warning text. WPF-only diagnostics return
+a structured injection or connection failure.
+
+Actionable failures use stable lower-snake-case `Code` and `Stage` values, a
+sanitized human-readable `Detail`, optional `Retryable` and `RetryAfterMs`
+guidance, and optional machine-readable `RecoveryActions`. Stages identify
+process discovery, attachment, architecture detection, injection, pipe
+connection, protocol, or target shutdown. Public error payloads, error text,
+and traces omit raw filesystem paths, injector stdout or stderr, and target-side
+stack traces.
 
 **Upgraded tools:**
 
