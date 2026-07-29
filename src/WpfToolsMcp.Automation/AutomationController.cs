@@ -4917,15 +4917,17 @@ public sealed partial class AutomationController : IDisposable
         var start = structuredElementDeadline?.StartTimestamp ?? Stopwatch.GetTimestamp();
         var attempts = 0;
         WaitForObservation? lastObservation = null;
-        WaitObservedValue? lastObservedValue = null;
+        WaitObservedValue? lastObservedValue = CreateUnavailableObservedValue("condition_not_observed");
         var lastFailureReason = "not_attached";
 
         Rectangle? lastBounds = null;
         long? stableStartTimestamp = null;
 
-        while (true)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
 
             if ((timeoutMs > 0 || attempts > 0) &&
                 Stopwatch.GetElapsedTime(start).TotalMilliseconds >= timeoutMs)
@@ -5034,27 +5036,25 @@ public sealed partial class AutomationController : IDisposable
             }
 
             var remainingMs = Math.Max(1, timeoutMs - (int)elapsed.TotalMilliseconds);
-            try
-            {
-                await Task.Delay(Math.Min(pollIntervalMs, remainingMs), cancellationToken);
+            await Task.Delay(Math.Min(pollIntervalMs, remainingMs), cancellationToken);
             }
-            catch (OperationCanceledException) when (
-                IsStructuredElementDeadlineCancellation(structuredElementDeadline))
-            {
-                var timeoutResponse = CreateLegacyWaitTimeoutResponse(
-                    request.State,
-                    WaitBackend.Uia,
-                    timeoutMs,
-                    start,
-                    attempts,
-                    lastObservation,
-                    lastObservedValue,
-                    lastFailureReason,
-                    request.ThrowOnTimeout);
-                trace?.SetSummary(
-                    $"{request.State} succeeded=false attempts={attempts} reason={lastFailureReason}");
-                return timeoutResponse;
-            }
+        }
+        catch (OperationCanceledException) when (
+            IsStructuredElementDeadlineCancellation(structuredElementDeadline))
+        {
+            var timeoutResponse = CreateLegacyWaitTimeoutResponse(
+                request.State,
+                WaitBackend.Uia,
+                timeoutMs,
+                start,
+                attempts,
+                lastObservation,
+                lastObservedValue,
+                lastFailureReason,
+                request.ThrowOnTimeout);
+            trace?.SetSummary(
+                $"{request.State} succeeded=false attempts={attempts} reason={lastFailureReason}");
+            return timeoutResponse;
         }
     }
         catch (Exception ex)
@@ -5091,15 +5091,16 @@ public sealed partial class AutomationController : IDisposable
         var start = structuredElementDeadline?.StartTimestamp ?? Stopwatch.GetTimestamp();
         var attempts = 0;
         WaitForObservation? lastObservation = null;
-        WaitObservedValue? lastObservedValue = null;
+        WaitObservedValue? lastObservedValue = CreateUnavailableObservedValue("condition_not_observed");
         var lastFailureReason = "not_attached";
 
         Rect? lastBounds = null;
         long? stableStartTimestamp = null;
 
+        AgentClient? client = null;
         try
         {
-            var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+            client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
             string? currentXPath = string.IsNullOrWhiteSpace(xpath) ? null : NormalizeWpfXPath(xpath);
 
             while (true)
@@ -5359,6 +5360,24 @@ public sealed partial class AutomationController : IDisposable
                 lastObservedValue,
                 lastFailureReason,
                 throwOnTimeout);
+        }
+        catch (Exception ex) when (
+            structuredElementDeadline is not null &&
+            ex is not OperationCanceledException &&
+            (ex is TimeoutException || client?.IsConnected == false))
+        {
+            var reasonCode = IsApplicationRunning(_application)
+                ? "agent_connection_lost"
+                : "target_process_exited";
+            return CreateStructuredFailureResponse(
+                stateText,
+                WaitBackend.Wpf,
+                start,
+                attempts,
+                lastObservation,
+                lastObservedValue,
+                reasonCode,
+                reasonCode);
         }
     }
 

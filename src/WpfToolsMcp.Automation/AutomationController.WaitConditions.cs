@@ -141,10 +141,14 @@ public sealed partial class AutomationController
                 State = stateName,
                 ReasonCode = response.Succeeded
                     ? null
-                    : response.ReasonCode ?? "wait_timeout"
+                    : response.ReasonCode ?? "wait_timeout",
+                LastObservedValue = response.LastObservedValue ??
+                    CreateUnavailableObservedValue("condition_not_observed")
             };
 
-            if (!structuredResponse.Succeeded && request.ThrowOnTimeout)
+            if (!structuredResponse.Succeeded &&
+                request.ThrowOnTimeout &&
+                string.Equals(structuredResponse.ReasonCode, "wait_timeout", StringComparison.Ordinal))
             {
                 return CreateStructuredTimeoutResponse(
                     request,
@@ -172,8 +176,8 @@ public sealed partial class AutomationController
                 structuredStart,
                 attempts: 0,
                 lastObservation: null,
-                lastObservedValue: CreateUnavailableObservedValue("condition_not_met"),
-                failureReason: "condition_not_met");
+                lastObservedValue: CreateUnavailableObservedValue("condition_not_observed"),
+                failureReason: "condition_not_observed");
         }
         catch (Exception ex) when (
             ex is not OperationCanceledException &&
