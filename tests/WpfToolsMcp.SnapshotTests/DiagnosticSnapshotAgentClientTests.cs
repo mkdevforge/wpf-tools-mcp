@@ -32,7 +32,7 @@ public sealed class DiagnosticSnapshotAgentClientTests
 
             var snapshotRequest = new CaptureWpfDiagnosticSnapshotRequest(
                 WindowHandle: 0x1234,
-                Locator: new ElementLocator(AutomationId: "SaveButton"),
+                Locator: null,
                 ElementId: "agent-element-42",
                 RootXPath: "/Window/Button[1]",
                 Sections:

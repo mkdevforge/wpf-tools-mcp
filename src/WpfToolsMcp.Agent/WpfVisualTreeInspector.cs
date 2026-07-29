@@ -3300,7 +3300,14 @@ internal static partial class WpfVisualTreeInspector
     public static GetBindingInfoResponse GetBindingInfo(
         string ownerId,
         GetBindingInfoRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        GetBindingInfo(ownerId, request, cancellationToken, visibleOnly: true);
+
+    private static GetBindingInfoResponse GetBindingInfo(
+        string ownerId,
+        GetBindingInfoRequest request,
+        CancellationToken cancellationToken,
+        bool visibleOnly)
     {
         var maxProperties = Math.Clamp(request.MaxProperties, 1, 50_000);
         var valueFormat = string.IsNullOrWhiteSpace(request.ValueFormat) ? "string" : request.ValueFormat;
@@ -3317,7 +3324,7 @@ internal static partial class WpfVisualTreeInspector
             request.Locator,
             request.ElementId,
             request.WindowHandle,
-            visibleOnly: true,
+            visibleOnly,
             includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
@@ -4500,7 +4507,14 @@ internal static partial class WpfVisualTreeInspector
     public static GetDataContextResponse GetDataContext(
         string ownerId,
         GetDataContextRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        GetDataContext(ownerId, request, cancellationToken, visibleOnly: true);
+
+    private static GetDataContextResponse GetDataContext(
+        string ownerId,
+        GetDataContextRequest request,
+        CancellationToken cancellationToken,
+        bool visibleOnly)
     {
         var maxDepth = Math.Clamp(request.MaxDepth, 0, 25);
         var maxPropertiesPerObject = Math.Clamp(request.MaxPropertiesPerObject, 1, 5000);
@@ -4518,7 +4532,7 @@ internal static partial class WpfVisualTreeInspector
             request.Locator,
             request.ElementId,
             request.WindowHandle,
-            visibleOnly: true,
+            visibleOnly,
             includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,
@@ -4617,7 +4631,14 @@ internal static partial class WpfVisualTreeInspector
     public static GetComputedPropertiesResponse GetComputedProperties(
         string ownerId,
         GetComputedPropertiesRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        GetComputedProperties(ownerId, request, cancellationToken, visibleOnly: true);
+
+    private static GetComputedPropertiesResponse GetComputedProperties(
+        string ownerId,
+        GetComputedPropertiesRequest request,
+        CancellationToken cancellationToken,
+        bool visibleOnly)
     {
         var includeSources = request.IncludeSources;
         var includeDefault = request.IncludeDefault;
@@ -4644,7 +4665,7 @@ internal static partial class WpfVisualTreeInspector
             request.Locator,
             request.ElementId,
             request.WindowHandle,
-            visibleOnly: true,
+            visibleOnly,
             includeOffViewport: true,
             interactiveOnly: false,
             interactiveMode: InteractiveMode.Heuristic,

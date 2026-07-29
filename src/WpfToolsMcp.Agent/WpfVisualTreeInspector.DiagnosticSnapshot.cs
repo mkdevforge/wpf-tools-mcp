@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -18,7 +19,7 @@ internal static partial class WpfVisualTreeInspector
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private static readonly DiagnosticSection[] WpfDiagnosticSectionOrder =
+    private static readonly HashSet<DiagnosticSection> SupportedWpfDiagnosticSections =
     [
         DiagnosticSection.VisualTree,
         DiagnosticSection.WpfProperties,
@@ -38,6 +39,7 @@ internal static partial class WpfVisualTreeInspector
         cancellationToken.ThrowIfCancellationRequested();
 
         var budget = NormalizeDiagnosticSnapshotBudget(request.Budget);
+        var requestedSections = ValidateWpfDiagnosticSections(request.Sections);
         var startedAtUtc = DateTimeOffset.UtcNow;
         var captureStartTimestamp = Stopwatch.GetTimestamp();
 
@@ -70,7 +72,6 @@ internal static partial class WpfVisualTreeInspector
         var targetAgentElementId = target.ElementIdWpf
             ?? throw new InvalidOperationException("Failed to register the diagnostic snapshot target.");
 
-        var requestedSections = new HashSet<DiagnosticSection>(request.Sections ?? []);
         var (propertyNames, propertyNamesTruncated) = PrepareDiagnosticPropertyNames(
             request.PropertyNames,
             budget.MaxItems);
@@ -79,15 +80,10 @@ internal static partial class WpfVisualTreeInspector
             budget.MaxItems);
 
         var remainingPayloadChars = budget.MaxPayloadChars;
-        var results = new List<DiagnosticSectionResult>(WpfDiagnosticSectionOrder.Length);
+        var results = new List<DiagnosticSectionResult>(requestedSections.Count);
 
-        foreach (var section in WpfDiagnosticSectionOrder)
+        foreach (var section in requestedSections)
         {
-            if (!requestedSections.Contains(section))
-            {
-                continue;
-            }
-
             results.Add(section switch
             {
                 DiagnosticSection.VisualTree => CaptureWpfDiagnosticSection(
@@ -137,7 +133,8 @@ internal static partial class WpfVisualTreeInspector
                                 ValueFormat: "string",
                                 IncludeProvenance: false,
                                 MaxProvenanceCandidates: 0),
-                            cancellationToken);
+                            cancellationToken,
+                            visibleOnly: false);
 
                         if (propertyNamesTruncated)
                         {
@@ -151,10 +148,9 @@ internal static partial class WpfVisualTreeInspector
 
                         return response;
                     },
-                    normalize: static response => response with
-                    {
-                        Element = StripDiagnosticAgentIds(response.Element)
-                    },
+                    normalize: response => NormalizeDiagnosticComputedProperties(
+                        response,
+                        budget.MaxValueLength),
                     isTruncated: static response => response.Truncated,
                     truncatedReason: static response => response.TruncatedReason),
 
@@ -198,11 +194,11 @@ internal static partial class WpfVisualTreeInspector
                             IncludeUnbound: false,
                             MaxProperties: budget.MaxItems,
                             ValueFormat: "string"),
-                        cancellationToken),
-                    normalize: static response => response with
-                    {
-                        Element = StripDiagnosticAgentIds(response.Element)
-                    },
+                        cancellationToken,
+                        visibleOnly: false),
+                    normalize: response => NormalizeDiagnosticBindings(
+                        response,
+                        budget.MaxValueLength),
                     isTruncated: static response => response.Truncated,
                     truncatedReason: static response => response.TruncatedReason),
 
@@ -228,7 +224,8 @@ internal static partial class WpfVisualTreeInspector
                                 IncludeNulls: false,
                                 IncludeFrameworkProperties: false,
                                 PropertyAllowList: dataContextProperties),
-                            cancellationToken);
+                            cancellationToken,
+                            visibleOnly: false);
 
                         if (dataContextPropertiesTruncated)
                         {
@@ -329,7 +326,7 @@ internal static partial class WpfVisualTreeInspector
         string evidenceSchema,
         DateTimeOffset captureStartedAtUtc,
         long captureStartTimestamp,
-        int maxFailureMessageLength,
+        int maxEvidenceValueLength,
         ref int remainingPayloadChars,
         Func<T> capture,
         Func<T, T> normalize,
@@ -355,10 +352,17 @@ internal static partial class WpfVisualTreeInspector
         {
             var response = normalize(capture());
             var data = JsonSerializer.SerializeToNode(response, DiagnosticSnapshotJsonOptions);
+            var evidenceValuesTruncated = TruncateDiagnosticEvidenceValues(
+                data,
+                maxEvidenceValueLength);
+            if (evidenceValuesTruncated)
+            {
+                MarkDiagnosticEvidenceValueTruncation<T>(data);
+            }
+
             var payloadChars = data?.ToJsonString(DiagnosticSnapshotJsonOptions).Length ?? 0;
             if (payloadChars > remainingPayloadChars)
             {
-                remainingPayloadChars = 0;
                 return CreatePayloadBudgetResult(
                     section,
                     evidenceSchema,
@@ -371,7 +375,8 @@ internal static partial class WpfVisualTreeInspector
             remainingPayloadChars -= payloadChars;
             var completedOffsetMs = GetElapsedMilliseconds(captureStartTimestamp);
             var sectionCompletedAtUtc = captureStartedAtUtc.AddMilliseconds(completedOffsetMs);
-            var truncated = isTruncated(response);
+            var responseTruncated = isTruncated(response);
+            var truncated = responseTruncated || evidenceValuesTruncated;
             return new DiagnosticSectionResult(
                 Section: section,
                 Status: truncated ? DiagnosticSectionStatus.Truncated : DiagnosticSectionStatus.Success,
@@ -384,7 +389,11 @@ internal static partial class WpfVisualTreeInspector
                 CompletedOffsetMs: completedOffsetMs,
                 DurationMs: GetElapsedMilliseconds(sectionStartTimestamp),
                 Data: data,
-                Code: truncated ? truncatedReason(response) ?? "sectionBudget" : null,
+                Code: truncated
+                    ? responseTruncated
+                        ? truncatedReason(response) ?? "sectionBudget"
+                        : "maxValueLength"
+                    : null,
                 PayloadChars: payloadChars);
         }
         catch (OperationCanceledException)
@@ -395,7 +404,7 @@ internal static partial class WpfVisualTreeInspector
         {
             var completedOffsetMs = GetElapsedMilliseconds(captureStartTimestamp);
             var sectionCompletedAtUtc = captureStartedAtUtc.AddMilliseconds(completedOffsetMs);
-            var message = GetBoundedDiagnosticFailureMessage(ex, maxFailureMessageLength);
+            var message = GetBoundedDiagnosticFailureMessage(ex, maxEvidenceValueLength);
             return new DiagnosticSectionResult(
                 Section: section,
                 Status: DiagnosticSectionStatus.Failed,
@@ -447,6 +456,30 @@ internal static partial class WpfVisualTreeInspector
             MaxNodes: Math.Clamp(budget.MaxNodes, DiagnosticSnapshotLimits.MinNodes, DiagnosticSnapshotLimits.MaxNodes),
             MaxValueLength: Math.Clamp(budget.MaxValueLength, DiagnosticSnapshotLimits.MinValueLength, DiagnosticSnapshotLimits.MaxValueLength),
             MaxPayloadChars: Math.Clamp(budget.MaxPayloadChars, DiagnosticSnapshotLimits.MinPayloadChars, DiagnosticSnapshotLimits.MaxPayloadChars));
+    }
+
+    private static IReadOnlyList<DiagnosticSection> ValidateWpfDiagnosticSections(
+        IReadOnlyList<DiagnosticSection>? sections)
+    {
+        if (sections is null || sections.Count is < 1 || sections.Count > SupportedWpfDiagnosticSections.Count)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(sections),
+                $"sections must contain between 1 and {SupportedWpfDiagnosticSections.Count} WPF entries.");
+        }
+
+        var result = sections.ToArray();
+        if (result.Any(section => !Enum.IsDefined(section) || !SupportedWpfDiagnosticSections.Contains(section)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(sections), "sections contains a non-WPF or unsupported value.");
+        }
+
+        if (result.Distinct().Count() != result.Length)
+        {
+            throw new ArgumentException("sections must not contain duplicates.", nameof(sections));
+        }
+
+        return result;
     }
 
     private static (IReadOnlyList<string>? Values, bool Truncated) PrepareDiagnosticPropertyNames(
@@ -503,6 +536,143 @@ internal static partial class WpfVisualTreeInspector
         return result;
     }
 
+    private static GetComputedPropertiesResponse NormalizeDiagnosticComputedProperties(
+        GetComputedPropertiesResponse response,
+        int maxValueLength)
+    {
+        var properties = new ComputedPropertyInfo[response.Properties.Count];
+        var valueTruncated = false;
+        for (var index = 0; index < properties.Length; index++)
+        {
+            var property = response.Properties[index];
+            var value = TruncateDiagnosticEvidenceValue(
+                property.Value,
+                maxValueLength,
+                out var propertyValueTruncated);
+            valueTruncated |= propertyValueTruncated;
+            properties[index] = property with { Value = value };
+        }
+
+        return response with
+        {
+            Element = StripDiagnosticAgentIds(response.Element),
+            Properties = properties,
+            Truncated = response.Truncated || valueTruncated,
+            TruncatedReason = response.TruncatedReason ?? (valueTruncated ? "maxValueLength" : null)
+        };
+    }
+
+    private static GetBindingInfoResponse NormalizeDiagnosticBindings(
+        GetBindingInfoResponse response,
+        int maxValueLength)
+    {
+        var bindings = new BindingInfo[response.Bindings.Count];
+        var valueTruncated = false;
+        for (var index = 0; index < bindings.Length; index++)
+        {
+            var binding = response.Bindings[index];
+            var currentValue = TruncateDiagnosticEvidenceValue(
+                binding.CurrentValue,
+                maxValueLength,
+                out var bindingValueTruncated);
+            valueTruncated |= bindingValueTruncated;
+            bindings[index] = binding with { CurrentValue = currentValue };
+        }
+
+        return response with
+        {
+            Element = StripDiagnosticAgentIds(response.Element),
+            Bindings = bindings,
+            Truncated = response.Truncated || valueTruncated,
+            TruncatedReason = response.TruncatedReason ?? (valueTruncated ? "maxValueLength" : null)
+        };
+    }
+
+    private static string? TruncateDiagnosticEvidenceValue(
+        string? value,
+        int maxValueLength,
+        out bool truncated)
+    {
+        truncated = value is not null && value.Length > maxValueLength;
+        if (!truncated)
+        {
+            return value;
+        }
+
+        const string suffix = "...";
+        var take = Math.Max(0, maxValueLength - suffix.Length);
+        if (take > 0 && char.IsHighSurrogate(value![take - 1]))
+        {
+            take--;
+        }
+
+        return value![..take] + suffix;
+    }
+
+    private static bool TruncateDiagnosticEvidenceValues(JsonNode? node, int maxValueLength)
+    {
+        var truncated = false;
+        switch (node)
+        {
+            case JsonObject jsonObject:
+                foreach (var propertyName in jsonObject.Select(property => property.Key).ToArray())
+                {
+                    var value = jsonObject[propertyName];
+                    if (value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var text))
+                    {
+                        jsonObject[propertyName] = TruncateDiagnosticEvidenceValue(
+                            text,
+                            maxValueLength,
+                            out var valueTruncated);
+                        truncated |= valueTruncated;
+                    }
+                    else
+                    {
+                        truncated |= TruncateDiagnosticEvidenceValues(value, maxValueLength);
+                    }
+                }
+
+                break;
+
+            case JsonArray jsonArray:
+                for (var index = 0; index < jsonArray.Count; index++)
+                {
+                    var value = jsonArray[index];
+                    if (value is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var text))
+                    {
+                        jsonArray[index] = TruncateDiagnosticEvidenceValue(
+                            text,
+                            maxValueLength,
+                            out var valueTruncated);
+                        truncated |= valueTruncated;
+                    }
+                    else
+                    {
+                        truncated |= TruncateDiagnosticEvidenceValues(value, maxValueLength);
+                    }
+                }
+
+                break;
+        }
+
+        return truncated;
+    }
+
+    private static void MarkDiagnosticEvidenceValueTruncation<T>(JsonNode? data)
+    {
+        if (data is not JsonObject jsonObject || !jsonObject.ContainsKey("truncated"))
+        {
+            return;
+        }
+
+        jsonObject["truncated"] = true;
+        if (typeof(T).GetProperty("TruncatedReason") is not null &&
+            (!jsonObject.TryGetPropertyValue("truncatedReason", out var reason) || reason is null))
+        {
+            jsonObject["truncatedReason"] = "maxValueLength";
+        }
+    }
+
     private static ElementRef StripDiagnosticAgentIds(ElementRef element) =>
         element with
         {
@@ -519,7 +689,7 @@ internal static partial class WpfVisualTreeInspector
             message = exception.GetBaseException().GetType().Name;
         }
 
-        message = message.Trim();
+        message = ScrubDiagnosticFailureMessage(message.Trim());
         var maxLength = Math.Clamp(
             requestedMaxLength,
             DiagnosticSnapshotLimits.MinValueLength,
@@ -537,6 +707,43 @@ internal static partial class WpfVisualTreeInspector
 
         return message[..take] + "...";
     }
+
+    internal static string ScrubDiagnosticFailureMessage(string message)
+    {
+        const string privateIdPrefix = "wpfobj_";
+        const int privateIdValueLength = 16;
+        const string replacement = "[private-wpf-id]";
+
+        var matchStart = message.IndexOf(privateIdPrefix, StringComparison.Ordinal);
+        if (matchStart < 0)
+        {
+            return message;
+        }
+
+        var result = new StringBuilder(message.Length);
+        var copyStart = 0;
+        while (matchStart >= 0)
+        {
+            result.Append(message, copyStart, matchStart - copyStart);
+            result.Append(replacement);
+
+            var matchEnd = matchStart + privateIdPrefix.Length;
+            var maximumMatchEnd = Math.Min(message.Length, matchEnd + privateIdValueLength);
+            while (matchEnd < maximumMatchEnd && IsPrivateWpfElementIdCharacter(message[matchEnd]))
+            {
+                matchEnd++;
+            }
+
+            copyStart = matchEnd;
+            matchStart = message.IndexOf(privateIdPrefix, copyStart, StringComparison.Ordinal);
+        }
+
+        result.Append(message, copyStart, message.Length - copyStart);
+        return result.ToString();
+    }
+
+    private static bool IsPrivateWpfElementIdCharacter(char character) =>
+        char.IsAsciiLetterOrDigit(character) || character is '_' or '-';
 
     private static string GetDiagnosticFailureCode(string message)
     {
