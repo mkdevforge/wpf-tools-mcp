@@ -9,9 +9,227 @@ namespace WpfToolsMcp.Automation;
 
 internal readonly record struct SessionWindowSelection(long Handle, string Title);
 
+internal readonly record struct SessionTopLevelWindowObservation(
+    long Handle,
+    string Title,
+    long OwnerHandle,
+    bool IsVisible,
+    bool IsEnabled,
+    int ZOrder);
+
+internal readonly record struct SessionAutomaticModalIdentity(long OwnerHandle, long RootOwnerHandle);
+
+internal sealed class SessionTopLevelWindowGraph
+{
+    private readonly IReadOnlyDictionary<long, SessionTopLevelWindowObservation> _windows;
+
+    private SessionTopLevelWindowGraph(
+        IReadOnlyDictionary<long, SessionTopLevelWindowObservation> windows,
+        bool isAvailable)
+    {
+        _windows = windows;
+        IsAvailable = isAvailable;
+    }
+
+    internal static SessionTopLevelWindowGraph Unavailable { get; } =
+        new(new Dictionary<long, SessionTopLevelWindowObservation>(), isAvailable: false);
+
+    internal bool IsAvailable { get; }
+
+    internal static SessionTopLevelWindowGraph Create(IEnumerable<SessionTopLevelWindowObservation> windows)
+    {
+        ArgumentNullException.ThrowIfNull(windows);
+
+        var byHandle = new Dictionary<long, SessionTopLevelWindowObservation>();
+        foreach (var window in windows)
+        {
+            if (window.Handle == 0)
+            {
+                continue;
+            }
+
+            if (!byHandle.TryGetValue(window.Handle, out var existing) || window.ZOrder < existing.ZOrder)
+            {
+                byHandle[window.Handle] = window;
+            }
+        }
+
+        return new SessionTopLevelWindowGraph(byHandle, isAvailable: true);
+    }
+
+    internal bool ContainsWindow(long handle) => _windows.ContainsKey(handle);
+
+    internal bool IsAutomaticOwnerLive(long handle) =>
+        _windows.TryGetValue(handle, out var window) && window.IsVisible;
+
+    internal bool IsAutomaticModalLive(long handle, SessionAutomaticModalIdentity identity) =>
+        TryGetModalIdentity(handle, requireEnabledSurface: false, out var currentIdentity, out _) &&
+        currentIdentity == identity;
+
+    internal bool TrySelectModal(
+        long activeHandle,
+        out SessionTopLevelWindowObservation selected,
+        out SessionAutomaticModalIdentity identity)
+    {
+        selected = default;
+        identity = default;
+        ModalCandidate? best = null;
+
+        foreach (var window in _windows.Values)
+        {
+            if (!TryGetModalIdentity(
+                    window.Handle,
+                    requireEnabledSurface: true,
+                    out var candidateIdentity,
+                    out var ownershipPath))
+            {
+                continue;
+            }
+
+            var candidate = new ModalCandidate(
+                Window: window,
+                Identity: candidateIdentity,
+                IsInActiveOwnershipGroup: activeHandle != 0 &&
+                    IsDescendantOrSelf(window.Handle, activeHandle),
+                OwnershipDepth: ownershipPath.Count - 1);
+
+            if (best is null || IsPreferred(candidate, best.Value))
+            {
+                best = candidate;
+            }
+        }
+
+        if (best is null)
+        {
+            return false;
+        }
+
+        selected = best.Value.Window;
+        identity = best.Value.Identity;
+        return true;
+    }
+
+    internal bool TryGetOwnershipPath(
+        long handle,
+        out IReadOnlyList<SessionTopLevelWindowObservation> ownershipPath)
+    {
+        var reversed = new List<SessionTopLevelWindowObservation>();
+        var seen = new HashSet<long>();
+        var currentHandle = handle;
+
+        while (currentHandle != 0)
+        {
+            if (!seen.Add(currentHandle) || !_windows.TryGetValue(currentHandle, out var current))
+            {
+                ownershipPath = Array.Empty<SessionTopLevelWindowObservation>();
+                return false;
+            }
+
+            reversed.Add(current);
+            currentHandle = current.OwnerHandle;
+        }
+
+        reversed.Reverse();
+        ownershipPath = reversed;
+        return reversed.Count > 0;
+    }
+
+    internal bool TryGetHistoricalModalIdentity(
+        long handle,
+        out SessionAutomaticModalIdentity identity) =>
+        TryGetModalIdentity(handle, requireEnabledSurface: false, out identity, out _);
+
+    private bool TryGetModalIdentity(
+        long handle,
+        bool requireEnabledSurface,
+        out SessionAutomaticModalIdentity identity,
+        out IReadOnlyList<SessionTopLevelWindowObservation> ownershipPath)
+    {
+        identity = default;
+        ownershipPath = Array.Empty<SessionTopLevelWindowObservation>();
+
+        if (!_windows.TryGetValue(handle, out var window) ||
+            !window.IsVisible ||
+            (requireEnabledSurface && !window.IsEnabled) ||
+            window.OwnerHandle == 0 ||
+            !_windows.TryGetValue(window.OwnerHandle, out var owner) ||
+            owner.IsEnabled ||
+            !TryGetOwnershipPath(handle, out ownershipPath))
+        {
+            return false;
+        }
+
+        identity = new SessionAutomaticModalIdentity(
+            OwnerHandle: window.OwnerHandle,
+            RootOwnerHandle: ownershipPath[0].Handle);
+        return true;
+    }
+
+    private bool IsDescendantOrSelf(long candidateHandle, long ancestorHandle)
+    {
+        var seen = new HashSet<long>();
+        var currentHandle = candidateHandle;
+
+        while (currentHandle != 0 && seen.Add(currentHandle))
+        {
+            if (currentHandle == ancestorHandle)
+            {
+                return true;
+            }
+
+            if (!_windows.TryGetValue(currentHandle, out var current))
+            {
+                return false;
+            }
+
+            currentHandle = current.OwnerHandle;
+        }
+
+        return false;
+    }
+
+    private static bool IsPreferred(ModalCandidate candidate, ModalCandidate current)
+    {
+        if (candidate.Window.ZOrder != current.Window.ZOrder)
+        {
+            return candidate.Window.ZOrder < current.Window.ZOrder;
+        }
+
+        if (candidate.IsInActiveOwnershipGroup != current.IsInActiveOwnershipGroup)
+        {
+            return candidate.IsInActiveOwnershipGroup;
+        }
+
+        if (candidate.OwnershipDepth != current.OwnershipDepth)
+        {
+            return candidate.OwnershipDepth > current.OwnershipDepth;
+        }
+
+        return candidate.Window.Handle < current.Window.Handle;
+    }
+
+    private readonly record struct ModalCandidate(
+        SessionTopLevelWindowObservation Window,
+        SessionAutomaticModalIdentity Identity,
+        bool IsInActiveOwnershipGroup,
+        int OwnershipDepth);
+}
+
 internal sealed class SessionWindowSelectionHistory
 {
-    private sealed record Entry(long Handle, string Title, bool PreserveAsFallback);
+    private enum SelectionSource
+    {
+        Explicit,
+        AutomaticOwner,
+        AutomaticModal
+    }
+
+    private sealed record Entry(
+        long Handle,
+        string Title,
+        bool PreserveAsFallback,
+        SelectionSource Source,
+        SessionAutomaticModalIdentity? AutomaticModalIdentity);
 
     private const int DefaultCapacity = 16;
     private readonly object _sync = new();
@@ -27,6 +245,38 @@ internal sealed class SessionWindowSelectionHistory
     }
 
     internal void RecordSelection(long handle, string? title, bool preserveAsFallback = false)
+        => Record(
+            handle,
+            title,
+            preserveAsFallback,
+            SelectionSource.Explicit,
+            automaticModalIdentity: null);
+
+    internal void RecordAutomaticOwner(long handle, string? title)
+        => Record(
+            handle,
+            title,
+            preserveAsFallback: false,
+            SelectionSource.AutomaticOwner,
+            automaticModalIdentity: null);
+
+    internal void RecordAutomaticModal(
+        long handle,
+        string? title,
+        SessionAutomaticModalIdentity identity)
+        => Record(
+            handle,
+            title,
+            preserveAsFallback: false,
+            SelectionSource.AutomaticModal,
+            identity);
+
+    private void Record(
+        long handle,
+        string? title,
+        bool preserveAsFallback,
+        SelectionSource source,
+        SessionAutomaticModalIdentity? automaticModalIdentity)
     {
         if (handle == 0)
         {
@@ -36,13 +286,32 @@ internal sealed class SessionWindowSelectionHistory
         lock (_sync)
         {
             var existingIndex = _entries.FindIndex(entry => entry.Handle == handle);
-            var wasPreserved = existingIndex >= 0 && _entries[existingIndex].PreserveAsFallback;
+            var existing = existingIndex >= 0 ? _entries[existingIndex] : null;
+            var wasPreserved = existing?.PreserveAsFallback == true;
             if (existingIndex >= 0)
             {
                 _entries.RemoveAt(existingIndex);
             }
 
-            var entry = new Entry(handle, title ?? "", preserveAsFallback || wasPreserved);
+            var effectiveSource = source;
+            var effectiveIdentity = automaticModalIdentity;
+            if (source != SelectionSource.Explicit && existing?.Source == SelectionSource.Explicit)
+            {
+                effectiveSource = SelectionSource.Explicit;
+                effectiveIdentity = null;
+            }
+            var normalizedTitle = title ?? "";
+            if (normalizedTitle.Length == 0 && existing is not null)
+            {
+                normalizedTitle = existing.Title;
+            }
+
+            var entry = new Entry(
+                handle,
+                normalizedTitle,
+                preserveAsFallback || wasPreserved,
+                effectiveSource,
+                effectiveIdentity);
             _entries.Add(entry);
 
             while (_entries.Count > _capacity)
@@ -67,7 +336,9 @@ internal sealed class SessionWindowSelectionHistory
         }
     }
 
-    internal SessionWindowSelection Reconcile(Func<long, bool> isWindowValid)
+    internal SessionWindowSelection Reconcile(
+        Func<long, bool> isWindowValid,
+        SessionTopLevelWindowGraph? windowGraph = null)
     {
         ArgumentNullException.ThrowIfNull(isWindowValid);
 
@@ -86,7 +357,18 @@ internal sealed class SessionWindowSelectionHistory
             for (var index = snapshot.Length - 1; index >= 0; index--)
             {
                 var entry = snapshot[index];
-                if (isWindowValid(entry.Handle))
+                var isLive = entry.Source switch
+                {
+                    SelectionSource.AutomaticOwner when windowGraph?.IsAvailable == true =>
+                        windowGraph.IsAutomaticOwnerLive(entry.Handle),
+                    SelectionSource.AutomaticModal when
+                        windowGraph?.IsAvailable == true &&
+                        entry.AutomaticModalIdentity is SessionAutomaticModalIdentity identity =>
+                        windowGraph.IsAutomaticModalLive(entry.Handle, identity),
+                    _ => isWindowValid(entry.Handle)
+                };
+
+                if (isLive)
                 {
                     mostRecentLive ??= entry;
                 }
@@ -118,8 +400,49 @@ internal sealed class SessionWindowSelectionHistory
     }
 }
 
+internal static class SessionWindowReconciler
+{
+    internal static SessionWindowSelection Reconcile(
+        SessionWindowSelectionHistory history,
+        Func<long, bool> isWindowValid,
+        SessionTopLevelWindowGraph windowGraph)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(isWindowValid);
+        ArgumentNullException.ThrowIfNull(windowGraph);
+
+        var active = history.Reconcile(isWindowValid, windowGraph);
+        if (!windowGraph.IsAvailable ||
+            !windowGraph.TrySelectModal(active.Handle, out var modal, out _))
+        {
+            return active;
+        }
+
+        if (!windowGraph.TryGetOwnershipPath(modal.Handle, out var ownershipPath))
+        {
+            return active;
+        }
+
+        foreach (var window in ownershipPath)
+        {
+            if (windowGraph.TryGetHistoricalModalIdentity(window.Handle, out var identity))
+            {
+                history.RecordAutomaticModal(window.Handle, window.Title, identity);
+            }
+            else
+            {
+                history.RecordAutomaticOwner(window.Handle, window.Title);
+            }
+        }
+
+        return history.GetActive();
+    }
+}
+
 public sealed class SessionManager : IDisposable
 {
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
     private sealed class SessionState
     {
         private readonly object _sync = new();
@@ -153,8 +476,10 @@ public sealed class SessionManager : IDisposable
 
         public SessionWindowSelection GetActiveWindow() => _windowSelections.GetActive();
 
-        public SessionWindowSelection ReconcileActiveWindow(Func<long, bool> isWindowValid) =>
-            _windowSelections.Reconcile(isWindowValid);
+        public SessionWindowSelection ReconcileActiveWindow(
+            Func<long, bool> isWindowValid,
+            SessionTopLevelWindowGraph windowGraph) =>
+            SessionWindowReconciler.Reconcile(_windowSelections, isWindowValid, windowGraph);
 
         public bool IsEnding
         {
@@ -661,75 +986,55 @@ public sealed class SessionManager : IDisposable
 
     private static SessionWindowSelection ReconcileActiveWindow(SessionState session)
     {
-        var active = session.ReconcileActiveWindow(handle => IsWindowHandleValid(handle, session.Pid));
-        if (!TryGetOwnedModalPopup(active.Handle, session.Pid, out var modalPopup))
-        {
-            return active;
-        }
-
-        session.RecordWindowSelection(modalPopup.Handle, modalPopup.Title);
-        return modalPopup;
+        var windowGraph = ObserveTopLevelWindows(session.Pid);
+        return session.ReconcileActiveWindow(
+            handle => IsWindowHandleValid(handle, session.Pid),
+            windowGraph);
     }
 
-    private static bool TryGetOwnedModalPopup(
-        long ownerHandle,
-        int expectedPid,
-        out SessionWindowSelection modalPopup)
+    private static SessionTopLevelWindowGraph ObserveTopLevelWindows(int expectedPid)
     {
-        modalPopup = default;
-        if (!OperatingSystem.IsWindows() || ownerHandle == 0 || expectedPid <= 0)
+        if (!OperatingSystem.IsWindows() || expectedPid <= 0)
         {
-            return false;
+            return SessionTopLevelWindowGraph.Unavailable;
         }
 
         try
         {
-            var owner = new IntPtr(ownerHandle);
-            var popup = GetLastActivePopup(owner);
-            if (popup == IntPtr.Zero || popup == owner || !IsWindow(popup) || !IsWindowVisible(popup))
+            var windows = new List<SessionTopLevelWindowObservation>();
+            var zOrder = 0;
+            EnumWindowsProc callback = (hwnd, _) =>
             {
-                return false;
-            }
+                var currentZOrder = zOrder++;
+                try
+                {
+                    GetWindowThreadProcessId(hwnd, out var processId);
+                    if (processId == (uint)expectedPid)
+                    {
+                        windows.Add(new SessionTopLevelWindowObservation(
+                            Handle: hwnd.ToInt64(),
+                            Title: GetNativeWindowTitle(hwnd),
+                            OwnerHandle: GetWindow(hwnd, GW_OWNER).ToInt64(),
+                            IsVisible: IsWindowVisible(hwnd),
+                            IsEnabled: IsWindowEnabled(hwnd),
+                            ZOrder: currentZOrder));
+                    }
+                }
+                catch
+                {
+                }
 
-            _ = GetWindowThreadProcessId(popup, out var popupPid);
-            if (popupPid != (uint)expectedPid || !IsOwnedBy(popup, owner))
-            {
-                return false;
-            }
+                return true;
+            };
 
-            var immediateOwner = GetWindow(popup, GW_OWNER);
-            if (immediateOwner == IntPtr.Zero || IsWindowEnabled(immediateOwner))
-            {
-                return false;
-            }
-
-            modalPopup = new SessionWindowSelection(popup.ToInt64(), GetNativeWindowTitle(popup));
-            return true;
+            return EnumWindows(callback, IntPtr.Zero)
+                ? SessionTopLevelWindowGraph.Create(windows)
+                : SessionTopLevelWindowGraph.Unavailable;
         }
         catch
         {
-            return false;
+            return SessionTopLevelWindowGraph.Unavailable;
         }
-    }
-
-    private static bool IsOwnedBy(IntPtr candidate, IntPtr expectedOwner)
-    {
-        var current = candidate;
-        for (var depth = 0; depth < 16; depth++)
-        {
-            current = GetWindow(current, GW_OWNER);
-            if (current == expectedOwner)
-            {
-                return true;
-            }
-
-            if (current == IntPtr.Zero)
-            {
-                return false;
-            }
-        }
-
-        return false;
     }
 
     private static string GetNativeWindowTitle(IntPtr hwnd)
@@ -821,8 +1126,8 @@ public sealed class SessionManager : IDisposable
     [DllImport("user32.dll", SetLastError = false)]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-    [DllImport("user32.dll", SetLastError = false)]
-    private static extern IntPtr GetLastActivePopup(IntPtr hWnd);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = false)]
     private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
