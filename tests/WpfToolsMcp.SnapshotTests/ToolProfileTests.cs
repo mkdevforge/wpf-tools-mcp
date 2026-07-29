@@ -14,6 +14,7 @@ public sealed class ToolProfileTests
     private static readonly string[] CoreToolNames =
     [
         "attach_to_app",
+        "capture_diagnostic_snapshot",
         "click_element",
         "close_app",
         "close_session",
@@ -155,6 +156,19 @@ public sealed class ToolProfileTests
             new[] { "elementId", "locator", "propertyNames", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Is.EqualTo(
             new[] { "elementId", "locator", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["capture_diagnostic_snapshot"]), Is.EqualTo(
+            new[]
+            {
+                "budget",
+                "dataContextProperties",
+                "elementId",
+                "locator",
+                "propertyNames",
+                "sections",
+                "sessionId",
+                "timeoutMs",
+                "windowHandle"
+            }));
         Assert.That(GetInputPropertyNames(tools["click_element"]), Is.EqualTo(
             new[] { "clickType", "elementId", "interactionPolicy", "locator", "sessionId" }));
         Assert.That(GetInputPropertyNames(tools["type_text"]), Is.EqualTo(
@@ -179,6 +193,7 @@ public sealed class ToolProfileTests
                      "get_data_context",
                      "get_computed_properties",
                      "get_layout_context",
+                     "capture_diagnostic_snapshot",
                      "click_element",
                      "type_text",
                      "drag"
