@@ -195,10 +195,9 @@ public sealed partial class AutomationController
             var timingSkewMs = bounded.Count == 0
                 ? 0
                 : Math.Max(0, bounded.Max(section => section.CompletedOffsetMs) - bounded.Min(section => section.StartedOffsetMs));
-            var evidenceSections = bounded.Where(section => section.Data is not null).ToArray();
-            var crossBackendAtomic = evidenceSections.Length <= 1 ||
+            var crossBackendAtomic = bounded.Count <= 1 ||
                                      (wpfSectionsSingleDispatcherTurn &&
-                                      evidenceSections.All(section => section.Source == DiagnosticCaptureSource.WpfDispatcher));
+                                      bounded.All(section => section.Source == DiagnosticCaptureSource.WpfDispatcher));
 
             var response = new CaptureDiagnosticSnapshotResponse(
                 CaptureId: captureId,
