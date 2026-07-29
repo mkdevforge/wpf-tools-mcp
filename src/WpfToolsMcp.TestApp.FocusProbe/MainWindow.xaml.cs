@@ -169,12 +169,23 @@ public partial class MainWindow : Window
 
         names.Add(key switch
         {
+            Key.Back => "Backspace",
             Key.Return => "Enter",
             Key.Escape => "Escape",
             Key.Left => "ArrowLeft",
             Key.Up => "ArrowUp",
             Key.Right => "ArrowRight",
             Key.Down => "ArrowDown",
+            Key.D0 => "Digit0",
+            Key.D1 => "Digit1",
+            Key.D2 => "Digit2",
+            Key.D3 => "Digit3",
+            Key.D4 => "Digit4",
+            Key.D5 => "Digit5",
+            Key.D6 => "Digit6",
+            Key.D7 => "Digit7",
+            Key.D8 => "Digit8",
+            Key.D9 => "Digit9",
             _ => key.ToString()
         });
         return string.Join("+", names);

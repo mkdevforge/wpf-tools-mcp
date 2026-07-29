@@ -177,14 +177,14 @@ public sealed partial class AutomationController
                             rawWalker,
                             timeoutMs,
                             pollIntervalMs,
-                            ActionKind.TypeText,
+                            ActionKind.Inspect,
                             cancellationToken).ConfigureAwait(false)
                         : ResolveElement(
                             window,
                             request.Locator!,
                             controlWalker,
                             rawWalker,
-                            ActionKind.TypeText);
+                            ActionKind.Inspect);
                 }
             }
 
