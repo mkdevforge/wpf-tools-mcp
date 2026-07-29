@@ -64,6 +64,26 @@ public sealed class DiagnosticSnapshotCoordinatorTests
     }
 
     [Test]
+    public void Resolution_avoids_agent_injection_for_uia_tree_property_and_screenshot_sections()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                AutomationController.SelectDiagnosticSnapshotResolutionBackend(
+                    [DiagnosticSection.VisualTree, DiagnosticSection.UiaProperties, DiagnosticSection.Screenshot]),
+                Is.EqualTo(InspectionBackend.Uia));
+            Assert.That(
+                AutomationController.SelectDiagnosticSnapshotResolutionBackend(
+                    [DiagnosticSection.DataContext]),
+                Is.EqualTo(InspectionBackend.Auto));
+            Assert.That(
+                AutomationController.SelectDiagnosticSnapshotResolutionBackend(
+                    [DiagnosticSection.WpfProperties]),
+                Is.EqualTo(InspectionBackend.Auto));
+        });
+    }
+
+    [Test]
     public void Validator_enforces_budget_and_timeout_bounds()
     {
         var invalidRequests = new[]

@@ -263,8 +263,9 @@ public sealed partial class AutomationController
                 handle.WindowHandle);
         }
 
+        var resolutionBackend = SelectDiagnosticSnapshotResolutionBackend(request.Sections);
         return await ResolveElementAsync(
-            InspectionBackend.Auto,
+            resolutionBackend,
             request.Locator ?? new ElementLocator(XPath: "/Window"),
             request.WindowHandle,
             timeoutMs: request.TimeoutMs,
@@ -275,7 +276,7 @@ public sealed partial class AutomationController
             interactiveOnly: false,
             InteractiveMode.Heuristic,
             cancellationToken,
-            autoInject: true).ConfigureAwait(false);
+            autoInject: resolutionBackend == InspectionBackend.Auto).ConfigureAwait(false);
     }
 
     private async Task<CaptureWpfDiagnosticSnapshotResponse> CaptureWpfDiagnosticSnapshotAsync(
@@ -415,5 +416,14 @@ public sealed partial class AutomationController
             : Task.FromException<T>(new InvalidOperationException(
                 "agent_capability_unavailable: the injected agent does not support coherent diagnostic snapshots. " +
                 "Restart the target application and attach a new session."));
+    }
+
+    internal static InspectionBackend SelectDiagnosticSnapshotResolutionBackend(
+        IReadOnlyList<DiagnosticSection> sections)
+    {
+        ArgumentNullException.ThrowIfNull(sections);
+        return sections.Any(WpfDiagnosticSections.Contains)
+            ? InspectionBackend.Auto
+            : InspectionBackend.Uia;
     }
 }
