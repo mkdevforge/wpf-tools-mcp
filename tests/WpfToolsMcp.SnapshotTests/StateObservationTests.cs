@@ -539,6 +539,29 @@ public sealed class StateObservationTests
     }
 
     [Test]
+    public async Task Structured_wpf_value_wait_captures_short_transition_between_poll_intervals()
+    {
+        await InvokeAsync("Observation_RunOrdered");
+
+        var result = await WaitForWpfStringConditionAsync(
+            WaitConditionKind.DependencyPropertyValue,
+            pathName: "propertyName",
+            path: "Text",
+            expected: "degraded",
+            timeoutMs: 5_000,
+            pollIntervalMs: 250);
+        await WaitForMarkerAsync("ordered-complete", TimeSpan.FromSeconds(5), _testCts.Token);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Succeeded, Is.True);
+            Assert.That(result.BackendUsed, Is.EqualTo(WaitBackend.Wpf));
+            Assert.That(result.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
+            Assert.That(result.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("degraded"));
+        });
+    }
+
+    [Test]
     public async Task Structured_wpf_value_timeout_returns_backend_reason_and_actual_scalar()
     {
         var result = await WaitForWpfStringConditionAsync(
@@ -785,7 +808,8 @@ public sealed class StateObservationTests
         string pathName,
         string path,
         string expected,
-        int timeoutMs)
+        int timeoutMs,
+        int pollIntervalMs = 25)
     {
         var condition = new Dictionary<string, object?>
         {
@@ -811,7 +835,7 @@ public sealed class StateObservationTests
                 },
                 ["condition"] = condition,
                 ["timeoutMs"] = timeoutMs,
-                ["pollIntervalMs"] = 25
+                ["pollIntervalMs"] = pollIntervalMs
             },
             _testCts.Token);
     }

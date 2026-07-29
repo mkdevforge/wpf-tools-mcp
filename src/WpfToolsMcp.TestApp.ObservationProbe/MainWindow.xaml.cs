@@ -13,6 +13,9 @@ namespace WpfToolsMcp.TestApp.ObservationProbe;
 
 public partial class MainWindow : Window
 {
+    private static readonly TimeSpan OrderedStartDelay = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan OrderedTransitionInterval = TimeSpan.FromMilliseconds(30);
+
     private static readonly ObservationState[] OrderedStates =
     [
         new("queued", 1, "warming"),
@@ -35,7 +38,7 @@ public partial class MainWindow : Window
         _options = options;
         _viewModel = new ObservationViewModel(Dispatcher);
         _orderedTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(30),
+            OrderedTransitionInterval,
             DispatcherPriority.Normal,
             ApplyNextOrderedState,
             Dispatcher);
@@ -90,6 +93,7 @@ public partial class MainWindow : Window
         }
 
         _orderedStateIndex = 0;
+        _orderedTimer.Interval = OrderedStartDelay;
         RunOrderedButton.IsEnabled = false;
         _orderedTimer.Start();
     }
@@ -98,6 +102,11 @@ public partial class MainWindow : Window
     {
         var state = OrderedStates[_orderedStateIndex++];
         _viewModel.Apply(state.Phase, state.Count, state.NestedMode);
+
+        if (_orderedStateIndex == 1)
+        {
+            _orderedTimer.Interval = OrderedTransitionInterval;
+        }
 
         if (_orderedStateIndex < OrderedStates.Length)
         {
