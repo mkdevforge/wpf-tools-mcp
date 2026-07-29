@@ -1507,6 +1507,39 @@ public sealed partial class AutomationController
         return response;
     }
 
+    private static WaitForResponse CreateLegacyWaitTimeoutResponse(
+        string state,
+        WaitBackend backend,
+        int timeoutMs,
+        long startTimestamp,
+        int attempts,
+        WaitForObservation? lastObservation,
+        WaitObservedValue? lastObservedValue,
+        string failureReason,
+        bool throwOnTimeout)
+    {
+        var response = new WaitForResponse(
+            Succeeded: false,
+            State: state,
+            ElapsedMs: GetElapsedMilliseconds(startTimestamp),
+            Attempts: attempts,
+            LastObservation: lastObservation,
+            FailureReason: failureReason)
+        {
+            BackendUsed = backend,
+            ReasonCode = "wait_timeout",
+            LastObservedValue = lastObservedValue
+        };
+
+        if (throwOnTimeout)
+        {
+            throw new InvalidOperationException(
+                $"timeout: wait_for state='{state}' after {timeoutMs}ms ({failureReason}).");
+        }
+
+        return response;
+    }
+
     private static WaitForResponse CreateTargetProcessExitedResponse(
         string state,
         WaitBackend backend,

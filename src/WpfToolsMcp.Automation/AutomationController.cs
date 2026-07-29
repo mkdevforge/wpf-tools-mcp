@@ -4910,6 +4910,7 @@ public sealed partial class AutomationController : IDisposable
         var attempts = 0;
         WaitForObservation? lastObservation = null;
         WaitObservedValue? lastObservedValue = null;
+        var lastFailureReason = "not_attached";
 
         Rectangle? lastBounds = null;
         long? stableStartTimestamp = null;
@@ -4917,6 +4918,24 @@ public sealed partial class AutomationController : IDisposable
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (attempts > 0 && Stopwatch.GetElapsedTime(start).TotalMilliseconds >= timeoutMs)
+            {
+                var timeoutResponse = CreateLegacyWaitTimeoutResponse(
+                    request.State,
+                    WaitBackend.Uia,
+                    timeoutMs,
+                    start,
+                    attempts,
+                    lastObservation,
+                    lastObservedValue,
+                    lastFailureReason,
+                    request.ThrowOnTimeout);
+                trace?.SetSummary(
+                    $"{request.State} succeeded=false attempts={attempts} reason={lastFailureReason}");
+                return timeoutResponse;
+            }
+
             attempts++;
 
             AutomationElement? element;
@@ -4965,9 +4984,11 @@ public sealed partial class AutomationController : IDisposable
                 lastObservedValue = ObserveLegacyUiaWaitValue(element, state);
             }
 
-            if (satisfied)
+            lastFailureReason = failureReason ?? lastFailureReason;
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (satisfied && (attempts == 1 || elapsed.TotalMilliseconds < timeoutMs))
             {
-                var elapsedMs = (int)Math.Round(Stopwatch.GetElapsedTime(start).TotalMilliseconds, MidpointRounding.AwayFromZero);
+                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
                 trace?.SetSummary($"{request.State} succeeded=true attempts={attempts}");
                 return new WaitForResponse(
                     Succeeded: true,
@@ -4981,33 +5002,30 @@ public sealed partial class AutomationController : IDisposable
                 };
             }
 
-            var elapsed = Stopwatch.GetElapsedTime(start);
-            if (elapsed.TotalMilliseconds >= timeoutMs)
+            if (satisfied)
             {
-                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
-                var response = new WaitForResponse(
-                    Succeeded: false,
-                    State: request.State,
-                    ElapsedMs: elapsedMs,
-                    Attempts: attempts,
-                    LastObservation: lastObservation,
-                    FailureReason: failureReason ?? "timeout")
-                {
-                    BackendUsed = WaitBackend.Uia,
-                    ReasonCode = "wait_timeout",
-                    LastObservedValue = lastObservedValue
-                };
-
-                if (request.ThrowOnTimeout)
-                {
-                    throw new InvalidOperationException($"timeout: wait_for state='{request.State}' after {timeoutMs}ms ({failureReason ?? "timeout"}).");
-                }
-
-                trace?.SetSummary($"{request.State} succeeded=false attempts={attempts} reason={failureReason ?? "timeout"}");
-                return response;
+                lastFailureReason = "condition_met_after_timeout";
             }
 
-            await Task.Delay(pollIntervalMs, cancellationToken);
+            if (elapsed.TotalMilliseconds >= timeoutMs)
+            {
+                var timeoutResponse = CreateLegacyWaitTimeoutResponse(
+                    request.State,
+                    WaitBackend.Uia,
+                    timeoutMs,
+                    start,
+                    attempts,
+                    lastObservation,
+                    lastObservedValue,
+                    lastFailureReason,
+                    request.ThrowOnTimeout);
+                trace?.SetSummary(
+                    $"{request.State} succeeded=false attempts={attempts} reason={lastFailureReason}");
+                return timeoutResponse;
+            }
+
+            var remainingMs = Math.Max(1, timeoutMs - (int)elapsed.TotalMilliseconds);
+            await Task.Delay(Math.Min(pollIntervalMs, remainingMs), cancellationToken);
         }
     }
         catch (Exception ex)
@@ -5046,6 +5064,7 @@ public sealed partial class AutomationController : IDisposable
         var attempts = 0;
         WaitForObservation? lastObservation = null;
         WaitObservedValue? lastObservedValue = null;
+        var lastFailureReason = "not_attached";
 
         Rect? lastBounds = null;
         long? stableStartTimestamp = null;
@@ -5055,6 +5074,21 @@ public sealed partial class AutomationController : IDisposable
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (attempts > 0 && Stopwatch.GetElapsedTime(start).TotalMilliseconds >= timeoutMs)
+            {
+                return CreateLegacyWaitTimeoutResponse(
+                    stateText,
+                    WaitBackend.Wpf,
+                    timeoutMs,
+                    start,
+                    attempts,
+                    lastObservation,
+                    lastObservedValue,
+                    lastFailureReason,
+                    throwOnTimeout);
+            }
+
             attempts++;
 
             var satisfied = false;
@@ -5240,9 +5274,11 @@ public sealed partial class AutomationController : IDisposable
                 }
             }
 
-            if (satisfied)
+            lastFailureReason = failureReason ?? lastFailureReason;
+            var elapsed = Stopwatch.GetElapsedTime(start);
+            if (satisfied && (attempts == 1 || elapsed.TotalMilliseconds < timeoutMs))
             {
-                var elapsedMs = (int)Math.Round(Stopwatch.GetElapsedTime(start).TotalMilliseconds, MidpointRounding.AwayFromZero);
+                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
                 return new WaitForResponse(
                     Succeeded: true,
                     State: stateText,
@@ -5255,32 +5291,27 @@ public sealed partial class AutomationController : IDisposable
                 };
             }
 
-            var elapsed = Stopwatch.GetElapsedTime(start);
-            if (elapsed.TotalMilliseconds >= timeoutMs)
+            if (satisfied)
             {
-                var elapsedMs = (int)Math.Round(elapsed.TotalMilliseconds, MidpointRounding.AwayFromZero);
-                var response = new WaitForResponse(
-                    Succeeded: false,
-                    State: stateText,
-                    ElapsedMs: elapsedMs,
-                    Attempts: attempts,
-                    LastObservation: lastObservation,
-                    FailureReason: failureReason ?? "timeout")
-                {
-                    BackendUsed = WaitBackend.Wpf,
-                    ReasonCode = "wait_timeout",
-                    LastObservedValue = lastObservedValue
-                };
-
-                if (throwOnTimeout)
-                {
-                    throw new InvalidOperationException($"timeout: wait_for state='{stateText}' after {timeoutMs}ms ({failureReason ?? "timeout"}).");
-                }
-
-                return response;
+                lastFailureReason = "condition_met_after_timeout";
             }
 
-            await Task.Delay(pollIntervalMs, cancellationToken);
+            if (elapsed.TotalMilliseconds >= timeoutMs)
+            {
+                return CreateLegacyWaitTimeoutResponse(
+                    stateText,
+                    WaitBackend.Wpf,
+                    timeoutMs,
+                    start,
+                    attempts,
+                    lastObservation,
+                    lastObservedValue,
+                    lastFailureReason,
+                    throwOnTimeout);
+            }
+
+            var remainingMs = Math.Max(1, timeoutMs - (int)elapsed.TotalMilliseconds);
+            await Task.Delay(Math.Min(pollIntervalMs, remainingMs), cancellationToken);
         }
     }
 
