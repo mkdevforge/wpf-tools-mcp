@@ -800,6 +800,15 @@ public sealed class ToolProfileTests
             var launch = await LaunchPrimaryTestAppAsync(mcp);
             try
             {
+                var sessionsBeforeFallback = await mcp.CallToolAsync<ListSessionsResponse>("list_sessions");
+                var sessionBeforeFallback = sessionsBeforeFallback.Sessions.Single(session => session.SessionId == launch.SessionId);
+                var wpfBeforeFallback = sessionBeforeFallback.BackendCapabilityStates.Single(state => state.Backend == "wpf");
+                Assert.Multiple(() =>
+                {
+                    Assert.That(wpfBeforeFallback.State, Is.EqualTo("not_initialized"));
+                    Assert.That(wpfBeforeFallback.Failure, Is.Null);
+                });
+
                 var tree = await mcp.CallToolAsync<GetVisualTreeResponse>("get_visual_tree", new Dictionary<string, object?>
                 {
                     ["sessionId"] = launch.SessionId,
@@ -807,9 +816,52 @@ public sealed class ToolProfileTests
                     ["maxNodes"] = 100
                 });
 
-                Assert.That(tree.BackendUsed, Is.EqualTo(InspectionBackend.Uia));
+                var matches = await mcp.CallToolAsync<FindElementsResponse>("find_elements", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = launch.SessionId,
+                    ["query"] = new Dictionary<string, object?> { ["automationId"] = "Basic_Button" },
+                    ["maxResults"] = 3
+                });
+
+                var resolved = await mcp.CallToolAsync<ResolveElementResponse>("resolve_element", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = launch.SessionId,
+                    ["locator"] = new Dictionary<string, object?> { ["automationId"] = "Basic_Button" }
+                });
+
+                var sessionsAfterFallback = await mcp.CallToolAsync<ListSessionsResponse>("list_sessions");
+                var sessionAfterFallback = sessionsAfterFallback.Sessions.Single(session => session.SessionId == launch.SessionId);
+                var wpfAfterFallback = sessionAfterFallback.BackendCapabilityStates.Single(state => state.Backend == "wpf");
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(tree.BackendUsed, Is.EqualTo(InspectionBackend.Uia));
+                    Assert.That(matches.BackendUsed, Is.EqualTo(InspectionBackend.Uia));
+                    Assert.That(matches.ReturnedMatches, Is.EqualTo(1));
+                    Assert.That(resolved.BackendUsed, Is.EqualTo(InspectionBackend.Uia));
+                    Assert.That(resolved.Element.AutomationId, Is.EqualTo("Basic_Button"));
+                    Assert.That(wpfAfterFallback.State, Is.EqualTo("unavailable"));
+                });
+
+                AssertMissingAssetsFallback(tree.Fallback);
+                AssertMissingAssetsFallback(matches.Fallback);
+                AssertMissingAssetsFallback(resolved.Fallback);
+                AssertMissingAssetsFailure(wpfAfterFallback.Failure);
+
                 Assert.That(tree.Warnings, Is.Not.Null);
-                Assert.That(string.Join(" ", tree.Warnings!), Does.Contain("WPF auto-injection failed"));
+                Assert.That(matches.Warnings, Is.Not.Null);
+                Assert.That(string.Join(" ", tree.Warnings!), Does.Contain("backend_assets_missing at injection"));
+                Assert.That(string.Join(" ", matches.Warnings!), Does.Contain("backend_assets_missing at injection"));
+
+                var serializedResponses = JsonSerializer.Serialize(new
+                {
+                    sessionsBeforeFallback,
+                    tree,
+                    matches,
+                    resolved,
+                    sessionsAfterFallback
+                });
+                Assert.That(serializedResponses, Does.Not.Contain(isolatedServerDir).IgnoreCase);
 
                 var ex = Assert.ThrowsAsync<InvalidOperationException>(async () =>
                     _ = await mcp.CallToolAsync<GetDataContextResponse>("get_data_context", new Dictionary<string, object?>
@@ -818,7 +870,11 @@ public sealed class ToolProfileTests
                         ["locator"] = new Dictionary<string, object?> { ["automationId"] = "Basic_Button" }
                     }));
 
-                Assert.That(ex!.Message, Does.Contain("Phase 2 agent payload directory not found"));
+                Assert.Multiple(() =>
+                {
+                    Assert.That(ex!.Message, Does.Contain("backend_assets_missing"));
+                    Assert.That(ex.Message, Does.Not.Contain(isolatedServerDir).IgnoreCase);
+                });
             }
             finally
             {
@@ -1769,6 +1825,34 @@ public sealed class ToolProfileTests
         catch
         {
         }
+    }
+
+    private static void AssertMissingAssetsFallback(BackendFallbackInfo? fallback)
+    {
+        Assert.That(fallback, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(fallback!.FromBackend, Is.EqualTo("wpf"));
+            Assert.That(fallback.ToBackend, Is.EqualTo("uia"));
+            Assert.That(fallback.Attempted, Is.True);
+            Assert.That(fallback.Available, Is.True);
+            Assert.That(fallback.Used, Is.True);
+        });
+        AssertMissingAssetsFailure(fallback!.Failure);
+    }
+
+    private static void AssertMissingAssetsFailure(FailureInfo? failure)
+    {
+        Assert.That(failure, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(failure!.Code, Is.EqualTo("backend_assets_missing"));
+            Assert.That(failure.Stage, Is.EqualTo("injection"));
+            Assert.That(failure.Detail, Is.EqualTo("Required WPF backend files are unavailable."));
+            Assert.That(failure.Retryable, Is.False);
+            Assert.That(failure.RetryAfterMs, Is.Null);
+            Assert.That(failure.RecoveryActions, Is.EqualTo(new[] { "use_uia", "repair_installation" }));
+        });
     }
 
     private static string CopyServerWithoutPhase2Payload(string serverExe)
