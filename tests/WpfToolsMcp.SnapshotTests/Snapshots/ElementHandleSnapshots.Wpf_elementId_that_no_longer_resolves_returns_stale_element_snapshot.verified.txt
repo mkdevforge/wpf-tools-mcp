@@ -26,5 +26,5 @@
       CursorMoved: true
     }
   },
-  Error: Tool 'get_data_context' failed: An error occurred invoking 'get_data_context': tool=GetDataContext: stale_element: not_found for '<element>'. Last known WPF identity: type=Button, automationId=Dynamic_NewButton, name=, xpath=/Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/StackPanel/Button. Call resolve_element again. Last agent error: wpf_resolve:not_found: Locator did not match any elements.
+  Error: Tool 'get_data_context' failed: An error occurred invoking 'get_data_context': tool=GetDataContext: stale_element: not_found for '<element>'. Last known WPF identity: type=Button, automationId=Dynamic_NewButton, name=, xpath=/Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/StackPanel/Button. Call resolve_element again.
 }

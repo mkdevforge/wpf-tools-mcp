@@ -230,6 +230,45 @@ public sealed class AgentClientLifecycleTests
         }
     }
 
+    [TestCase("performance_already_running: runId=private-run", "performance_already_running")]
+    [TestCase("performance_not_running", "performance_not_running")]
+    [TestCase("performance_run_not_owned", "performance_run_not_owned")]
+    [TestCase("performance_run_id_mismatch: activeRunId=private-run", "performance_run_id_mismatch")]
+    [TestCase("performance_stop_failed", "performance_stop_failed")]
+    public async Task Performance_agent_errors_expose_only_allowlisted_stable_codes(
+        string remoteMessage,
+        string expectedCode)
+    {
+        const string remoteDetails = @"stderr: token=details-secret; source=C:\Users\operator\private.log";
+
+        var exception = await CapturePerformanceAgentErrorAsync(remoteMessage, remoteDetails);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception.Message, Is.EqualTo(expectedCode));
+            Assert.That(exception.Message, Does.Not.Contain("private-run"));
+            Assert.That(exception.Message, Does.Not.Contain("details-secret"));
+            Assert.That(exception.InnerException, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task Performance_agent_errors_keep_unrecognized_remote_content_private()
+    {
+        const string remoteMessage = @"performance_private_failure: C:\work\secret-project api-key=message-secret";
+        const string remoteDetails = @"stderr: token=details-secret; source=C:\Users\operator\private.log";
+
+        var exception = await CapturePerformanceAgentErrorAsync(remoteMessage, remoteDetails);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception.Message, Is.EqualTo("Agent call failed."));
+            Assert.That(exception.Message, Does.Not.Contain("message-secret"));
+            Assert.That(exception.Message, Does.Not.Contain("details-secret"));
+            Assert.That(exception.Message, Does.Not.Contain(@"C:\work\secret-project"));
+        });
+    }
+
     [Test]
     public async Task Capability_handshake_rejects_an_incompatible_positive_protocol_version()
     {
@@ -994,6 +1033,52 @@ public sealed class AgentClientLifecycleTests
         }
 
         Assert.Fail("The controller did not enter disposal within the bounded wait.");
+    }
+
+    private static async Task<InvalidOperationException> CapturePerformanceAgentErrorAsync(
+        string remoteMessage,
+        string? remoteDetails)
+    {
+        var pipeName = $"wpf-tools-mcp-performance-error-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+
+        AgentClient? client = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var acceptTask = server.WaitForConnectionAsync(timeout.Token);
+            var clientTask = AgentClient.ConnectAsync(pipeName, TimeSpan.FromSeconds(2), timeout.Token);
+            await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
+            client = await clientTask;
+
+            var callTask = AutomationController.CallPerformanceAgentAsync(
+                () => client.CallAsync<string>("wpf/performance_stop", null, timeout.Token));
+            var request = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(request.Method, Is.EqualTo("wpf/performance_stop"));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    request.Id,
+                    Ok: false,
+                    Error: new AgentError(remoteMessage, remoteDetails)),
+                timeout.Token);
+
+            return Assert.CatchAsync<InvalidOperationException>(async () =>
+                       _ = await callTask.WaitAsync(TimeSpan.FromSeconds(2)))
+                   ?? throw new AssertionException("Expected the performance agent call to fail.");
+        }
+        finally
+        {
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+        }
     }
 
     private static void SetPrivateField<T>(AutomationController controller, string name, T value)

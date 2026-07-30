@@ -575,7 +575,12 @@ public sealed class ElementHandleSnapshots
                 }
             }
 
-            Assert.That(error, Does.Contain("stale_element: not_found"));
+            Assert.Multiple(() =>
+            {
+                Assert.That(error, Does.Contain("stale_element: not_found"));
+                Assert.That(error, Does.Not.Contain("Last agent error"));
+                Assert.That(error, Does.Not.Contain("wpf_resolve:not_found"));
+            });
 
             await Verifier.Verify(new
             {

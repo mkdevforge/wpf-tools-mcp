@@ -90,7 +90,7 @@ public sealed class InjectorProcessRunnerTests
 
         var result = await InjectorProcessRunner.RunAsync(
             startInfo,
-            TimeSpan.FromSeconds(5),
+            InjectorProcessRunner.GetConfiguredTimeout(),
             CancellationToken.None);
 
         Assert.That(result.ExitCode, Is.Zero, result.Stderr);

@@ -9,6 +9,14 @@ namespace WpfToolsMcp.Automation;
 public sealed partial class AutomationController
 {
     private static readonly TimeSpan AutoAgentFailureRetryDelay = TimeSpan.FromSeconds(10);
+    private static readonly string[] PublicPerformanceErrorCodes =
+    [
+        "performance_already_running",
+        "performance_not_running",
+        "performance_run_not_owned",
+        "performance_run_id_mismatch",
+        "performance_stop_failed"
+    ];
     private readonly object _agentSync = new();
     private AgentClient? _agentClient;
     private string? _agentPipeName;
@@ -461,7 +469,11 @@ public sealed partial class AutomationController
         {
             var client = await EnsureAgentConnectedAsync(cancellationToken);
             var request = new PerformanceStartRequest(probeIntervalMs, autoStopAfterMs, resetIfRunning);
-            var response = await client.CallAsync<PerformanceStartResponse>("wpf/performance_start", request, cancellationToken);
+            var response = await CallPerformanceAgentAsync(
+                () => client.CallAsync<PerformanceStartResponse>(
+                    "wpf/performance_start",
+                    request,
+                    cancellationToken));
             trace?.SetSummary($"runId={response.RunId} startedAt={response.StartedAtUtc:O}");
             return response;
         }
@@ -487,7 +499,11 @@ public sealed partial class AutomationController
         {
             var client = await EnsureAgentConnectedAsync(cancellationToken);
             var request = new PerformanceStopRequest(runId.Trim());
-            var response = await client.CallAsync<PerformanceStopResponse>("wpf/performance_stop", request, cancellationToken);
+            var response = await CallPerformanceAgentAsync(
+                () => client.CallAsync<PerformanceStopResponse>(
+                    "wpf/performance_stop",
+                    request,
+                    cancellationToken));
             trace?.SetSummary($"runId={runId.Trim()}");
             return response;
         }
@@ -500,6 +516,45 @@ public sealed partial class AutomationController
         {
             trace?.Dispose();
         }
+    }
+
+    internal static async Task<T> CallPerformanceAgentAsync<T>(Func<Task<T>> call)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+
+        try
+        {
+            return await call().ConfigureAwait(false);
+        }
+        catch (AgentRemoteException ex)
+        {
+            var publicCode = GetPublicPerformanceErrorCode(ex.RemoteMessage);
+            if (publicCode is null)
+            {
+                throw;
+            }
+
+            throw new InvalidOperationException(publicCode);
+        }
+    }
+
+    private static string? GetPublicPerformanceErrorCode(string? remoteMessage)
+    {
+        if (string.IsNullOrWhiteSpace(remoteMessage))
+        {
+            return null;
+        }
+
+        foreach (var code in PublicPerformanceErrorCodes)
+        {
+            if (string.Equals(remoteMessage, code, StringComparison.Ordinal) ||
+                remoteMessage.StartsWith(code + ":", StringComparison.Ordinal))
+            {
+                return code;
+            }
+        }
+
+        return null;
     }
 
     public async Task<bool> RefreshWpfBackendCapabilityAsync(CancellationToken cancellationToken = default)
