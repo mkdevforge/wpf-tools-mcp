@@ -626,7 +626,10 @@ public sealed class StateObservationTests
             Assert.That(result.FailureReason, Is.EqualTo("target_element_unloaded"));
             Assert.That(result.ReasonCode, Is.EqualTo("target_element_unloaded"));
             Assert.That(result.LastObservedValue?.State, Is.EqualTo(WaitObservedValueState.Value));
-            Assert.That(result.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("idle"));
+            Assert.That(
+                result.LastObservedValue?.Value?.GetValue<string>(),
+                Is.AnyOf("idle", string.Empty),
+                "WPF may clear the Text binding before raising Unloaded.");
         });
     }
 
