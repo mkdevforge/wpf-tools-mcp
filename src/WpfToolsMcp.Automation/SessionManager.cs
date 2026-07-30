@@ -631,6 +631,10 @@ public sealed class SessionManager : IDisposable
             if (controllerAttached)
             {
                 await RefreshBackendCapabilitiesAsync(session, cancellationToken).ConfigureAwait(false);
+                processState = ProcessTargetResolver.Observe(session.ProcessIdentity);
+                controllerAttached =
+                    processState == ProcessInstanceState.Current &&
+                    session.Controller.IsAttached;
             }
 
             var activeWindow = ReconcileActiveWindow(session);

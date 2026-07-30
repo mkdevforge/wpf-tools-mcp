@@ -170,7 +170,7 @@ public sealed partial class AutomationController
 
     private static bool IsWpfSetValueUnsupported(Exception ex)
     {
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        var message = GetInternalFailureMessage(ex);
         return message.Contains("set_value_unsupported_wpf_target:", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -219,7 +219,7 @@ public sealed partial class AutomationController
 
     private static bool IsWpfInvokeUnsupported(Exception ex)
     {
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        var message = GetInternalFailureMessage(ex);
         return message.Contains("invoke_unsupported_wpf_target:", StringComparison.OrdinalIgnoreCase);
     }
 

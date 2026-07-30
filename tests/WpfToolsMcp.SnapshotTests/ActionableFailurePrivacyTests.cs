@@ -40,6 +40,31 @@ public sealed class ActionableFailurePrivacyTests
     }
 
     [Test]
+    public async Task Relative_missing_executable_is_reported_as_process_discovery_failure()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe);
+        var missingExecutable = $"wpf-tools-mcp-missing-{Guid.NewGuid():N}.exe";
+
+        var result = await mcp.CallToolResultAsync("launch_app", new Dictionary<string, object?>
+        {
+            ["exePath"] = missingExecutable
+        });
+        var failure = JsonSerializer.Deserialize<FailureInfo>(
+            result.StructuredContent!.ToJsonString(),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.IsError, Is.True);
+            Assert.That(failure!.Code, Is.EqualTo("process_not_found"));
+            Assert.That(failure.Stage, Is.EqualTo("process_discovery"));
+            Assert.That(failure.Retryable, Is.False);
+            Assert.That(result.Content.OfType<TextContentBlock>().Single().Text, Does.Not.Contain(missingExecutable));
+        });
+    }
+
+    [Test]
     public async Task Generic_mcp_error_mapping_ignores_raw_messages_around_actionable_failures()
     {
         var serverAssemblyPath = Path.ChangeExtension(

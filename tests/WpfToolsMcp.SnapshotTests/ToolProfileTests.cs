@@ -843,9 +843,9 @@ public sealed class ToolProfileTests
                     Assert.That(wpfAfterFallback.State, Is.EqualTo("unavailable"));
                 });
 
-                AssertMissingAssetsFallback(tree.Fallback);
-                AssertMissingAssetsFallback(matches.Fallback);
-                AssertMissingAssetsFallback(resolved.Fallback);
+                AssertMissingAssetsFallback(tree.Fallback, attempted: true);
+                AssertMissingAssetsFallback(matches.Fallback, attempted: false);
+                AssertMissingAssetsFallback(resolved.Fallback, attempted: false);
                 AssertMissingAssetsFailure(wpfAfterFallback.Failure);
 
                 Assert.That(tree.Warnings, Is.Not.Null);
@@ -1827,14 +1827,14 @@ public sealed class ToolProfileTests
         }
     }
 
-    private static void AssertMissingAssetsFallback(BackendFallbackInfo? fallback)
+    private static void AssertMissingAssetsFallback(BackendFallbackInfo? fallback, bool attempted)
     {
         Assert.That(fallback, Is.Not.Null);
         Assert.Multiple(() =>
         {
             Assert.That(fallback!.FromBackend, Is.EqualTo("wpf"));
             Assert.That(fallback.ToBackend, Is.EqualTo("uia"));
-            Assert.That(fallback.Attempted, Is.True);
+            Assert.That(fallback.Attempted, Is.EqualTo(attempted));
             Assert.That(fallback.Available, Is.True);
             Assert.That(fallback.Used, Is.True);
         });

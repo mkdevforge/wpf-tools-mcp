@@ -96,6 +96,12 @@ internal sealed class AgentClient : IAsyncDisposable
             await pipe.ConnectAsync(cts.Token);
             return new AgentClient(pipe);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            pipe.Dispose();
+            throw new TimeoutException(
+                $"Agent pipe connection timed out after {timeout.TotalSeconds:0.###}s.");
+        }
         catch
         {
             pipe.Dispose();
@@ -107,9 +113,20 @@ internal sealed class AgentClient : IAsyncDisposable
     {
         var paramsNode = @params is null ? null : JsonSerializer.SerializeToNode(@params, JsonOptions);
         var result = await CallRawAsync(method, paramsNode, cancellationToken);
-        var value = result is null ? default : result.Deserialize<T>(JsonOptions);
+        T? value;
+        try
+        {
+            value = result is null ? default : result.Deserialize<T>(JsonOptions);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            PoisonConnection();
+            throw new InvalidOperationException($"Agent call '{method}' returned an invalid result.", ex);
+        }
+
         if (value is null)
         {
+            PoisonConnection();
             throw new InvalidOperationException($"Agent call '{method}' returned null.");
         }
 

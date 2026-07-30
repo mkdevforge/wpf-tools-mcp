@@ -358,7 +358,8 @@ available, inspection tools can return deeper WPF-native data. Backend-neutral
 tools fall back to UIA where an equivalent exists. UIA fallbacks in auto tree,
 search, and resolve responses include structured WPF-to-UIA metadata, while
 tree and search retain compatibility warning text. WPF-only diagnostics return
-a structured injection or connection failure.
+a stable sanitized failure code and detail; callers can inspect `list_sessions`
+for the full structured backend failure state.
 
 Actionable failures use stable lower-snake-case `Code` and `Stage` values, a
 sanitized human-readable `Detail`, optional `Retryable` and `RetryAfterMs`

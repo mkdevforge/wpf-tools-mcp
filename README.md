@@ -127,11 +127,17 @@ When `backend=Auto` uses UIA for `get_visual_tree`, `find_elements`, or
 `resolve_element`, the response includes structured `Fallback` metadata:
 `FromBackend`, `ToBackend`, `Attempted`, `Available`, `Used`, and an optional
 `FailureInfo`. Tree and search responses also retain their text warning for
-compatibility; callers should use `Fallback` for machine decisions.
+compatibility; callers should use `Fallback` for machine decisions. `Attempted`
+is true only when the WPF path performed work for that request; native routing
+and a cached retry gate report false even when the prior failure is included.
+`Available` reports whether the destination UIA backend could serve the request,
+and `Used` reports whether the returned payload came from that backend.
 
-Public actionable errors and trace entries use the sanitized failure contract.
-They do not expose raw filesystem paths, injector stdout or stderr, or
-target-side stack traces; those diagnostics remain internal to the server.
+Public actionable errors and trace entries use the failure code and sanitized
+detail. `list_sessions` and structured attach, launch, resolve, and fallback
+results expose the full failure object. None expose raw filesystem paths,
+injector stdout or stderr, or target-side stack traces; those diagnostics remain
+internal to the server.
 
 ### Coherent Diagnostic Snapshots
 

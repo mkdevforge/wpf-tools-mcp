@@ -14,8 +14,9 @@ public sealed partial class AutomationController
     private string? _agentPipeName;
     private int? _agentPid;
     private AgentCapabilitiesResponse? _agentCapabilities;
-    private string? _agentAutoConnectFailure;
+    private FailureInfo? _agentAutoConnectFailure;
     private DateTimeOffset? _agentAutoConnectFailureAtUtc;
+    private long _agentAutoConnectAttemptSequence;
 
     public bool IsAgentConnected
     {
@@ -39,12 +40,46 @@ public sealed partial class AutomationController
                     return "ready";
                 }
 
-                return string.IsNullOrWhiteSpace(_agentAutoConnectFailure)
+                return _agentAutoConnectFailure is null
                     ? "not_initialized"
                     : "unavailable";
             }
         }
     }
+
+    internal BackendCapabilityState GetWpfBackendCapabilityState()
+    {
+        lock (_agentSync)
+        {
+            if (_agentClient is not null && _agentClient.IsConnected)
+            {
+                return new BackendCapabilityState("wpf", "ready");
+            }
+
+            if (_agentAutoConnectFailure is null)
+            {
+                return new BackendCapabilityState("wpf", "not_initialized");
+            }
+
+            var failure = _agentAutoConnectFailure;
+            if (failure.Retryable is true && _agentAutoConnectFailureAtUtc is { } recordedAt)
+            {
+                var remaining = GetAutoAgentFailureRetryDelay(failure) - (DateTimeOffset.UtcNow - recordedAt);
+                failure = failure with
+                {
+                    RetryAfterMs = Math.Max(0, (int)Math.Ceiling(remaining.TotalMilliseconds))
+                };
+            }
+
+            return new BackendCapabilityState("wpf", "unavailable")
+            {
+                Failure = failure
+            };
+        }
+    }
+
+    internal FailureInfo? GetWpfBackendFailure() =>
+        GetWpfBackendCapabilityState().Failure;
 
     private sealed record WpfAgentTarget(
         long? WindowHandle,
@@ -95,7 +130,7 @@ public sealed partial class AutomationController
 
     private static bool IsWpfAgentStaleOrNotFound(Exception ex)
     {
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        var message = GetInternalFailureMessage(ex);
         return message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("wpf_handle_stale:", StringComparison.OrdinalIgnoreCase);
     }
@@ -140,11 +175,8 @@ public sealed partial class AutomationController
         var context = target.Handle is null
             ? ""
             : $" Last known WPF identity: type={target.Handle.Type}, automationId={target.Handle.AutomationId}, name={target.Handle.Name}, xpath={target.Handle.XPath}.";
-        var lastAgentError = (inner.GetBaseException().Message ?? inner.Message ?? string.Empty)
-            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)[0];
-
         return new InvalidOperationException(
-            $"stale_element: not_found for '{target.PublicElementId}'.{context} Call resolve_element again. Last agent error: {lastAgentError}");
+            $"stale_element: not_found for '{target.PublicElementId}'.{context} Call resolve_element again.");
     }
 
     private async Task<ElementRef> StripAgentElementIdAsync(
@@ -195,147 +227,200 @@ public sealed partial class AutomationController
             _lifetimeCts.Token);
         var operationToken = operationCancellation.Token;
         var trace = BeginTraceSpan("inject_agent");
+        var stage = FailureDiagnostics.Stages.Attachment;
+        ProcessIntegrityLevelComparison? integrityComparison = null;
         try
         {
             operationToken.ThrowIfCancellationRequested();
             var application = EnsureAttached();
             var automation = EnsureAutomation();
 
-        var pid = application.ProcessId;
-        using var process = Process.GetProcessById(pid);
-        var pipeName = AgentPipeName.Compute(process);
+            var pid = application.ProcessId;
+            var processIdentity = EnsureAttachedProcessIdentityCurrent(pid);
+            using var process = Process.GetProcessById(pid);
+            var pipeName = AgentPipeName.Compute(processIdentity);
 
-        AgentClient? existingClient;
-        string? existingPipeName;
-        int? existingPid;
-        lock (_agentSync)
-        {
-            existingClient = _agentClient;
-            existingPipeName = _agentPipeName;
-            existingPid = _agentPid;
-        }
-
-        if (existingClient is not null &&
-            existingClient.IsConnected &&
-            existingPipeName is not null &&
-            existingPid == pid)
-        {
-            // Ensure the agent is still responsive
-            try
+            AgentClient? existingClient;
+            string? existingPipeName;
+            int? existingPid;
+            lock (_agentSync)
             {
-                var capabilities = await VerifyAgentAndGetCapabilitiesAsync(existingClient, operationToken);
-                lock (_agentSync)
+                existingClient = _agentClient;
+                existingPipeName = _agentPipeName;
+                existingPid = _agentPid;
+            }
+
+            if (existingClient is not null &&
+                existingClient.IsConnected &&
+                existingPipeName is not null &&
+                existingPid == pid)
+            {
+                stage = FailureDiagnostics.Stages.Protocol;
+                try
                 {
-                    if (ReferenceEquals(_agentClient, existingClient))
+                    var capabilities = await VerifyAgentForAttachedProcessAsync(
+                        existingClient,
+                        pid,
+                        operationToken);
+                    lock (_agentSync)
                     {
+                        if (ReferenceEquals(_agentClient, existingClient))
+                        {
+                            _agentCapabilities = capabilities;
+                        }
+                    }
+
+                    var response = new InjectAgentResponse(Injected: false, PipeName: existingPipeName);
+                    ClearAutoAgentFailure();
+                    trace?.SetSummary($"injected={response.Injected} pipe={response.PipeName}");
+                    return response;
+                }
+                catch (Exception) when (!operationToken.IsCancellationRequested)
+                {
+                    CleanupAgent();
+                }
+            }
+
+            if (existingClient is not null &&
+                (existingPid != pid || !existingClient.IsConnected || existingPipeName is null))
+            {
+                CleanupAgent();
+            }
+
+            // Connect-first lets a restarted MCP server reuse an agent without injecting again.
+            stage = FailureDiagnostics.Stages.PipeConnection;
+            var connectFirstClient = await TryConnectToAgentWithRetryAsync(
+                pipeName,
+                totalTimeout: TimeSpan.FromSeconds(2),
+                operationToken);
+
+            if (connectFirstClient is not null)
+            {
+                AgentCapabilitiesResponse capabilities;
+                try
+                {
+                    stage = FailureDiagnostics.Stages.Protocol;
+                    capabilities = await VerifyAgentForAttachedProcessAsync(
+                        connectFirstClient,
+                        pid,
+                        operationToken);
+                    lock (_agentSync)
+                    {
+                        _agentClient = connectFirstClient;
+                        _agentPipeName = pipeName;
+                        _agentPid = pid;
                         _agentCapabilities = capabilities;
                     }
                 }
+                catch
+                {
+                    await connectFirstClient.DisposeAsync();
+                    throw;
+                }
 
-                var response = new InjectAgentResponse(Injected: false, PipeName: existingPipeName);
+                var response = new InjectAgentResponse(Injected: false, PipeName: pipeName);
                 ClearAutoAgentFailure();
                 trace?.SetSummary($"injected={response.Injected} pipe={response.PipeName}");
                 return response;
             }
-            catch (Exception) when (!operationToken.IsCancellationRequested)
+
+            stage = FailureDiagnostics.Stages.Injection;
+            if (ProcessIntegrityLevelInspector.TryCompareWithCurrentProcess(pid, out var measuredIntegrity))
             {
-                CleanupAgent();
+                integrityComparison = measuredIntegrity;
+                if (measuredIntegrity == ProcessIntegrityLevelComparison.TargetHigher)
+                {
+                    throw new ActionableFailureException(
+                        FailureDiagnostics.AccessDenied(stage, measuredIntegrity));
+                }
             }
-        }
 
-        if (existingClient is not null &&
-            (existingPid != pid || !existingClient.IsConnected || existingPipeName is null))
-        {
-            CleanupAgent();
-        }
+            var assets = Phase2Assets.ResolveFromAppBase();
 
-        // Connect-first: if the app was already injected (e.g. MCP server restarted), we should reconnect without re-injecting.
-        var connectFirstClient = await TryConnectToAgentWithRetryAsync(
-            pipeName,
-            totalTimeout: TimeSpan.FromSeconds(2),
-            operationToken);
+            stage = FailureDiagnostics.Stages.Attachment;
+            var window = FindMainWindow(application, automation);
+            var hwnd = window.Properties.NativeWindowHandle.Value;
+            if (hwnd == IntPtr.Zero)
+            {
+                throw FailureDiagnostics.Exception(
+                    FailureDiagnostics.Codes.AttachmentFailed,
+                    stage,
+                    "The target window handle is unavailable for WPF attachment.",
+                    retryable: true,
+                    recoveryActions: [FailureDiagnostics.Recovery.Retry, FailureDiagnostics.Recovery.UseUia]);
+            }
 
-        if (connectFirstClient is not null)
-        {
-            AgentCapabilitiesResponse capabilities;
+            stage = FailureDiagnostics.Stages.ArchitectureDetection;
+            var architecture = ProcessArchitectureDetector.GetProcessArchitecture(process);
+
+            stage = FailureDiagnostics.Stages.Injection;
+            _ = EnsureAttachedProcessIdentityCurrent(pid);
+            var injectResult = await SnoopInjector.InjectAsync(
+                assets,
+                targetPid: pid,
+                targetHwnd: hwnd.ToInt64(),
+                targetArchitecture: architecture,
+                pipeName: pipeName,
+                cancellationToken: operationToken);
+
+            if (injectResult.ExitCode != 0)
+            {
+                throw new ActionableFailureException(
+                    FailureDiagnostics.ClassifyInjectorFailure(injectResult, integrityComparison));
+            }
+
+            stage = FailureDiagnostics.Stages.PipeConnection;
+            var client = await ConnectToAgentWithRetryAsync(pipeName, operationToken);
+            AgentCapabilitiesResponse injectedCapabilities;
             try
             {
-                capabilities = await VerifyAgentAndGetCapabilitiesAsync(connectFirstClient, operationToken);
+                stage = FailureDiagnostics.Stages.Protocol;
+                injectedCapabilities = await VerifyAgentForAttachedProcessAsync(
+                    client,
+                    pid,
+                    operationToken);
+                lock (_agentSync)
+                {
+                    _agentClient = client;
+                    _agentPipeName = pipeName;
+                    _agentPid = pid;
+                    _agentCapabilities = injectedCapabilities;
+                }
             }
             catch
             {
-                await connectFirstClient.DisposeAsync();
+                await client.DisposeAsync();
                 throw;
             }
 
-            lock (_agentSync)
-            {
-                _agentClient = connectFirstClient;
-                _agentPipeName = pipeName;
-                _agentPid = pid;
-                _agentCapabilities = capabilities;
-            }
-
-            var response = new InjectAgentResponse(Injected: false, PipeName: pipeName);
+            var finalResponse = new InjectAgentResponse(Injected: true, PipeName: pipeName);
             ClearAutoAgentFailure();
-            trace?.SetSummary($"injected={response.Injected} pipe={response.PipeName}");
-            return response;
+            trace?.SetSummary($"injected={finalResponse.Injected} pipe={finalResponse.PipeName}");
+            return finalResponse;
         }
-
-        var assets = Phase2Assets.ResolveFromAppBase();
-
-        var window = FindMainWindow(application, automation);
-        var hwnd = window.Properties.NativeWindowHandle.Value;
-        if (hwnd == IntPtr.Zero)
+        catch (OperationCanceledException)
         {
-            throw new InvalidOperationException("Main window handle is not available.");
-        }
-
-        var architecture = ProcessArchitectureDetector.GetProcessArchitecture(process);
-
-        var injectResult = await SnoopInjector.InjectAsync(
-            assets,
-            targetPid: pid,
-            targetHwnd: hwnd.ToInt64(),
-            targetArchitecture: architecture,
-            pipeName: pipeName,
-            cancellationToken: operationToken);
-
-        if (injectResult.ExitCode != 0)
-        {
-            var details = BuildInjectorFailureDetails(injectResult);
-            throw new InvalidOperationException($"Snoop injection failed.{details}");
-        }
-
-        var client = await ConnectToAgentWithRetryAsync(pipeName, operationToken);
-        AgentCapabilitiesResponse injectedCapabilities;
-        try
-        {
-            injectedCapabilities = await VerifyAgentAndGetCapabilitiesAsync(client, operationToken);
-        }
-        catch
-        {
-            await client.DisposeAsync();
             throw;
         }
-
-        lock (_agentSync)
+        catch (ActionableFailureException ex)
         {
-            _agentClient = client;
-            _agentPipeName = pipeName;
-            _agentPid = pid;
-            _agentCapabilities = injectedCapabilities;
-        }
-
-        var finalResponse = new InjectAgentResponse(Injected: true, PipeName: pipeName);
-        ClearAutoAgentFailure();
-        trace?.SetSummary($"injected={finalResponse.Injected} pipe={finalResponse.PipeName}");
-        return finalResponse;
+            var failure = PreferTargetStateFailure(ex.Failure);
+            var reported = failure == ex.Failure
+                ? ex
+                : new ActionableFailureException(failure, ex);
+            SetAutoAgentFailure(failure);
+            trace?.SetError(reported);
+            throw reported;
         }
         catch (Exception ex)
         {
-            trace?.SetError(ex);
-            throw;
+            var classified = FailureDiagnostics.Classify(ex, stage, integrityComparison);
+            var actionable = new ActionableFailureException(
+                PreferTargetStateFailure(classified),
+                ex);
+            SetAutoAgentFailure(actionable);
+            trace?.SetError(actionable);
+            throw actionable;
         }
         finally
         {
@@ -419,7 +504,7 @@ public sealed partial class AutomationController
 
     public async Task<bool> RefreshWpfBackendCapabilityAsync(CancellationToken cancellationToken = default)
     {
-        var client = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
+        var client = await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
         return client is not null;
     }
 
@@ -593,7 +678,7 @@ public sealed partial class AutomationController
     }
 
     private static bool IsObservationNotFound(Exception ex) =>
-        ex.GetBaseException().Message.Contains("observe_state_not_found", StringComparison.OrdinalIgnoreCase);
+        GetInternalFailureMessage(ex).Contains("observe_state_not_found", StringComparison.OrdinalIgnoreCase);
 
     private static InvalidOperationException CreateObservationConnectionLostException(
         WpfStateObservation observation,
@@ -1112,22 +1197,34 @@ public sealed partial class AutomationController
         return await client.CallAsync<GetVisualTreeResponse>("wpf/get_visual_tree", request, cancellationToken);
     }
 
-    internal async Task<GetVisualTreeResponse?> TryGetVisualTreeWpfAsync(
+    internal async Task<(GetVisualTreeResponse? Response, bool Attempted, FailureInfo? Failure)> TryGetVisualTreeWpfAsync(
         GetWpfVisualTreeRequestV2 request,
         CancellationToken cancellationToken,
         bool autoInject = false)
     {
+        var attemptSequence = GetAutoAgentAttemptSequence();
         var client = autoInject
             ? await EnsureAgentConnectedForAutoAsync(cancellationToken)
             : await EnsureAgentConnectedOrNullAsync(cancellationToken);
         if (client is null)
         {
-            return null;
+            return (
+                null,
+                autoInject && GetAutoAgentAttemptSequence() != attemptSequence,
+                GetWpfBackendFailure());
         }
 
         try
         {
-            return await client.CallAsync<GetVisualTreeResponse>("wpf/get_visual_tree", request, cancellationToken);
+            var response = await client.CallAsync<GetVisualTreeResponse>(
+                "wpf/get_visual_tree",
+                request,
+                cancellationToken);
+            return (response, true, null);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1136,12 +1233,16 @@ public sealed partial class AutomationController
                 throw;
             }
 
-            if (autoInject && ShouldRecordAutoAgentFailure(ex))
+            var failure = ex is AgentRemoteException
+                ? FailureDiagnostics.BackendOperationFailure()
+                : FailureDiagnostics.Classify(ex, FailureDiagnostics.Stages.Protocol);
+            failure = PreferTargetStateFailure(failure);
+            if (autoInject && ShouldRecordAutoAgentFailure(ex, client.IsConnected))
             {
-                SetAutoAgentFailure(ex);
+                SetAutoAgentFailure(failure);
             }
 
-            return null;
+            return (null, true, failure);
         }
     }
 
@@ -1162,22 +1263,31 @@ public sealed partial class AutomationController
         return await CallFindElementsWpfAsync(client, request, cancellationToken);
     }
 
-    internal async Task<FindElementsResponse?> TryFindElementsWpfAsync(
+    internal async Task<(FindElementsResponse? Response, bool Attempted, FailureInfo? Failure)> TryFindElementsWpfAsync(
         FindElementsWpfRequest request,
         CancellationToken cancellationToken,
         bool autoInject = false)
     {
+        var attemptSequence = GetAutoAgentAttemptSequence();
         var client = autoInject
             ? await EnsureAgentConnectedForAutoAsync(cancellationToken)
             : await EnsureAgentConnectedOrNullAsync(cancellationToken);
         if (client is null)
         {
-            return null;
+            return (
+                null,
+                autoInject && GetAutoAgentAttemptSequence() != attemptSequence,
+                GetWpfBackendFailure());
         }
 
         try
         {
-            return await CallFindElementsWpfAsync(client, request, cancellationToken);
+            var response = await CallFindElementsWpfAsync(client, request, cancellationToken);
+            return (response, true, null);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -1186,12 +1296,16 @@ public sealed partial class AutomationController
                 throw;
             }
 
-            if (autoInject && ShouldRecordAutoAgentFailure(ex))
+            var failure = ex is AgentRemoteException
+                ? FailureDiagnostics.BackendOperationFailure()
+                : FailureDiagnostics.Classify(ex, FailureDiagnostics.Stages.Protocol);
+            failure = PreferTargetStateFailure(failure);
+            if (autoInject && ShouldRecordAutoAgentFailure(ex, client.IsConnected))
             {
-                SetAutoAgentFailure(ex);
+                SetAutoAgentFailure(failure);
             }
 
-            return null;
+            return (null, true, failure);
         }
     }
 
@@ -1285,12 +1399,28 @@ public sealed partial class AutomationController
                 throw new InvalidOperationException("Agent returned an invalid capabilities response.");
             }
 
+            if (capabilities.ProtocolVersion != AgentProtocolCapabilities.CurrentProtocolVersion)
+            {
+                throw new ActionableFailureException(FailureDiagnostics.ProtocolMismatch());
+            }
+
             return capabilities;
         }
         catch (InvalidOperationException ex) when (IsUnknownCapabilitiesMethod(ex))
         {
             return new AgentCapabilitiesResponse(ProtocolVersion: 0, Capabilities: []);
         }
+    }
+
+    internal async Task<AgentCapabilitiesResponse> VerifyAgentForAttachedProcessAsync(
+        AgentClient client,
+        int expectedPid,
+        CancellationToken cancellationToken)
+    {
+        var capabilities = await VerifyAgentAndGetCapabilitiesAsync(client, cancellationToken)
+            .ConfigureAwait(false);
+        _ = EnsureAttachedProcessIdentityCurrent(expectedPid);
+        return capabilities;
     }
 
     private static bool IsUnknownCapabilitiesMethod(InvalidOperationException exception) =>
@@ -1381,16 +1511,54 @@ public sealed partial class AutomationController
         {
             client = _agentClient;
             existingPid = _agentPid;
-            if (client is not null && client.IsConnected && existingPid == pid)
-            {
-                return client;
-            }
-
-            _agentCapabilities = null;
         }
 
-        using var process = Process.GetProcessById(pid);
-        var pipeName = AgentPipeName.Compute(process);
+        if (client is not null && client.IsConnected && existingPid == pid)
+        {
+            try
+            {
+                var capabilities = await VerifyAgentForAttachedProcessAsync(
+                        client,
+                        pid,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                lock (_agentSync)
+                {
+                    if (ReferenceEquals(_agentClient, client))
+                    {
+                        _agentCapabilities = capabilities;
+                    }
+                }
+
+                ClearAutoAgentFailure();
+                return client;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                SetAutoAgentFailure(
+                    FailureDiagnostics.CreateException(ex, FailureDiagnostics.Stages.Protocol));
+                CleanupAgent(clearFailure: false);
+                return null;
+            }
+        }
+
+        if (client is not null)
+        {
+            bool preserveFailure;
+            lock (_agentSync)
+            {
+                preserveFailure = _agentAutoConnectFailure is not null;
+            }
+
+            CleanupAgent(clearFailure: !preserveFailure);
+        }
+
+        var processIdentity = EnsureAttachedProcessIdentityCurrent(pid);
+        var pipeName = AgentPipeName.Compute(processIdentity);
 
         // Try quick reconnect to an already-injected agent (do not inject here).
         try
@@ -1403,23 +1571,41 @@ public sealed partial class AutomationController
             AgentCapabilitiesResponse capabilities;
             try
             {
-                capabilities = await VerifyAgentAndGetCapabilitiesAsync(connectClient, cancellationToken);
+                capabilities = await VerifyAgentForAttachedProcessAsync(
+                    connectClient,
+                    pid,
+                    cancellationToken);
+                lock (_agentSync)
+                {
+                    _agentClient = connectClient;
+                    _agentPipeName = pipeName;
+                    _agentPid = pid;
+                    _agentCapabilities = capabilities;
+                }
             }
-            catch
+            catch (OperationCanceledException)
             {
                 await connectClient.DisposeAsync();
+                throw;
+            }
+            catch (Exception ex)
+            {
+                await connectClient.DisposeAsync();
+                SetAutoAgentFailure(
+                    FailureDiagnostics.CreateException(ex, FailureDiagnostics.Stages.Protocol));
                 return null;
             }
 
-            lock (_agentSync)
-            {
-                _agentClient = connectClient;
-                _agentPipeName = pipeName;
-                _agentPid = pid;
-                _agentCapabilities = capabilities;
-            }
-
+            ClearAutoAgentFailure();
             return connectClient;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
         }
         catch
         {
@@ -1460,17 +1646,12 @@ public sealed partial class AutomationController
 
         lock (_agentSync)
         {
-            if (_agentClient is not null && _agentClient.IsConnected && _agentPid == pid)
+            if (_agentAutoConnectFailure is { } failure)
             {
-                return _agentClient;
-            }
-
-            if (!string.IsNullOrWhiteSpace(_agentAutoConnectFailure))
-            {
-                var failureAge = _agentAutoConnectFailureAtUtc is { } recordedAt
-                    ? DateTimeOffset.UtcNow - recordedAt
-                    : AutoAgentFailureRetryDelay;
-                if (failureAge < AutoAgentFailureRetryDelay)
+                if (!ShouldRetryAutoAgentConnection(
+                        failure,
+                        _agentAutoConnectFailureAtUtc,
+                        DateTimeOffset.UtcNow))
                 {
                     return null;
                 }
@@ -1480,11 +1661,24 @@ public sealed partial class AutomationController
             }
         }
 
+        _ = Interlocked.Increment(ref _agentAutoConnectAttemptSequence);
         var existing = await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
             ClearAutoAgentFailure();
             return existing;
+        }
+
+        lock (_agentSync)
+        {
+            if (_agentAutoConnectFailure is { } passiveFailure &&
+                !ShouldRetryAutoAgentConnection(
+                    passiveFailure,
+                    _agentAutoConnectFailureAtUtc,
+                    DateTimeOffset.UtcNow))
+            {
+                return null;
+            }
         }
 
         try
@@ -1503,21 +1697,56 @@ public sealed partial class AutomationController
 
         lock (_agentSync)
         {
-            return _agentClient is not null && _agentClient.IsConnected ? _agentClient : null;
+            if (_agentClient is not null && _agentClient.IsConnected && _agentPid == pid)
+            {
+                return _agentClient;
+            }
         }
+
+        SetAutoAgentFailure(
+            FailureDiagnostics.Exception(
+                FailureDiagnostics.Codes.AgentConnectionFailed,
+                FailureDiagnostics.Stages.PipeConnection,
+                "The WPF backend initialized but its pipe connection is unavailable.",
+                retryable: true,
+                recoveryActions: [FailureDiagnostics.Recovery.UseUia, FailureDiagnostics.Recovery.Retry],
+                retryAfterMs: 1_000));
+        return null;
     }
 
-    private string GetAutoAgentFallbackWarning()
+    internal static bool ShouldRetryAutoAgentConnection(
+        FailureInfo failure,
+        DateTimeOffset? recordedAtUtc,
+        DateTimeOffset nowUtc)
     {
-        string? failure;
-        lock (_agentSync)
+        ArgumentNullException.ThrowIfNull(failure);
+        if (failure.Retryable is not true)
         {
-            failure = _agentAutoConnectFailure;
+            return false;
         }
 
-        return string.IsNullOrWhiteSpace(failure)
+        return recordedAtUtc is null ||
+               nowUtc - recordedAtUtc.Value >= GetAutoAgentFailureRetryDelay(failure);
+    }
+
+    private long GetAutoAgentAttemptSequence() =>
+        Interlocked.Read(ref _agentAutoConnectAttemptSequence);
+
+    private static TimeSpan GetAutoAgentFailureRetryDelay(FailureInfo failure) =>
+        failure.RetryAfterMs is >= 0 and var retryAfterMs
+            ? TimeSpan.FromMilliseconds(retryAfterMs)
+            : AutoAgentFailureRetryDelay;
+
+    private string GetAutoAgentFallbackWarning(FailureInfo? failure = null)
+    {
+        if (failure is null)
+        {
+            failure = GetWpfBackendFailure();
+        }
+
+        return failure is null
             ? "backend=auto: WPF agent not connected; used UIA."
-            : $"backend=auto: WPF auto-injection failed; used UIA. {failure}";
+            : $"backend=auto: WPF backend unavailable ({failure.Code} at {failure.Stage}); used UIA.";
     }
 
     private void ClearAutoAgentFailure()
@@ -1529,16 +1758,39 @@ public sealed partial class AutomationController
         }
     }
 
-    private void SetAutoAgentFailure(Exception ex)
+    private void SetAutoAgentFailure(
+        Exception ex,
+        string stage = FailureDiagnostics.Stages.Injection)
     {
-        var message = ex.GetBaseException().Message;
+        var failure = ex is ActionableFailureException actionable
+            ? actionable.Failure
+            : FailureDiagnostics.Classify(ex, stage);
+        failure = PreferTargetStateFailure(failure);
         lock (_agentSync)
         {
-            _agentAutoConnectFailure = string.IsNullOrWhiteSpace(message)
-                ? ex.GetType().Name
-                : message.Trim();
+            _agentAutoConnectFailure = failure;
             _agentAutoConnectFailureAtUtc = DateTimeOffset.UtcNow;
         }
+    }
+
+    private void SetAutoAgentFailure(FailureInfo failure)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        failure = PreferTargetStateFailure(failure);
+        lock (_agentSync)
+        {
+            _agentAutoConnectFailure = failure;
+            _agentAutoConnectFailureAtUtc = DateTimeOffset.UtcNow;
+        }
+    }
+
+    private FailureInfo PreferTargetStateFailure(FailureInfo fallback)
+    {
+        var identity = _processIdentity;
+        return identity is not null &&
+               ProcessTargetResolver.Observe(identity.Value) == ProcessInstanceState.ExitedOrReused
+            ? FailureDiagnostics.TargetExited()
+            : fallback;
     }
 
     private static async Task<AgentClient> ConnectToAgentWithRetryAsync(string pipeName, CancellationToken cancellationToken)
@@ -1636,7 +1888,7 @@ public sealed partial class AutomationController
         builder.AppendLine(string.IsNullOrWhiteSpace(value) ? "<empty>" : value.TrimEnd());
     }
 
-    private void CleanupAgent()
+    private void CleanupAgent(bool clearFailure = true)
     {
         AgentClient? client;
         lock (_agentSync)
@@ -1646,8 +1898,11 @@ public sealed partial class AutomationController
             _agentPipeName = null;
             _agentPid = null;
             _agentCapabilities = null;
-            _agentAutoConnectFailure = null;
-            _agentAutoConnectFailureAtUtc = null;
+            if (clearFailure)
+            {
+                _agentAutoConnectFailure = null;
+                _agentAutoConnectFailureAtUtc = null;
+            }
         }
 
         if (client is not null)

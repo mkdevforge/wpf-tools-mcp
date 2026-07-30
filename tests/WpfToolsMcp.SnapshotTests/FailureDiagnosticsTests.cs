@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using WpfToolsMcp.Automation;
 
@@ -7,6 +8,42 @@ namespace WpfToolsMcp.SnapshotTests;
 public sealed class FailureDiagnosticsTests
 {
     private const string PrivateSentinel = @"C:\Users\private\project\token=super-secret";
+
+    [Test]
+    public void Auto_agent_retry_gate_honors_transient_retry_delay()
+    {
+        var recordedAt = new DateTimeOffset(2026, 7, 30, 0, 0, 0, TimeSpan.Zero);
+        var transient = FailureDiagnostics.Create(
+            FailureDiagnostics.Codes.AgentConnectionTimeout,
+            FailureDiagnostics.Stages.PipeConnection,
+            "The WPF agent did not accept a pipe connection before the timeout.",
+            retryable: true,
+            retryAfterMs: 1_000,
+            recoveryActions: [FailureDiagnostics.Recovery.UseUia, FailureDiagnostics.Recovery.Retry]);
+        var permanent = FailureDiagnostics.MissingAssets();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                AutomationController.ShouldRetryAutoAgentConnection(
+                    transient,
+                    recordedAt,
+                    recordedAt.AddMilliseconds(999)),
+                Is.False);
+            Assert.That(
+                AutomationController.ShouldRetryAutoAgentConnection(
+                    transient,
+                    recordedAt,
+                    recordedAt.AddMilliseconds(1_000)),
+                Is.True);
+            Assert.That(
+                AutomationController.ShouldRetryAutoAgentConnection(
+                    permanent,
+                    recordedAt,
+                    recordedAt.AddDays(1)),
+                Is.False);
+        });
+    }
 
     [Test]
     public void Missing_assets_are_classified_without_exposing_the_path()
@@ -53,7 +90,7 @@ public sealed class FailureDiagnosticsTests
             ProcessIntegrityLevelComparison.Same);
         var targetHigher = FailureDiagnostics.Classify(
             new UnauthorizedAccessException(PrivateSentinel),
-            FailureDiagnostics.Stages.Injection,
+            FailureDiagnostics.Stages.Attachment,
             ProcessIntegrityLevelComparison.TargetHigher);
 
         Assert.Multiple(() =>
@@ -61,8 +98,31 @@ public sealed class FailureDiagnosticsTests
             Assert.That(unmeasured.Code, Is.EqualTo(FailureDiagnostics.Codes.AccessDenied));
             Assert.That(sameIntegrity.Code, Is.EqualTo(FailureDiagnostics.Codes.AccessDenied));
             Assert.That(targetHigher.Code, Is.EqualTo(FailureDiagnostics.Codes.ElevationMismatch));
+            Assert.That(targetHigher.Stage, Is.EqualTo(FailureDiagnostics.Stages.Attachment));
             Assert.That(targetHigher.Detail, Does.Contain("measured integrity level"));
             Assert.That(targetHigher.Detail, Does.Not.Contain(PrivateSentinel));
+        });
+    }
+
+    [Test]
+    public void Com_access_denied_hresult_uses_measured_integrity_without_exposing_the_message()
+    {
+        var unmeasured = FailureDiagnostics.Classify(
+            new COMException(PrivateSentinel, unchecked((int)0x80070005u)),
+            FailureDiagnostics.Stages.Attachment);
+        var targetHigher = FailureDiagnostics.Classify(
+            new COMException(PrivateSentinel, unchecked((int)0x80070005u)),
+            FailureDiagnostics.Stages.Attachment,
+            ProcessIntegrityLevelComparison.TargetHigher);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(unmeasured.Code, Is.EqualTo(FailureDiagnostics.Codes.AccessDenied));
+            Assert.That(targetHigher.Code, Is.EqualTo(FailureDiagnostics.Codes.ElevationMismatch));
+            Assert.That(unmeasured.Stage, Is.EqualTo(FailureDiagnostics.Stages.Attachment));
+            Assert.That(targetHigher.Stage, Is.EqualTo(FailureDiagnostics.Stages.Attachment));
+            Assert.That(JsonSerializer.Serialize(unmeasured), Does.Not.Contain(PrivateSentinel));
+            Assert.That(JsonSerializer.Serialize(targetHigher), Does.Not.Contain(PrivateSentinel));
         });
     }
 
@@ -99,9 +159,29 @@ public sealed class FailureDiagnosticsTests
             Assert.That(crash.Code, Is.EqualTo(FailureDiagnostics.Codes.InjectorCrashed));
             Assert.That(crash.Retryable, Is.False);
             Assert.That(reportedFailure.Code, Is.EqualTo(FailureDiagnostics.Codes.InjectionFailed));
-            Assert.That(reportedFailure.Retryable, Is.Null);
+            Assert.That(reportedFailure.Retryable, Is.False);
             Assert.That(JsonSerializer.Serialize(crash), Does.Not.Contain(PrivateSentinel));
             Assert.That(JsonSerializer.Serialize(reportedFailure), Does.Not.Contain(PrivateSentinel));
+        });
+    }
+
+    [TestCase(5)]
+    [TestCase(unchecked((int)0x80070005u))]
+    [TestCase(unchecked((int)0xC0000022u))]
+    public void Injector_access_denied_exit_uses_measured_integrity_without_parsing_output(int exitCode)
+    {
+        var result = new InjectionRunResult(exitCode, PrivateSentinel, PrivateSentinel);
+        var unmeasured = FailureDiagnostics.ClassifyInjectorFailure(result);
+        var targetHigher = FailureDiagnostics.ClassifyInjectorFailure(
+            result,
+            ProcessIntegrityLevelComparison.TargetHigher);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(unmeasured.Code, Is.EqualTo(FailureDiagnostics.Codes.AccessDenied));
+            Assert.That(targetHigher.Code, Is.EqualTo(FailureDiagnostics.Codes.ElevationMismatch));
+            Assert.That(unmeasured.Stage, Is.EqualTo(FailureDiagnostics.Stages.Injection));
+            Assert.That(JsonSerializer.Serialize(targetHigher), Does.Not.Contain(PrivateSentinel));
         });
     }
 
@@ -128,6 +208,20 @@ public sealed class FailureDiagnosticsTests
             Assert.That(missing.Code, Is.EqualTo(FailureDiagnostics.Codes.ProcessNotFound));
             Assert.That(discovery.Code, Is.EqualTo(FailureDiagnostics.Codes.ProcessDiscoveryFailed));
         });
+    }
+
+    [Test]
+    public void Backend_scope_miss_is_not_reported_as_an_attachment_failure()
+    {
+        var failure = FailureDiagnostics.BackendScopeUnavailable(
+            "The requested scope is unavailable through the WPF backend.");
+
+        AssertFailure(
+            failure,
+            FailureDiagnostics.Codes.BackendScopeUnavailable,
+            FailureDiagnostics.Stages.Protocol,
+            retryable: false,
+            FailureDiagnostics.Recovery.UseUia);
     }
 
     [Test]

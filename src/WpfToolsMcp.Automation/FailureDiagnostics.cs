@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security;
 using System.Text.Json;
 using WpfToolsMcp.Contracts;
@@ -11,6 +12,7 @@ internal static class FailureDiagnostics
     private const int InjectionRetryDelayMs = 10_000;
     private const int MaximumDetailLength = 512;
     private const int ErrorAccessDenied = 5;
+    private const int HResultAccessDenied = unchecked((int)0x80070005u);
 
     internal static class Stages
     {
@@ -26,8 +28,10 @@ internal static class FailureDiagnostics
     internal static class Codes
     {
         internal const string ProcessNotFound = "process_not_found";
+        internal const string StaleProcessCandidate = "stale_process_candidate";
         internal const string ProcessIdentityUnavailable = "process_identity_unavailable";
         internal const string ProcessDiscoveryFailed = "process_discovery_failed";
+        internal const string ProcessStateUnavailable = "process_state_unavailable";
         internal const string AccessDenied = "access_denied";
         internal const string ElevationMismatch = "elevation_mismatch";
         internal const string AttachmentFailed = "attachment_failed";
@@ -42,6 +46,8 @@ internal static class FailureDiagnostics
         internal const string AgentConnectionFailed = "agent_connection_failed";
         internal const string ProtocolMismatch = "protocol_mismatch";
         internal const string ProtocolError = "protocol_error";
+        internal const string BackendScopeUnavailable = "backend_scope_unavailable";
+        internal const string BackendOperationFailed = "backend_operation_failed";
         internal const string AgentUnresponsive = "agent_unresponsive";
         internal const string TargetExited = "target_exited";
         internal const string ProcessReplaced = "process_replaced";
@@ -57,6 +63,7 @@ internal static class FailureDiagnostics
         internal const string MatchElevation = "match_elevation";
         internal const string UseSupportedArchitecture = "use_supported_architecture";
         internal const string RepairInstallation = "repair_installation";
+        internal const string SelectProcessInstance = "select_process_instance";
     }
 
     internal static ActionableFailureException CreateException(
@@ -245,9 +252,18 @@ internal static class FailureDiagnostics
             : InjectionFailure();
     }
 
-    internal static FailureInfo ClassifyInjectorFailure(InjectionRunResult result)
+    internal static FailureInfo ClassifyInjectorFailure(
+        InjectionRunResult result,
+        ProcessIntegrityLevelComparison? integrityComparison = null)
     {
         ArgumentNullException.ThrowIfNull(result);
+        if (result.ExitCode is ErrorAccessDenied or
+            unchecked((int)0x80070005u) or
+            unchecked((int)0xC0000022u))
+        {
+            return AccessDenied(Stages.Injection, integrityComparison);
+        }
+
         return InjectorExit(result.ExitCode);
     }
 
@@ -283,6 +299,22 @@ internal static class FailureDiagnostics
             retryAfterMs: ShortRetryDelayMs,
             recoveryActions: [Recovery.UseUia, Recovery.Retry, Recovery.RestartTarget]);
     }
+
+    internal static FailureInfo BackendOperationFailure() =>
+        Create(
+            Codes.BackendOperationFailed,
+            Stages.Protocol,
+            "The WPF backend could not complete the requested operation.",
+            retryable: null,
+            recoveryActions: [Recovery.UseUia]);
+
+    internal static FailureInfo BackendScopeUnavailable(string detail) =>
+        Create(
+            Codes.BackendScopeUnavailable,
+            Stages.Protocol,
+            detail,
+            retryable: false,
+            recoveryActions: [Recovery.UseUia]);
 
     internal static FailureInfo TargetExited(bool processReplaced = false) =>
         processReplaced
@@ -345,21 +377,25 @@ internal static class FailureDiagnostics
             Codes.AttachmentFailed,
             Stages.Attachment,
             "The target process could not be attached for UI automation.",
-            recoveryActions: [Recovery.Retry]);
+            retryable: true,
+            retryAfterMs: ShortRetryDelayMs,
+            recoveryActions: [Recovery.Retry, Recovery.Reattach]);
 
     internal static FailureInfo ArchitectureDetectionFailure() =>
         Create(
             Codes.ArchitectureDetectionFailed,
             Stages.ArchitectureDetection,
             "The target process architecture could not be determined.",
-            recoveryActions: [Recovery.UseUia]);
+            retryable: false,
+            recoveryActions: [Recovery.UseUia, Recovery.UseSupportedArchitecture]);
 
     internal static FailureInfo InjectionFailure() =>
         Create(
             Codes.InjectionFailed,
             Stages.Injection,
             "The WPF backend could not be initialized in the target process.",
-            recoveryActions: [Recovery.UseUia]);
+            retryable: false,
+            recoveryActions: [Recovery.UseUia, Recovery.RestartTarget]);
 
     private static FailureInfo UnexpectedFailure(string stage) =>
         Create(
@@ -413,7 +449,8 @@ internal static class FailureDiagnostics
 
     private static bool IsAccessDenied(Exception exception) =>
         exception is UnauthorizedAccessException or SecurityException ||
-        exception is Win32Exception { NativeErrorCode: ErrorAccessDenied };
+        exception is Win32Exception { NativeErrorCode: ErrorAccessDenied } ||
+        exception is COMException { HResult: HResultAccessDenied };
 
     private static bool SupportsUiaFallback(string stage) =>
         stage is Stages.ArchitectureDetection or Stages.Injection or Stages.PipeConnection or Stages.Protocol;
