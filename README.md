@@ -130,8 +130,10 @@ set `backend=Wpf` and must be strict with an exact `automationId` or `xpath`.
 An `elementId` keeps its registered backend; supplying a conflicting backend or
 window handle is rejected.
 
-WPF-origin calls scan only the selected window's UIA control tree. `maxNodes`
-defaults to 5,000 and accepts 1 through 50,000. The `UiaMapping` result reports
+WPF-origin calls scan only the selected window's in-process UIA control tree.
+`maxNodes` defaults to 5,000 and accepts 1 through 50,000. It is one shared
+node-visit budget for the control scan and bounded raw/control path work, so
+reported `ScannedNodes` never exceeds it. The `UiaMapping` result reports
 `Exact`, `Heuristic`, `Ambiguous`, or `Unmapped`, the stable method
 `scoredWindowScan`, an integer ranking score, symbolic evidence, scan counts,
 and at most ten ranked candidates. The score ranks evidence; it is not a
@@ -141,10 +143,13 @@ probability or confidence percentage.
 AutomationId, a compatible control type, and a runtime identity that can be
 verified and registered. `Heuristic` requires a complete scan, a reusable
 unique winner scoring at least 150 and leading the runner-up by at least 40.
-Incomplete scans, ties, weaker scores, smaller leads, and unverifiable runtime
-identity never select a UIA element. In those cases `Uia`,
+Incomplete scans, ties, weak heuristic scores, insufficient heuristic leads,
+and unverifiable runtime identity never select a UIA element. In those cases `Uia`,
 `LocatorSuggestions`, `FlaUi`, `SelectedXPath`, and `SelectedElementId` are
 omitted; bounded candidates explain the ambiguity when available.
+Candidate `Reusable` means that a public `uia_...` handle was actually
+registered and returned. Non-winners are diagnostic only: their evidence may
+report provider runtime-identity availability, but they are not registered.
 
 Successful WPF-origin results include reusable `wpf_...` and `uia_...`
 element IDs, WPF and UIA paths, automation properties, and bounds. The source

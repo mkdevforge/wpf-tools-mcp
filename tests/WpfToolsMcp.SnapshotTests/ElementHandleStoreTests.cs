@@ -51,6 +51,41 @@ public sealed class ElementHandleStoreTests
     }
 
     [Test]
+    public void Protected_uia_registration_fails_without_evicting_the_only_source_handle()
+    {
+        var store = new AutomationController.ElementHandleStore(capacity: 1);
+        var source = RegisterWpf(store, "agent_source", "/Window/Button[1]");
+
+        var registered = TryRegisterUiaKeeping(store, source, out var peer);
+        var identities = store.SnapshotIdentities();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(registered, Is.False);
+            Assert.That(peer, Is.Null);
+            Assert.That(store.TryGet(source, out _), Is.True);
+            Assert.That(identities.ElementIds, Is.EqualTo(new[] { source }));
+        });
+    }
+
+    [Test]
+    public void Protected_uia_registration_retains_source_and_peer_when_capacity_allows()
+    {
+        var store = new AutomationController.ElementHandleStore(capacity: 2);
+        var source = RegisterWpf(store, "agent_source", "/Window/Button[1]");
+
+        var registered = TryRegisterUiaKeeping(store, source, out var peer);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(registered, Is.True);
+            Assert.That(peer, Does.StartWith("uia_"));
+            Assert.That(store.TryGet(source, out _), Is.True);
+            Assert.That(store.TryGet(peer!, out _), Is.True);
+        });
+    }
+
+    [Test]
     public void Updating_last_reference_surfaces_old_agent_handle_for_release()
     {
         var store = new AutomationController.ElementHandleStore(capacity: 10);
@@ -117,4 +152,20 @@ public sealed class ElementHandleStoreTests
             name: "Primary",
             className: "System.Windows.Controls.Button");
     }
+
+    private static bool TryRegisterUiaKeeping(
+        AutomationController.ElementHandleStore store,
+        string source,
+        out string? peer) =>
+        store.TryRegisterUiaKeeping(
+            source,
+            windowHandle: 42,
+            xpath: "/Window/Button[1]",
+            runtimeId: [1, 2, 3],
+            type: "Button",
+            automationId: "PrimaryButton",
+            name: "Primary",
+            className: "Button",
+            bounds: new Rect(1, 2, 3, 4),
+            out peer);
 }

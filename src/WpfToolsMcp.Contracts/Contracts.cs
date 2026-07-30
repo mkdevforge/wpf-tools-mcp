@@ -290,8 +290,8 @@ public sealed record UiaMappingCandidate(
     string? Name,
     string? ClassName,
     Rect Bounds,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? XPath,
-    int Score,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? XPath = null,
+    [property: JsonRequired] int Score = 0,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? XPathOmitted = null)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -306,8 +306,8 @@ public sealed record UiaMappingCandidate(
 
 public sealed record UiaMappingDiagnostics(
     bool Ambiguous,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SelectedXPath,
-    IReadOnlyList<UiaMappingCandidate> Candidates,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SelectedXPath = null,
+    [property: JsonRequired] IReadOnlyList<UiaMappingCandidate> Candidates = null!,
     int ReturnedCandidates = 0,
     int TotalCandidates = 0,
     bool Truncated = false,
@@ -397,10 +397,10 @@ public sealed record UiaLocatorSuggestions(
 public sealed record FlaUiLocatorSnippets(string FindFirst, string FindFirstByXPath);
 
 public sealed record GetUiaLocatorsResponse(
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WpfLocatorIdentity? Wpf,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaLocatorIdentity? Uia,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaLocatorSuggestions? LocatorSuggestions,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] FlaUiLocatorSnippets? FlaUi,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WpfLocatorIdentity? Wpf = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaLocatorIdentity? Uia = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaLocatorSuggestions? LocatorSuggestions = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] FlaUiLocatorSnippets? FlaUi = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

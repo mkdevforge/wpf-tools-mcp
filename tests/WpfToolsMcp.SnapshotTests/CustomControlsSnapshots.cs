@@ -238,8 +238,12 @@ public sealed class CustomControlsSnapshots
                 Assert.That(locators.UiaMapping.Truncated,
                     Is.EqualTo(locators.UiaMapping.ReturnedCandidates < locators.UiaMapping.TotalCandidates));
                 Assert.That(locators.UiaMapping.Candidates, Has.Count.GreaterThan(1));
-                Assert.That(locators.UiaMapping.Candidates.All(candidate => candidate.Reusable == true), Is.True);
-                Assert.That(locators.UiaMapping.Candidates.All(candidate => candidate.ElementId?.StartsWith("uia_", StringComparison.Ordinal) == true), Is.True);
+                Assert.That(locators.UiaMapping.Candidates.All(candidate => candidate.Reusable is null), Is.True);
+                Assert.That(locators.UiaMapping.Candidates.All(candidate => candidate.ElementId is null), Is.True);
+                Assert.That(locators.UiaMapping.Candidates.All(candidate =>
+                    candidate.Evidence?.Contains("runtime_identity_available") == true), Is.True);
+                Assert.That(locators.UiaMapping.Candidates.All(candidate =>
+                    candidate.Evidence?.Contains("public_handle_not_registered") == true), Is.True);
             });
 
             await Verifier.Verify(new

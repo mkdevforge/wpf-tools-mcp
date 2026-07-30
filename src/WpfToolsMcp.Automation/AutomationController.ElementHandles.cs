@@ -1374,6 +1374,81 @@ public sealed partial class AutomationController
             return AddHandle("uia_", handle);
         }
 
+        public bool TryRegisterUiaKeeping(
+            string requiredElementId,
+            long windowHandle,
+            string xpath,
+            int[] runtimeId,
+            string type,
+            string? automationId,
+            string? name,
+            string? className,
+            Rect? bounds,
+            out string? elementId)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(requiredElementId);
+            var handle = new ElementHandle(
+                Backend: InspectionBackend.Uia,
+                WindowHandle: windowHandle,
+                XPath: xpath,
+                WpfAgentElementId: null,
+                UiaRuntimeId: runtimeId,
+                Type: type,
+                AutomationId: automationId,
+                Name: name,
+                ClassName: className,
+                Bounds: bounds);
+
+            lock (_sync)
+            {
+                if (!_entries.ContainsKey(requiredElementId))
+                {
+                    elementId = null;
+                    return false;
+                }
+
+                string? candidateId = null;
+                for (var attempt = 0; attempt < 5; attempt++)
+                {
+                    var generated = "uia_" + CreateRandomId();
+                    if (!_entries.ContainsKey(generated))
+                    {
+                        candidateId = generated;
+                        break;
+                    }
+                }
+
+                if (candidateId is null)
+                {
+                    throw new InvalidOperationException("Failed to allocate unique elementId.");
+                }
+
+                while (_entries.Count >= _capacity)
+                {
+                    var eviction = _lru.Last;
+                    while (eviction is not null &&
+                           string.Equals(eviction.Value, requiredElementId, StringComparison.Ordinal))
+                    {
+                        eviction = eviction.Previous;
+                    }
+
+                    if (eviction is null)
+                    {
+                        elementId = null;
+                        return false;
+                    }
+
+                    _ = TryRemoveEntry(eviction.Value, out _, out _);
+                }
+
+                _entries[candidateId] = handle;
+                var node = _lru.AddFirst(candidateId);
+                _lruNodes[candidateId] = node;
+                elementId = candidateId;
+                return true;
+            }
+        }
+
         public string RegisterWpf(
             long windowHandle,
             string xpath,

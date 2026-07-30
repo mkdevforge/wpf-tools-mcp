@@ -191,6 +191,35 @@ public sealed class UiaLocatorSnapshots
     }
 
     [Test]
+    public async Task GetUiaLocators_path_work_shares_the_mapping_node_budget()
+    {
+        await LaunchPrimaryTestAppAsync();
+        try
+        {
+            var baseline = await GetBuiltInWpfButtonMappingAsync();
+            Assert.That(baseline.UiaMapping?.Status, Is.EqualTo(ElementMappingStatus.Exact));
+            var boundedMaxNodes = baseline.UiaMapping!.ScannedNodes!.Value - 1;
+            Assert.That(boundedMaxNodes, Is.GreaterThan(1));
+
+            var bounded = await GetBuiltInWpfButtonMappingAsync(boundedMaxNodes);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(bounded.Uia, Is.Null);
+                Assert.That(bounded.UiaMapping?.Status, Is.EqualTo(ElementMappingStatus.Ambiguous));
+                Assert.That(bounded.UiaMapping?.ScanComplete, Is.False);
+                Assert.That(bounded.UiaMapping?.ScannedNodes, Is.EqualTo(boundedMaxNodes));
+                Assert.That(bounded.UiaMapping?.SelectedElementId, Is.Null);
+                Assert.That(bounded.UiaMapping?.TruncatedReason, Is.EqualTo("maxNodes"));
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
     public async Task GetUiaTree_primary_window_snapshot()
     {
         await LaunchPrimaryTestAppAsync();
@@ -217,6 +246,25 @@ public sealed class UiaLocatorSnapshots
     {
         var exePath = TestAppPaths.FindTestAppExecutable();
         await LaunchAppAsync(exePath);
+    }
+
+    private Task<GetUiaLocatorsResponse> GetBuiltInWpfButtonMappingAsync(int? maxNodes = null)
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["backend"] = "wpf",
+            ["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "Basic_Button"
+            }
+        };
+        if (maxNodes is int boundedMaxNodes)
+        {
+            arguments["maxNodes"] = boundedMaxNodes;
+        }
+
+        return _mcp.CallToolAsync<GetUiaLocatorsResponse>("get_uia_locators", arguments);
     }
 
     private async Task LaunchCustomControlsAppAsync()

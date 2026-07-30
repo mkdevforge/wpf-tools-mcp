@@ -258,6 +258,7 @@ public sealed class ToolProfileTests
         Assert.That(
             GetOutputPropertyNames(tools["get_uia_locators"]),
             Is.EqualTo(new[] { "flaUi", "locatorSuggestions", "uia", "uiaMapping", "wpf" }));
+        Assert.That(GetOutputRequiredPropertyNames(tools["get_uia_locators"]), Is.Empty);
 
         foreach (var toolName in new[]
                  {
@@ -1387,6 +1388,27 @@ public sealed class ToolProfileTests
             .Select(property => property.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static string[] GetOutputRequiredPropertyNames(McpClientTool tool)
+    {
+        if (tool.ProtocolTool.OutputSchema is not { } schema ||
+            schema.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        if (schema.TryGetProperty("oneOf", out var branches) &&
+            branches.ValueKind == JsonValueKind.Array)
+        {
+            schema = branches.EnumerateArray().FirstOrDefault(branch =>
+                branch.ValueKind == JsonValueKind.Object &&
+                (!branch.TryGetProperty("required", out var required) ||
+                 required.ValueKind != JsonValueKind.Array ||
+                 !required.EnumerateArray().Any(item => item.GetString() == "error")));
+        }
+
+        return GetObjectRequiredPropertyNames(schema);
     }
 
     private static JsonElement AssertStructuredJsonResult(

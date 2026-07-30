@@ -134,16 +134,6 @@ internal static class ElementMappingScoring
             candidate.AutomationIdExact && candidate.TypeCompatible);
         if (top.AutomationIdExact && top.TypeCompatible && top.Reusable && exactCandidateCount == 1)
         {
-            if (scoreLead is int exactLead && exactLead < MinimumHeuristicLead)
-            {
-                return new Decision(
-                    ElementMappingStatus.Ambiguous,
-                    SelectedIndex: null,
-                    Score: top.Score,
-                    ScoreLead: exactLead,
-                    Evidence: ["scan_complete", "score_lead_below_selection_threshold"]);
-            }
-
             return new Decision(
                 ElementMappingStatus.Exact,
                 SelectedIndex: 0,

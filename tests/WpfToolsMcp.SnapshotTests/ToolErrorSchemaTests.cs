@@ -1,7 +1,9 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Json.Schema;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.SnapshotTests;
 
@@ -73,6 +75,113 @@ public sealed class ToolErrorSchemaTests
             Assert.That(sessions.IsError, Is.Not.True);
             Assert.That(missingProcess.IsError, Is.True);
             Assert.That(invalidSubscription.IsError, Is.True);
+        });
+    }
+
+    [TestCase("core")]
+    [TestCase("diagnostics")]
+    public async Task Uia_locator_unmapped_result_validates_when_optional_sections_are_omitted(string profile)
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, profile);
+        var tool = (await mcp.ListToolsAsync()).Single(item => item.Name == "get_uia_locators");
+        var response = new GetUiaLocatorsResponse(
+            Wpf: new WpfLocatorIdentity("Control", "Target", null, null, "/Window/Control", "wpf_1"),
+            UiaMapping: new UiaMappingDiagnostics(
+                Ambiguous: false,
+                SelectedXPath: null,
+                Candidates: [],
+                ReturnedCandidates: 0,
+                TotalCandidates: 0)
+            {
+                Status = ElementMappingStatus.Unmapped,
+                Method = "scoredWindowScan",
+                Score = 0,
+                ScannedNodes = 1,
+                ScanComplete = true,
+                Evidence = ["no_relevant_candidates"]
+            });
+        var structuredContent = JsonSerializer.SerializeToElement(
+            response,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var schema = JsonSchema.FromText(GetOutputSchema(tool).GetRawText());
+        var evaluation = schema.Evaluate(
+            structuredContent,
+            new EvaluationOptions { OutputFormat = OutputFormat.List });
+        var ambiguousResponse = new GetUiaLocatorsResponse(
+            Wpf: response.Wpf,
+            UiaMapping: new UiaMappingDiagnostics(
+                Ambiguous: true,
+                SelectedXPath: null,
+                Candidates:
+                [
+                    new UiaMappingCandidate(
+                        ElementType: "Button",
+                        AutomationId: "Target",
+                        Name: "Target",
+                        ClassName: "Button",
+                        Bounds: new Rect(1, 2, 3, 4),
+                        XPath: null,
+                        Score: 200,
+                        XPathOmitted: true)
+                    {
+                        Evidence =
+                        [
+                            "runtime_identity_available",
+                            "uia_path_budget_exhausted",
+                            "public_handle_not_registered"
+                        ]
+                    }
+                ],
+                ReturnedCandidates: 1,
+                TotalCandidates: 1,
+                Truncated: true)
+            {
+                Status = ElementMappingStatus.Ambiguous,
+                Method = "scoredWindowScan",
+                Score = 200,
+                Evidence = ["scan_incomplete"],
+                ScannedNodes = 1,
+                ScanComplete = false,
+                TruncatedReason = "maxNodes"
+            });
+        var ambiguousContent = JsonSerializer.SerializeToElement(
+            ambiguousResponse,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var ambiguousEvaluation = schema.Evaluate(
+            ambiguousContent,
+            new EvaluationOptions { OutputFormat = OutputFormat.List });
+        var withoutCandidates = JsonNode.Parse(structuredContent.GetRawText())!.AsObject();
+        _ = withoutCandidates["uiaMapping"]!.AsObject().Remove("candidates");
+        var withoutCandidatesEvaluation = schema.Evaluate(
+            JsonSerializer.SerializeToElement(withoutCandidates),
+            new EvaluationOptions { OutputFormat = OutputFormat.List });
+        var withoutCandidateScore = JsonNode.Parse(ambiguousContent.GetRawText())!.AsObject();
+        _ = withoutCandidateScore["uiaMapping"]!["candidates"]!.AsArray()[0]!
+            .AsObject()
+            .Remove("score");
+        var withoutCandidateScoreEvaluation = schema.Evaluate(
+            JsonSerializer.SerializeToElement(withoutCandidateScore),
+            new EvaluationOptions { OutputFormat = OutputFormat.List });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(structuredContent.TryGetProperty("uia", out _), Is.False);
+            Assert.That(structuredContent.TryGetProperty("locatorSuggestions", out _), Is.False);
+            Assert.That(structuredContent.TryGetProperty("flaUi", out _), Is.False);
+            Assert.That(
+                structuredContent.GetProperty("uiaMapping").TryGetProperty("selectedXPath", out _),
+                Is.False);
+            Assert.That(
+                evaluation.IsValid,
+                Is.True,
+                $"get_uia_locators unmapped result did not match its output schema: {JsonSerializer.Serialize(evaluation)}");
+            Assert.That(
+                ambiguousEvaluation.IsValid,
+                Is.True,
+                $"get_uia_locators pathless ambiguity did not match its output schema: {JsonSerializer.Serialize(ambiguousEvaluation)}");
+            Assert.That(withoutCandidatesEvaluation.IsValid, Is.False, "uiaMapping.candidates must remain required.");
+            Assert.That(withoutCandidateScoreEvaluation.IsValid, Is.False, "candidate.score must remain required.");
         });
     }
 

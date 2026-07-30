@@ -161,7 +161,7 @@ public sealed class UiaMappingDecisionTests
     }
 
     [Test]
-    public void Unique_exact_identity_with_insufficient_score_lead_is_not_selected()
+    public void Unique_exact_identity_does_not_require_the_heuristic_score_lead()
     {
         var decision = ElementMappingScoring.Decide(
             [
@@ -172,10 +172,10 @@ public sealed class UiaMappingDecisionTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(decision.Status, Is.EqualTo(ElementMappingStatus.Ambiguous));
-            Assert.That(decision.SelectedIndex, Is.Null);
+            Assert.That(decision.Status, Is.EqualTo(ElementMappingStatus.Exact));
+            Assert.That(decision.SelectedIndex, Is.Zero);
             Assert.That(decision.ScoreLead, Is.EqualTo(39));
-            Assert.That(decision.Evidence, Does.Contain("score_lead_below_selection_threshold"));
+            Assert.That(decision.Evidence, Does.Contain("unique_exact_automation_id_and_control_type"));
         });
     }
 
@@ -188,6 +188,123 @@ public sealed class UiaMappingDecisionTests
                 elementWindowHandle: 101));
 
         Assert.That(error!.Message, Does.StartWith("windowHandle does not match the elementId window."));
+    }
+
+    [TestCase(42, 42, true)]
+    [TestCase(41, 42, false)]
+    [TestCase(null, 42, false)]
+    public void Mapping_candidates_must_have_the_attached_process_identity(
+        int? candidateProcessId,
+        int attachedProcessId,
+        bool expected)
+    {
+        Assert.That(
+            AutomationController.IsUiaMappingProcessInScope(candidateProcessId, attachedProcessId),
+            Is.EqualTo(expected));
+    }
+
+    [Test]
+    public void Mapping_source_refresh_does_not_restore_cleared_public_metadata()
+    {
+        var historical = new AutomationController.ElementHandle(
+            InspectionBackend.Wpf,
+            WindowHandle: 42,
+            XPath: "/Window/Button",
+            WpfAgentElementId: "agent_old",
+            UiaRuntimeId: null,
+            Type: "Button",
+            AutomationId: "OldId",
+            Name: "Old name",
+            ClassName: "OldClass",
+            Bounds: new Rect(1, 2, 3, 4));
+        var current = new ElementRef(
+            Type: "",
+            AutomationId: null,
+            Name: null,
+            XPath: "/Window/Current",
+            ClassName: null,
+            Bounds: null,
+            ElementIdWpf: null);
+
+        var refreshed = AutomationController.RefreshWpfMappingSource(historical, current);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(refreshed.XPath, Is.EqualTo(current.XPath));
+            Assert.That(refreshed.WpfAgentElementId, Is.EqualTo("agent_old"));
+            Assert.That(refreshed.Type, Is.EqualTo(""));
+            Assert.That(refreshed.AutomationId, Is.Null);
+            Assert.That(refreshed.Name, Is.Null);
+            Assert.That(refreshed.ClassName, Is.Null);
+            Assert.That(refreshed.Bounds, Is.Null);
+        });
+    }
+
+    [Test]
+    public void Mapping_traversal_budget_is_shared_bounded_and_preserves_the_first_reason()
+    {
+        var budget = new AutomationController.UiaMappingTraversalBudget(maxNodes: 2);
+
+        Assert.That(budget.TryVisitNode(CancellationToken.None), Is.True);
+        Assert.That(budget.TryVisitNode(CancellationToken.None), Is.True);
+        Assert.That(budget.TryVisitNode(CancellationToken.None), Is.False);
+        budget.MarkIncomplete("laterFailure");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(budget.VisitedNodes, Is.EqualTo(2));
+            Assert.That(budget.IncompleteReason, Is.EqualTo("maxNodes"));
+        });
+    }
+
+    [Test]
+    public void Mapping_traversal_budget_observes_cancellation_before_consuming_a_node()
+    {
+        var budget = new AutomationController.UiaMappingTraversalBudget(maxNodes: 2);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() => budget.TryVisitNode(cancellation.Token));
+        Assert.That(budget.VisitedNodes, Is.Zero);
+    }
+
+    [Test]
+    public void Mapping_traversal_budget_does_not_call_the_provider_after_exhaustion()
+    {
+        var budget = new AutomationController.UiaMappingTraversalBudget(maxNodes: 1);
+        var providerCalls = 0;
+
+        var firstRead = budget.TryReadNode(
+            () =>
+            {
+                providerCalls++;
+                return new object();
+            },
+            "providerUnavailable",
+            CancellationToken.None,
+            out _,
+            out var firstBudgetExhausted);
+        var secondRead = budget.TryReadNode(
+            () =>
+            {
+                providerCalls++;
+                return new object();
+            },
+            "providerUnavailable",
+            CancellationToken.None,
+            out _,
+            out var secondBudgetExhausted);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(firstRead, Is.True);
+            Assert.That(firstBudgetExhausted, Is.False);
+            Assert.That(secondRead, Is.False);
+            Assert.That(secondBudgetExhausted, Is.True);
+            Assert.That(providerCalls, Is.EqualTo(1));
+            Assert.That(budget.VisitedNodes, Is.EqualTo(1));
+            Assert.That(budget.IncompleteReason, Is.EqualTo("maxNodes"));
+        });
     }
 
     [TestCase("Button", "Button", true)]

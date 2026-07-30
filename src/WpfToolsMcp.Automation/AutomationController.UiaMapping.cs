@@ -12,7 +12,7 @@ public sealed partial class AutomationController
 
     private sealed record RankedWpfUiaCandidate(
         AutomationElement Element,
-        string XPath,
+        int TraversalOrdinal,
         int[]? RuntimeId,
         string ElementType,
         string? AutomationId,
@@ -24,9 +24,12 @@ public sealed partial class AutomationController
     private sealed record WpfUiaScan(
         IReadOnlyList<RankedWpfUiaCandidate> Candidates,
         IReadOnlyList<AutomationElement> Elements,
-        int ScannedNodes,
-        bool Complete,
-        string? IncompleteReason);
+        bool Complete);
+
+    private sealed record PreparedWpfUiaCandidate(
+        RankedWpfUiaCandidate Candidate,
+        string? XPath,
+        IReadOnlyList<string> Evidence);
 
     private sealed record RegisteredUiaCandidate(
         AutomationElement Element,
@@ -36,22 +39,104 @@ public sealed partial class AutomationController
     private sealed record WpfUiaMappingResult(
         AutomationElement? SelectedElement,
         string? SelectedXPath,
+        string? SelectedFlaUiXPath,
         string? SelectedElementId,
         IReadOnlyList<AutomationElement> ScannedElements,
         UiaMappingDiagnostics Diagnostics);
 
-    private static ElementHandle RefreshWpfMappingSource(ElementHandle handle, ElementRef current) =>
+    private sealed record CandidateRegistrationAttempt(
+        RegisteredUiaCandidate? Registration,
+        string? FailureEvidence,
+        string? IncompleteReason);
+
+    internal sealed class UiaMappingTraversalBudget
+    {
+        private readonly int _maxNodes;
+
+        internal UiaMappingTraversalBudget(int maxNodes)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(maxNodes, 1);
+            _maxNodes = maxNodes;
+        }
+
+        internal int VisitedNodes { get; private set; }
+
+        internal string? IncompleteReason { get; private set; }
+
+        internal bool HasRemainingNodes => VisitedNodes < _maxNodes;
+
+        internal bool TryVisitNode(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (VisitedNodes >= _maxNodes)
+            {
+                MarkIncomplete("maxNodes");
+                return false;
+            }
+
+            VisitedNodes++;
+            return true;
+        }
+
+        internal bool TryReadNode<T>(
+            Func<T?> readNode,
+            string unavailableReason,
+            CancellationToken cancellationToken,
+            out T? node,
+            out bool budgetExhausted)
+            where T : class
+        {
+            ArgumentNullException.ThrowIfNull(readNode);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!HasRemainingNodes)
+            {
+                MarkIncomplete("maxNodes");
+                node = null;
+                budgetExhausted = true;
+                return false;
+            }
+
+            try
+            {
+                node = readNode();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                MarkIncomplete(unavailableReason);
+                node = null;
+                budgetExhausted = false;
+                return false;
+            }
+
+            budgetExhausted = false;
+            return node is null || TryVisitNode(cancellationToken);
+        }
+
+        internal void MarkIncomplete(string reason)
+        {
+            if (IncompleteReason is null)
+            {
+                IncompleteReason = reason;
+            }
+        }
+    }
+
+    internal static ElementHandle RefreshWpfMappingSource(ElementHandle handle, ElementRef current) =>
         handle with
         {
             XPath = current.XPath,
             WpfAgentElementId = string.IsNullOrWhiteSpace(current.ElementIdWpf)
                 ? handle.WpfAgentElementId
                 : current.ElementIdWpf,
-            Type = string.IsNullOrWhiteSpace(current.Type) ? handle.Type : current.Type,
-            AutomationId = string.IsNullOrWhiteSpace(current.AutomationId) ? handle.AutomationId : current.AutomationId,
-            Name = string.IsNullOrWhiteSpace(current.Name) ? handle.Name : current.Name,
-            ClassName = string.IsNullOrWhiteSpace(current.ClassName) ? handle.ClassName : current.ClassName,
-            Bounds = current.Bounds ?? handle.Bounds
+            Type = current.Type,
+            AutomationId = current.AutomationId,
+            Name = current.Name,
+            ClassName = current.ClassName,
+            Bounds = current.Bounds
         };
 
     internal static void ValidateUiaMappingWindowScope(long? requestedWindowHandle, long elementWindowHandle)
@@ -62,68 +147,154 @@ public sealed partial class AutomationController
         }
     }
 
+    internal static bool IsUiaMappingProcessInScope(int? candidateProcessId, int attachedProcessId) =>
+        candidateProcessId == attachedProcessId;
+
     private WpfUiaMappingResult MapWpfHandleToUia(
         Window window,
         ITreeWalker controlWalker,
         ITreeWalker rawWalker,
         ElementHandle source,
+        string sourceElementId,
+        int attachedProcessId,
         int maxNodes,
         CancellationToken cancellationToken)
     {
+        var traversalBudget = new UiaMappingTraversalBudget(maxNodes);
         var scan = ScanWpfUiaCandidates(
             window,
             controlWalker,
-            rawWalker,
             source,
-            maxNodes,
+            attachedProcessId,
+            traversalBudget,
             cancellationToken);
         var ordered = scan.Candidates
             .OrderByDescending(candidate => candidate.Ranking.Score)
-            .ThenBy(candidate => GetXPathDepth(candidate.XPath))
-            .ThenBy(candidate => candidate.XPath, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.TraversalOrdinal)
             .ToArray();
         var decisionScores = ordered.Select(candidate => candidate.Ranking).ToArray();
-        var decision = ElementMappingScoring.Decide(decisionScores, scan.Complete);
+
+        var preparedCandidates = new List<PreparedWpfUiaCandidate>(
+            Math.Min(ordered.Length, MaximumUiaMappingCandidates));
+        var pathWorkComplete = true;
+        foreach (var candidate in ordered.Take(MaximumUiaMappingCandidates))
+        {
+            if (!traversalBudget.HasRemainingNodes)
+            {
+                traversalBudget.MarkIncomplete("maxNodes");
+                pathWorkComplete = false;
+                preparedCandidates.Add(new PreparedWpfUiaCandidate(
+                    candidate,
+                    XPath: null,
+                    candidate.Ranking.Evidence.Concat(["uia_path_budget_exhausted"]).ToArray()));
+                continue;
+            }
+
+            if (TryComputeBoundedXPath(
+                    window,
+                    candidate.Element,
+                    rawWalker,
+                    traversalBudget,
+                    cancellationToken,
+                    out var xpath,
+                    out var failureEvidence))
+            {
+                preparedCandidates.Add(new PreparedWpfUiaCandidate(
+                    candidate,
+                    xpath,
+                    candidate.Ranking.Evidence.Concat(["uia_xpath_available"]).ToArray()));
+            }
+            else
+            {
+                pathWorkComplete = false;
+                preparedCandidates.Add(new PreparedWpfUiaCandidate(
+                    candidate,
+                    XPath: null,
+                    candidate.Ranking.Evidence.Concat([failureEvidence]).ToArray()));
+            }
+        }
+
+        var mappingComplete = scan.Complete && pathWorkComplete;
+        var decision = ElementMappingScoring.Decide(decisionScores, mappingComplete);
 
         RegisteredUiaCandidate? selectedRegistration = null;
+        string? selectedFlaUiXPath = null;
         var selectedRegistrationAttempted = decision.SelectedIndex == 0;
-        var selectedRegistrationFailed = false;
         if (selectedRegistrationAttempted)
         {
-            selectedRegistration = TryRegisterUiaMappingCandidate(
+            if (!TryComputeBoundedFlaUiXPath(
+                    window,
+                    ordered[0].Element,
+                    controlWalker,
+                    traversalBudget,
+                    cancellationToken,
+                    out selectedFlaUiXPath,
+                    out var flaUiPathFailure))
+            {
+                preparedCandidates[0] = preparedCandidates[0] with
+                {
+                    Evidence = preparedCandidates[0].Evidence.Concat([flaUiPathFailure]).ToArray()
+                };
+                mappingComplete = false;
+                decision = ElementMappingScoring.Decide(decisionScores, scanComplete: false);
+            }
+        }
+
+        CandidateRegistrationAttempt? registrationAttempt = null;
+        if (decision.SelectedIndex == 0 && selectedFlaUiXPath is not null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            registrationAttempt = TryRegisterSelectedUiaMappingCandidate(
                 window,
                 rawWalker,
+                sourceElementId,
                 source.WindowHandle,
-                ordered[0]);
+                attachedProcessId,
+                preparedCandidates[0],
+                traversalBudget,
+                cancellationToken);
+            selectedRegistration = registrationAttempt.Registration;
             if (selectedRegistration is null)
             {
-                selectedRegistrationFailed = true;
+                if (registrationAttempt.IncompleteReason is { } incompleteReason)
+                {
+                    traversalBudget.MarkIncomplete(incompleteReason);
+                    mappingComplete = false;
+                }
+
+                var failureEvidence = registrationAttempt.FailureEvidence ?? "runtime_identity_unverifiable";
                 decisionScores[0] = decisionScores[0] with
                 {
                     Reusable = false,
-                    Evidence = ReplaceRuntimeEvidence(
+                    Evidence = ApplyRegistrationFailureToCandidateEvidence(
                         decisionScores[0].Evidence,
-                        "runtime_identity_unverifiable")
+                        failureEvidence)
                 };
-                decision = ElementMappingScoring.Decide(decisionScores, scan.Complete);
+                decision = ElementMappingScoring.Decide(decisionScores, mappingComplete);
             }
         }
 
         var returnedCandidates = new List<UiaMappingCandidate>(
-            Math.Min(ordered.Length, MaximumUiaMappingCandidates));
-        for (var index = 0; index < Math.Min(ordered.Length, MaximumUiaMappingCandidates); index++)
+            preparedCandidates.Count);
+        for (var index = 0; index < preparedCandidates.Count; index++)
         {
-            var candidate = ordered[index];
-            var effectiveRanking = index == 0 && selectedRegistrationAttempted
-                ? decisionScores[0]
-                : candidate.Ranking;
+            var prepared = preparedCandidates[index];
+            var candidate = prepared.Candidate;
             var registration = index == 0 && selectedRegistrationAttempted
                 ? selectedRegistration
-                : TryRegisterUiaMappingCandidate(window, rawWalker, source.WindowHandle, candidate);
-            var evidence = registration?.Evidence ??
-                (effectiveRanking.Reusable
-                    ? ReplaceRuntimeEvidence(effectiveRanking.Evidence, "runtime_identity_unverifiable")
-                    : effectiveRanking.Evidence);
+                : null;
+            var evidence = registration?.Evidence ?? prepared.Evidence;
+            if (index == 0 && registrationAttempt?.FailureEvidence is { } candidateRegistrationFailure)
+            {
+                evidence = ApplyRegistrationFailureToCandidateEvidence(
+                    evidence,
+                    candidateRegistrationFailure);
+            }
+
+            if (registration is null)
+            {
+                evidence = evidence.Concat(["public_handle_not_registered"]).ToArray();
+            }
 
             returnedCandidates.Add(new UiaMappingCandidate(
                 ElementType: candidate.ElementType,
@@ -131,11 +302,12 @@ public sealed partial class AutomationController
                 Name: candidate.Name,
                 ClassName: candidate.ClassName,
                 Bounds: candidate.Bounds,
-                XPath: candidate.XPath,
-                Score: candidate.Ranking.Score)
+                XPath: prepared.XPath,
+                Score: candidate.Ranking.Score,
+                XPathOmitted: prepared.XPath is null ? true : null)
             {
                 ElementId = registration?.ElementId,
-                Reusable = registration is not null,
+                Reusable = registration is not null ? true : null,
                 Evidence = evidence
             });
         }
@@ -143,17 +315,17 @@ public sealed partial class AutomationController
         var selected = decision.SelectedIndex == 0 && selectedRegistration is not null;
         IReadOnlyList<string> decisionEvidence = selected
             ? decision.Evidence.Concat(["runtime_identity_verified"]).ToArray()
-            : selectedRegistrationFailed
-                ? ReplaceRuntimeEvidence(decision.Evidence, "runtime_identity_unverifiable")
+            : registrationAttempt?.FailureEvidence is { } decisionRegistrationFailure
+                ? ReplaceRuntimeEvidence(decision.Evidence, decisionRegistrationFailure)
                 : decision.Evidence;
         var candidatesTruncated = ordered.Length > MaximumUiaMappingCandidates;
         var diagnostics = new UiaMappingDiagnostics(
             Ambiguous: decision.Status == ElementMappingStatus.Ambiguous,
-            SelectedXPath: selected ? ordered[0].XPath : null,
+            SelectedXPath: selected ? preparedCandidates[0].XPath : null,
             Candidates: returnedCandidates,
             ReturnedCandidates: returnedCandidates.Count,
             TotalCandidates: ordered.Length,
-            Truncated: !scan.Complete || candidatesTruncated)
+            Truncated: !mappingComplete || candidatesTruncated)
         {
             Status = decision.Status,
             Method = WpfUiaMappingMethod,
@@ -161,16 +333,17 @@ public sealed partial class AutomationController
             Score = decision.Score ?? 0,
             ScoreLead = decision.ScoreLead,
             Evidence = decisionEvidence,
-            ScannedNodes = scan.ScannedNodes,
-            ScanComplete = scan.Complete,
-            TruncatedReason = !scan.Complete
-                ? scan.IncompleteReason
+            ScannedNodes = traversalBudget.VisitedNodes,
+            ScanComplete = mappingComplete,
+            TruncatedReason = !mappingComplete
+                ? traversalBudget.IncompleteReason
                 : candidatesTruncated ? "maxCandidates" : null
         };
 
         return new WpfUiaMappingResult(
             SelectedElement: selected ? selectedRegistration!.Element : null,
-            SelectedXPath: selected ? ordered[0].XPath : null,
+            SelectedXPath: selected ? preparedCandidates[0].XPath : null,
+            SelectedFlaUiXPath: selected ? selectedFlaUiXPath : null,
             SelectedElementId: selected ? selectedRegistration!.ElementId : null,
             ScannedElements: scan.Elements,
             Diagnostics: diagnostics);
@@ -179,18 +352,22 @@ public sealed partial class AutomationController
     private static WpfUiaScan ScanWpfUiaCandidates(
         Window window,
         ITreeWalker controlWalker,
-        ITreeWalker rawWalker,
         ElementHandle source,
-        int maxNodes,
+        int attachedProcessId,
+        UiaMappingTraversalBudget traversalBudget,
         CancellationToken cancellationToken)
     {
         var candidates = new List<RankedWpfUiaCandidate>();
-        var elements = new List<AutomationElement>(Math.Min(maxNodes, 1024));
+        var elements = new List<AutomationElement>();
         var pending = new Queue<AutomationElement>();
+        if (!traversalBudget.TryVisitNode(cancellationToken))
+        {
+            return new WpfUiaScan(candidates, elements, Complete: false);
+        }
+
         pending.Enqueue(window);
-        var scannedNodes = 0;
         var complete = true;
-        string? incompleteReason = null;
+        var traversalOrdinal = 0;
         var sourceFacts = new ElementMappingScoring.Facts(
             source.AutomationId,
             source.Name,
@@ -200,16 +377,22 @@ public sealed partial class AutomationController
         while (pending.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var element = pending.Dequeue();
+            var currentOrdinal = traversalOrdinal++;
 
-            if (scannedNodes >= maxNodes)
+            var candidateProcessId = TryGetUiaProcessId(element);
+            if (candidateProcessId is null)
             {
                 complete = false;
-                incompleteReason = "maxNodes";
-                break;
+                traversalBudget.MarkIncomplete("processIdentityUnavailable");
+                continue;
             }
 
-            var element = pending.Dequeue();
-            scannedNodes++;
+            if (!IsUiaMappingProcessInScope(candidateProcessId, attachedProcessId))
+            {
+                continue;
+            }
+
             elements.Add(element);
 
             try
@@ -229,10 +412,9 @@ public sealed partial class AutomationController
 
                 if (ranking is not null)
                 {
-                    var xpath = ComputeXPath(window, element, rawWalker);
                     candidates.Add(new RankedWpfUiaCandidate(
                         element,
-                        xpath,
+                        currentOrdinal,
                         runtimeId,
                         elementType,
                         automationId,
@@ -245,82 +427,540 @@ public sealed partial class AutomationController
             catch
             {
                 complete = false;
-                incompleteReason ??= "uiaTraversalUnavailable";
+                traversalBudget.MarkIncomplete("uiaTraversalUnavailable");
             }
 
-            try
-            {
-                var child = controlWalker.GetFirstChild(element);
-                while (child is not null)
-                {
-                    if (scannedNodes + pending.Count >= maxNodes)
-                    {
-                        complete = false;
-                        incompleteReason = "maxNodes";
-                        break;
-                    }
-
-                    pending.Enqueue(child);
-                    child = controlWalker.GetNextSibling(child);
-                }
-            }
-            catch
+            if (!traversalBudget.TryReadNode(
+                    () => controlWalker.GetFirstChild(element),
+                    "uiaTraversalUnavailable",
+                    cancellationToken,
+                    out var child,
+                    out _))
             {
                 complete = false;
-                incompleteReason ??= "uiaTraversalUnavailable";
+            }
+
+            while (child is not null)
+            {
+                pending.Enqueue(child);
+                var currentChild = child;
+                if (!traversalBudget.TryReadNode(
+                        () => controlWalker.GetNextSibling(currentChild),
+                        "uiaTraversalUnavailable",
+                        cancellationToken,
+                        out child,
+                        out _))
+                {
+                    complete = false;
+                    break;
+                }
             }
         }
 
         return new WpfUiaScan(
             candidates,
             elements,
-            scannedNodes,
-            complete && pending.Count == 0,
-            incompleteReason);
+            complete && pending.Count == 0 && traversalBudget.IncompleteReason is null);
     }
 
-    private RegisteredUiaCandidate? TryRegisterUiaMappingCandidate(
-        Window window,
-        ITreeWalker rawWalker,
-        long windowHandle,
-        RankedWpfUiaCandidate candidate)
+    private static int? TryGetUiaProcessId(AutomationElement element)
     {
-        if (candidate.RuntimeId is not { Length: > 0 } expectedRuntimeId)
-        {
-            return null;
-        }
-
         try
         {
-            var resolved = TryResolveByXPath(
-                window,
-                new ElementLocator(XPath: candidate.XPath),
-                rawWalker);
-            var actualRuntimeId = resolved is null ? null : TryGetRuntimeId(resolved);
-            if (resolved is null ||
-                actualRuntimeId is null ||
-                !actualRuntimeId.SequenceEqual(expectedRuntimeId))
-            {
-                return null;
-            }
-
-            var elementId = _elementHandles.RegisterUia(
-                windowHandle,
-                candidate.XPath,
-                expectedRuntimeId,
-                candidate.ElementType,
-                candidate.AutomationId,
-                candidate.Name,
-                candidate.ClassName,
-                candidate.Bounds);
-            return new RegisteredUiaCandidate(
-                resolved,
-                elementId,
-                candidate.Ranking.Evidence.Concat(["runtime_identity_verified"]).ToArray());
+            return element.Properties.ProcessId.Value;
         }
         catch
         {
             return null;
+        }
+    }
+
+    private static bool TryComputeBoundedXPath(
+        Window window,
+        AutomationElement element,
+        ITreeWalker walker,
+        UiaMappingTraversalBudget traversalBudget,
+        CancellationToken cancellationToken,
+        out string? xpath,
+        out string failureEvidence) =>
+        TryComputeBoundedPath(
+            window,
+            element,
+            walker,
+            GetXPathLabel,
+            rootPath: "/Window",
+            includeRootSegment: true,
+            traversalBudget,
+            cancellationToken,
+            out xpath,
+            out failureEvidence);
+
+    private static bool TryComputeBoundedFlaUiXPath(
+        Window window,
+        AutomationElement element,
+        ITreeWalker walker,
+        UiaMappingTraversalBudget traversalBudget,
+        CancellationToken cancellationToken,
+        out string? xpath,
+        out string failureEvidence) =>
+        TryComputeBoundedPath(
+            window,
+            element,
+            walker,
+            GetFlaUiXPathLabel,
+            rootPath: "/",
+            includeRootSegment: false,
+            traversalBudget,
+            cancellationToken,
+            out xpath,
+            out failureEvidence);
+
+    private static bool TryComputeBoundedPath(
+        Window window,
+        AutomationElement element,
+        ITreeWalker walker,
+        Func<AutomationElement, string> labelFactory,
+        string rootPath,
+        bool includeRootSegment,
+        UiaMappingTraversalBudget traversalBudget,
+        CancellationToken cancellationToken,
+        out string? xpath,
+        out string failureEvidence)
+    {
+        xpath = null;
+        failureEvidence = "uia_path_unavailable";
+
+        try
+        {
+            if (AreSameElement(window, element))
+            {
+                xpath = rootPath;
+                failureEvidence = "";
+                return true;
+            }
+
+            var segments = new List<string>();
+            AutomationElement? current = element;
+            while (current is not null && !AreSameElement(current, window))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var currentElement = current;
+                if (!traversalBudget.TryReadNode(
+                        () => walker.GetParent(currentElement),
+                        "uiaPathUnavailable",
+                        cancellationToken,
+                        out var parent,
+                        out var budgetExhausted))
+                {
+                    failureEvidence = budgetExhausted
+                        ? "uia_path_budget_exhausted"
+                        : "uia_path_unavailable";
+                    return false;
+                }
+
+                if (parent is null)
+                {
+                    traversalBudget.MarkIncomplete("uiaPathUnavailable");
+                    return false;
+                }
+
+                if (!TryComputeBoundedPathSegment(
+                        parent,
+                        current,
+                        walker,
+                        labelFactory,
+                        traversalBudget,
+                        cancellationToken,
+                        out var segment,
+                        out failureEvidence))
+                {
+                    return false;
+                }
+
+                segments.Add(segment!);
+                current = parent;
+            }
+
+            if (current is null)
+            {
+                traversalBudget.MarkIncomplete("uiaPathUnavailable");
+                return false;
+            }
+
+            segments.Reverse();
+            xpath = includeRootSegment
+                ? rootPath + "/" + string.Join('/', segments)
+                : segments.Count == 0 ? rootPath : "/" + string.Join('/', segments);
+            failureEvidence = "";
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            traversalBudget.MarkIncomplete("uiaPathUnavailable");
+            return false;
+        }
+    }
+
+    private static bool TryComputeBoundedPathSegment(
+        AutomationElement parent,
+        AutomationElement target,
+        ITreeWalker walker,
+        Func<AutomationElement, string> labelFactory,
+        UiaMappingTraversalBudget traversalBudget,
+        CancellationToken cancellationToken,
+        out string? segment,
+        out string failureEvidence)
+    {
+        segment = null;
+        failureEvidence = "uia_path_unavailable";
+
+        string targetLabel;
+        try
+        {
+            targetLabel = labelFactory(target);
+        }
+        catch
+        {
+            traversalBudget.MarkIncomplete("uiaPathUnavailable");
+            return false;
+        }
+
+        if (!traversalBudget.TryReadNode(
+                () => walker.GetFirstChild(parent),
+                "uiaPathUnavailable",
+                cancellationToken,
+                out var sibling,
+                out var budgetExhausted))
+        {
+            failureEvidence = budgetExhausted
+                ? "uia_path_budget_exhausted"
+                : "uia_path_unavailable";
+            return false;
+        }
+
+        var matchingSiblings = 0;
+        var targetIndex = 0;
+        while (sibling is not null)
+        {
+            string siblingLabel;
+            try
+            {
+                siblingLabel = labelFactory(sibling);
+            }
+            catch
+            {
+                traversalBudget.MarkIncomplete("uiaPathUnavailable");
+                return false;
+            }
+
+            if (string.Equals(siblingLabel, targetLabel, StringComparison.OrdinalIgnoreCase))
+            {
+                matchingSiblings++;
+                if (AreSameElement(sibling, target))
+                {
+                    targetIndex = matchingSiblings;
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var currentSibling = sibling;
+            if (!traversalBudget.TryReadNode(
+                    () => walker.GetNextSibling(currentSibling),
+                    "uiaPathUnavailable",
+                    cancellationToken,
+                    out sibling,
+                    out budgetExhausted))
+            {
+                failureEvidence = budgetExhausted
+                    ? "uia_path_budget_exhausted"
+                    : "uia_path_unavailable";
+                return false;
+            }
+        }
+
+        if (targetIndex == 0)
+        {
+            traversalBudget.MarkIncomplete("uiaPathUnavailable");
+            return false;
+        }
+
+        segment = matchingSiblings <= 1
+            ? targetLabel
+            : $"{targetLabel}[{targetIndex}]";
+        failureEvidence = "";
+        return true;
+    }
+
+    private static bool TryResolveBoundedXPath(
+        Window window,
+        string xpath,
+        ITreeWalker walker,
+        UiaMappingTraversalBudget traversalBudget,
+        CancellationToken cancellationToken,
+        out AutomationElement? resolved,
+        out string failureEvidence)
+    {
+        resolved = null;
+        failureEvidence = "uia_path_unavailable";
+
+        XPathSegment[] segments;
+        try
+        {
+            segments = xpath
+                .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(ParseXPathSegment)
+                .ToArray();
+        }
+        catch
+        {
+            traversalBudget.MarkIncomplete("uiaPathUnavailable");
+            return false;
+        }
+
+        if (segments.Length == 0)
+        {
+            traversalBudget.MarkIncomplete("uiaPathUnavailable");
+            return false;
+        }
+
+        AutomationElement current = window;
+        try
+        {
+            if (string.Equals(
+                    segments[0].TypeName,
+                    GetXPathLabel(current),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                segments = segments.Skip(1).ToArray();
+            }
+        }
+        catch
+        {
+            traversalBudget.MarkIncomplete("uiaPathUnavailable");
+            return false;
+        }
+
+        foreach (var segment in segments)
+        {
+            if (!TryResolveBoundedXPathSegment(
+                    current,
+                    segment,
+                    walker,
+                    traversalBudget,
+                    cancellationToken,
+                    out var next,
+                    out failureEvidence))
+            {
+                return false;
+            }
+
+            current = next!;
+        }
+
+        resolved = current;
+        failureEvidence = "";
+        return true;
+    }
+
+    private static bool TryResolveBoundedXPathSegment(
+        AutomationElement parent,
+        XPathSegment segment,
+        ITreeWalker walker,
+        UiaMappingTraversalBudget traversalBudget,
+        CancellationToken cancellationToken,
+        out AutomationElement? resolved,
+        out string failureEvidence)
+    {
+        resolved = null;
+        failureEvidence = "uia_path_unavailable";
+        if (segment.OneBasedIndex is <= 0)
+        {
+            traversalBudget.MarkIncomplete("uiaPathUnavailable");
+            return false;
+        }
+
+        if (!traversalBudget.TryReadNode(
+                () => walker.GetFirstChild(parent),
+                "uiaPathUnavailable",
+                cancellationToken,
+                out var child,
+                out var budgetExhausted))
+        {
+            failureEvidence = budgetExhausted
+                ? "uia_path_budget_exhausted"
+                : "uia_path_unavailable";
+            return false;
+        }
+
+        var matchingChildren = 0;
+        while (child is not null)
+        {
+            string childLabel;
+            try
+            {
+                childLabel = GetXPathLabel(child);
+            }
+            catch
+            {
+                traversalBudget.MarkIncomplete("uiaPathUnavailable");
+                return false;
+            }
+
+            if (string.Equals(childLabel, segment.TypeName, StringComparison.OrdinalIgnoreCase))
+            {
+                matchingChildren++;
+                if (segment.OneBasedIndex == matchingChildren)
+                {
+                    resolved = child;
+                    failureEvidence = "";
+                    return true;
+                }
+
+                if (segment.OneBasedIndex is null)
+                {
+                    resolved = child;
+                }
+            }
+
+            var currentChild = child;
+            if (!traversalBudget.TryReadNode(
+                    () => walker.GetNextSibling(currentChild),
+                    "uiaPathUnavailable",
+                    cancellationToken,
+                    out child,
+                    out budgetExhausted))
+            {
+                failureEvidence = budgetExhausted
+                    ? "uia_path_budget_exhausted"
+                    : "uia_path_unavailable";
+                return false;
+            }
+        }
+
+        if (segment.OneBasedIndex is null && matchingChildren == 1)
+        {
+            failureEvidence = "";
+            return true;
+        }
+
+        traversalBudget.MarkIncomplete("uiaPathChanged");
+        resolved = null;
+        failureEvidence = "uia_path_resolution_changed";
+        return false;
+    }
+
+    private CandidateRegistrationAttempt TryRegisterSelectedUiaMappingCandidate(
+        Window window,
+        ITreeWalker rawWalker,
+        string sourceElementId,
+        long windowHandle,
+        int attachedProcessId,
+        PreparedWpfUiaCandidate prepared,
+        UiaMappingTraversalBudget traversalBudget,
+        CancellationToken cancellationToken)
+    {
+        var candidate = prepared.Candidate;
+        if (prepared.XPath is null)
+        {
+            return new CandidateRegistrationAttempt(
+                Registration: null,
+                FailureEvidence: "uia_path_unavailable",
+                IncompleteReason: "uiaPathUnavailable");
+        }
+
+        if (candidate.RuntimeId is not { Length: > 0 } expectedRuntimeId)
+        {
+            return new CandidateRegistrationAttempt(
+                Registration: null,
+                FailureEvidence: "runtime_identity_unavailable",
+                IncompleteReason: null);
+        }
+
+        if (!TryResolveBoundedXPath(
+                window,
+                prepared.XPath,
+                rawWalker,
+                traversalBudget,
+                cancellationToken,
+                out var resolved,
+                out var pathFailureEvidence))
+        {
+            return new CandidateRegistrationAttempt(
+                Registration: null,
+                FailureEvidence: pathFailureEvidence,
+                IncompleteReason: traversalBudget.IncompleteReason ?? "uiaPathUnavailable");
+        }
+
+        try
+        {
+            var processId = TryGetUiaProcessId(resolved!);
+            if (processId is null)
+            {
+                return new CandidateRegistrationAttempt(
+                    Registration: null,
+                    FailureEvidence: "process_identity_unavailable",
+                    IncompleteReason: "processIdentityUnavailable");
+            }
+
+            if (!IsUiaMappingProcessInScope(processId, attachedProcessId))
+            {
+                return new CandidateRegistrationAttempt(
+                    Registration: null,
+                    FailureEvidence: "process_identity_outside_scope",
+                    IncompleteReason: "processIdentityChanged");
+            }
+
+            var actualRuntimeId = TryGetRuntimeId(resolved!);
+            if (actualRuntimeId is null ||
+                !actualRuntimeId.SequenceEqual(expectedRuntimeId))
+            {
+                return new CandidateRegistrationAttempt(
+                    Registration: null,
+                    FailureEvidence: "runtime_identity_unverifiable",
+                    IncompleteReason: null);
+            }
+
+            if (!_elementHandles.TryRegisterUiaKeeping(
+                    sourceElementId,
+                    windowHandle,
+                    prepared.XPath,
+                    expectedRuntimeId,
+                    candidate.ElementType,
+                    candidate.AutomationId,
+                    candidate.Name,
+                    candidate.ClassName,
+                    candidate.Bounds,
+                    out var elementId))
+            {
+                return new CandidateRegistrationAttempt(
+                    Registration: null,
+                    FailureEvidence: "handle_capacity_insufficient",
+                    IncompleteReason: null);
+            }
+
+            return new CandidateRegistrationAttempt(
+                new RegisteredUiaCandidate(
+                    resolved!,
+                    elementId!,
+                    prepared.Evidence.Concat(["runtime_identity_verified"]).ToArray()),
+                FailureEvidence: null,
+                IncompleteReason: null);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return new CandidateRegistrationAttempt(
+                Registration: null,
+                FailureEvidence: "runtime_identity_unverifiable",
+                IncompleteReason: null);
         }
     }
 
@@ -331,6 +971,13 @@ public sealed partial class AutomationController
             .Where(item => !item.StartsWith("runtime_identity_", StringComparison.Ordinal))
             .Append(replacement)
             .ToArray();
+
+    private static IReadOnlyList<string> ApplyRegistrationFailureToCandidateEvidence(
+        IReadOnlyList<string> evidence,
+        string failureEvidence) =>
+        failureEvidence.StartsWith("runtime_identity_", StringComparison.Ordinal)
+            ? ReplaceRuntimeEvidence(evidence, failureEvidence)
+            : evidence.Concat([failureEvidence]).Distinct(StringComparer.Ordinal).ToArray();
 
     internal static bool AreWpfAndUiaTypesCompatible(
         string? wpfType,

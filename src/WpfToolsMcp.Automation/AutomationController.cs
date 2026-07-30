@@ -9473,6 +9473,7 @@ public sealed partial class AutomationController : IDisposable
             Window window;
             AutomationElement? element = null;
             string? uiaXPath = null;
+            string? mappedFlaUiXPath = null;
             string? mappedUiaElementId = null;
             IReadOnlyList<AutomationElement>? scannedElements = null;
             WpfLocatorIdentity? wpf = null;
@@ -9523,10 +9524,13 @@ public sealed partial class AutomationController : IDisposable
                         controlWalker,
                         rawWalker,
                         source,
+                        id,
+                        application.ProcessId,
                         maxNodes,
                         cancellationToken);
                     element = mapping.SelectedElement;
                     uiaXPath = mapping.SelectedXPath;
+                    mappedFlaUiXPath = mapping.SelectedFlaUiXPath;
                     mappedUiaElementId = mapping.SelectedElementId;
                     scannedElements = mapping.ScannedElements;
                     uiaMapping = mapping.Diagnostics;
@@ -9583,10 +9587,13 @@ public sealed partial class AutomationController : IDisposable
                         controlWalker,
                         rawWalker,
                         source,
+                        wpfElementId,
+                        application.ProcessId,
                         maxNodes,
                         cancellationToken);
                     element = mapping.SelectedElement;
                     uiaXPath = mapping.SelectedXPath;
+                    mappedFlaUiXPath = mapping.SelectedFlaUiXPath;
                     mappedUiaElementId = mapping.SelectedElementId;
                     scannedElements = mapping.ScannedElements;
                     uiaMapping = mapping.Diagnostics;
@@ -9639,7 +9646,7 @@ public sealed partial class AutomationController : IDisposable
             }
 
             var allElements = scannedElements ?? EnumerateSelfAndDescendantsDepthFirst(window, controlWalker).ToArray();
-            var flaUiXPath = ComputeFlaUiXPath(window, element, controlWalker);
+            var flaUiXPath = mappedFlaUiXPath ?? ComputeFlaUiXPath(window, element, controlWalker);
             var uia = CreateUiaLocatorIdentity(element, uiaXPath, flaUiXPath) with
             {
                 ElementId = mappedUiaElementId
