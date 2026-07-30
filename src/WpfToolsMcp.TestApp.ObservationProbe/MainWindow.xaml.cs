@@ -15,6 +15,7 @@ public partial class MainWindow : Window
 {
     private static readonly TimeSpan OrderedStartDelay = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan OrderedTransitionInterval = TimeSpan.FromMilliseconds(30);
+    private static readonly TimeSpan DelayedRemoveInterval = TimeSpan.FromSeconds(2);
 
     private static readonly ObservationState[] OrderedStates =
     [
@@ -44,7 +45,7 @@ public partial class MainWindow : Window
             Dispatcher);
         _orderedTimer.Stop();
         _delayedRemoveTimer = new DispatcherTimer(
-            TimeSpan.FromMilliseconds(500),
+            DelayedRemoveInterval,
             DispatcherPriority.Normal,
             RemoveTargetAfterDelay,
             Dispatcher);

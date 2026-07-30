@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using NUnit.Framework;
 using VerifyNUnit;
@@ -359,8 +361,56 @@ public sealed class MinimalInteractionSnapshots
         response.FailureReason,
         response.BackendUsed,
         response.ReasonCode,
-        response.LastObservedValue
+        LastObservedValue = response.LastObservedValue is null
+            ? null
+            : new
+            {
+                response.LastObservedValue.State,
+                Value = ToStableWaitValue(response.LastObservedValue.Value),
+                response.LastObservedValue.ValueType,
+                response.LastObservedValue.Truncated,
+                response.LastObservedValue.Detail
+            }
     };
+
+    private static object? ToStableWaitValue(JsonNode? value)
+    {
+        if (value is JsonValue scalar)
+        {
+            if (scalar.TryGetValue<string>(out var text))
+            {
+                return text;
+            }
+
+            if (scalar.TryGetValue<bool>(out var boolean))
+            {
+                return boolean;
+            }
+
+            if (scalar.TryGetValue<int>(out var integer))
+            {
+                return integer;
+            }
+
+            if (scalar.TryGetValue<long>(out var longInteger))
+            {
+                return longInteger;
+            }
+
+            if (scalar.TryGetValue<double>(out var number))
+            {
+                return number;
+            }
+        }
+
+        if (value is null)
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(value.ToJsonString());
+        return document.RootElement.Clone();
+    }
 
     [Test]
     public async Task SelectItem_listbox_by_text_updates_status_snapshot()

@@ -584,6 +584,14 @@ public sealed class StateObservationTests
     [Test]
     public async Task Structured_wpf_value_wait_reports_when_target_unloads()
     {
+        var initial = await WaitForWpfStringConditionAsync(
+            WaitConditionKind.DependencyPropertyValue,
+            pathName: "propertyName",
+            path: "Text",
+            expected: "idle",
+            timeoutMs: 5_000);
+        Assert.That(initial.Succeeded, Is.True);
+
         await InvokeAsync("Observation_RemoveTargetDelayed");
         await WaitForMarkerAsync("target-remove-scheduled", TimeSpan.FromSeconds(5), _testCts.Token);
 
