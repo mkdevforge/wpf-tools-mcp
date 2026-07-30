@@ -43,6 +43,15 @@ public sealed partial class AutomationController
             Fallback = hasElementTarget ? fallback : null
         };
 
+    internal static (InspectionBackend BackendUsed, BackendFallbackInfo? Fallback)
+        SelectAutoScreenshotLocatorBackend(
+            bool wpfBackendAvailable,
+            bool wpfAttempted,
+            FailureInfo? failure) =>
+        wpfBackendAvailable
+            ? (InspectionBackend.Wpf, null)
+            : (InspectionBackend.Uia, CreateWpfToUiaFallback(wpfAttempted, failure));
+
     internal static bool IsPerWindowAutoWpfMiss(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);

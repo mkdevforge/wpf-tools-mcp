@@ -345,6 +345,41 @@ public sealed class InspectionResponseMetadataWpfTests
         }
     }
 
+    [Test]
+    public void Template_metadata_reports_incomplete_when_template_inspection_fails()
+    {
+        var ownerId = $"template-failure-metadata-{Guid.NewGuid():N}";
+        var target = new ThrowingTemplateFrameworkElement { Width = 100, Height = 30 };
+        AutomationProperties.SetAutomationId(target, "TemplateFailureTarget");
+        var window = CreateWindow(target);
+
+        try
+        {
+            ShowAndLayout(window);
+            var response = WpfVisualTreeInspector.GetTemplateInfo(
+                ownerId,
+                new GetTemplateInfoRequest(
+                    WindowHandle: GetWindowHandle(window),
+                    Locator: new ElementLocator(AutomationId: "TemplateFailureTarget"),
+                    IncludeNamedElements: true,
+                    MaxNamedElements: 1),
+                CancellationToken.None);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(response.Template.ReturnedNamedElements, Is.Zero);
+                Assert.That(response.Template.DiscoveredNamedElements, Is.Zero);
+                Assert.That(response.Template.NamedElementsScanComplete, Is.False);
+                Assert.That(response.Template.NamedElementsTruncated, Is.False);
+                Assert.That(response.Warnings, Has.Some.StartsWith("template_error:"));
+            });
+        }
+        finally
+        {
+            CloseAndRelease(window, ownerId);
+        }
+    }
+
     private static GetBindingInfoResponse InspectBindingInfo(Window window, string ownerId, int maxProperties) =>
         WpfVisualTreeInspector.GetBindingInfo(
             ownerId,
@@ -529,6 +564,12 @@ public sealed class InspectionResponseMetadataWpfTests
     private sealed class DataContextChild
     {
         public string Value { get; set; } = string.Empty;
+    }
+
+    private sealed class ThrowingTemplateFrameworkElement : FrameworkElement
+    {
+        private FrameworkTemplate? TemplateInternal =>
+            throw new InvalidOperationException("Synthetic template inspection failure.");
     }
 
     private sealed class FixtureValidationRule : ValidationRule

@@ -61,6 +61,37 @@ public sealed class InspectionResponseContractTests
     }
 
     [Test]
+    public void Screenshot_auto_routing_records_unavailable_wpf_backend_before_uia_capture()
+    {
+        var failure = new FailureInfo(
+            Code: "injection_failed",
+            Stage: "injection",
+            Detail: "The WPF backend could not be initialized.");
+
+        var unavailable = AutomationController.SelectAutoScreenshotLocatorBackend(
+            wpfBackendAvailable: false,
+            wpfAttempted: true,
+            failure);
+        var available = AutomationController.SelectAutoScreenshotLocatorBackend(
+            wpfBackendAvailable: true,
+            wpfAttempted: false,
+            failure: null);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(unavailable.BackendUsed, Is.EqualTo(InspectionBackend.Uia));
+            Assert.That(unavailable.Fallback, Is.Not.Null);
+            Assert.That(unavailable.Fallback!.FromBackend, Is.EqualTo("wpf"));
+            Assert.That(unavailable.Fallback.ToBackend, Is.EqualTo("uia"));
+            Assert.That(unavailable.Fallback.Attempted, Is.True);
+            Assert.That(unavailable.Fallback.Used, Is.True);
+            Assert.That(unavailable.Fallback.Failure, Is.SameAs(failure));
+            Assert.That(available.BackendUsed, Is.EqualTo(InspectionBackend.Wpf));
+            Assert.That(available.Fallback, Is.Null);
+        });
+    }
+
+    [Test]
     public void Inspection_metadata_requires_an_agent_that_advertises_the_wire_shape()
     {
         var previousAgent = new AgentCapabilitiesResponse(

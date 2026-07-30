@@ -5411,12 +5411,14 @@ internal static partial class WpfVisualTreeInspector
         }
 
         FrameworkTemplate? template = null;
+        var templateInspectionComplete = true;
         try
         {
             template = FrameworkElementHelper.GetTemplate(fe);
         }
         catch (Exception ex)
         {
+            templateInspectionComplete = false;
             warnings.Add($"template_error: {ex.Message}");
         }
 
@@ -5424,7 +5426,9 @@ internal static partial class WpfVisualTreeInspector
         {
             return new GetTemplateInfoResponse(
                 Element: elementRef,
-                Template: AddNamedElementMetadata(new TemplateInfo(TemplateKind.None), scanComplete: true),
+                Template: AddNamedElementMetadata(
+                    new TemplateInfo(TemplateKind.None),
+                    scanComplete: templateInspectionComplete),
                 Warnings: warnings.Count > 0 ? warnings : null)
             {
                 WindowHandleUsed = GetWindowHandle(window)

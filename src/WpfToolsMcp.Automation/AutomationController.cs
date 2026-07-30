@@ -904,6 +904,7 @@ public sealed partial class AutomationController : IDisposable
             var requestedBackend = request.Backend;
             ElementHandle? elementHandle = null;
             var elementBackend = requestedBackend == InspectionBackend.Auto ? InspectionBackend.Uia : requestedBackend;
+            BackendFallbackInfo? fallback = null;
 
             Window window;
             if (hasElementId)
@@ -948,11 +949,14 @@ public sealed partial class AutomationController : IDisposable
                 request.Locator is not null &&
                 autoBackendRoute != AutoBackendRoute.Uia)
             {
+                var attemptSequence = GetAutoAgentAttemptSequence();
                 var autoClient = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
-                if (autoClient is not null)
-                {
-                    elementBackend = InspectionBackend.Wpf;
-                }
+                var autoRouting = SelectAutoScreenshotLocatorBackend(
+                    wpfBackendAvailable: autoClient is not null,
+                    wpfAttempted: GetAutoAgentAttemptSequence() != attemptSequence,
+                    failure: autoClient is null ? GetWpfBackendFailure() : null);
+                elementBackend = autoRouting.BackendUsed;
+                fallback = autoRouting.Fallback;
             }
 
             var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
@@ -970,7 +974,6 @@ public sealed partial class AutomationController : IDisposable
             Rect? wpfElementBounds = null;
             var hasElementTarget = request.Locator is not null || hasElementId;
             var backendUsed = elementBackend;
-            BackendFallbackInfo? fallback = null;
 
             (Bitmap Bitmap, Rect CapturedBounds, Rect? RequestedBounds, bool WasClipped, ScreenshotCaptureMode CaptureModeUsed)? capture = null;
             ViewportConditions? capturedViewport = null;
