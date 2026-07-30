@@ -1,1 +1,1 @@
-Tool 'close_session' failed: An error occurred invoking 'close_session': tool=CloseSession: Unknown sessionId 'missing-session'.
+Tool 'close_session' failed: stale_session: The session is no longer valid.

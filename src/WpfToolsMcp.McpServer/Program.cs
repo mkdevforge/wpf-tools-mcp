@@ -26,8 +26,10 @@ var mcpBuilder = builder.Services
     .AddMcpServer()
     .WithRequestFilters(filters =>
     {
+        filters.AddListToolsFilter(McpToolOutputSchema.CreateListToolsFilter());
         filters.AddListToolsFilter(WaitToolSchema.CreateListToolsFilter());
         filters.AddListToolsFilter(DiagnosticSnapshotToolSchema.CreateListToolsFilter());
+        filters.AddCallToolFilter(McpToolErrorFilter.CreateCallToolFilter());
     })
     .WithStdioServerTransport();
 var toolSerializerOptions = new JsonSerializerOptions(McpJsonUtilities.DefaultOptions)

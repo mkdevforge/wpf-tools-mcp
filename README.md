@@ -55,13 +55,14 @@ agent workflows:
 | `core` (default) | 32 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
 | `diagnostics` | 55 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
-Every advertised tool includes an MCP `outputSchema`. Successful calls return
-their typed result as an object in `structuredContent` and also retain the same
-compact JSON in one text content block for clients that do not yet consume
-structured results. Callers should prefer `structuredContent`; the compatibility
-text contains raw JSON and is not JSON-string-encoded again. Existing bounded
-structured ambiguity and actionable-failure results for launch, attach, and
-resolve remain tool errors with `isError=true`.
+Every advertised tool includes an MCP `outputSchema` with exactly two `oneOf`
+branches: the tool's typed success schema and the common tool-error schema.
+Successful calls return their typed result as an object in `structuredContent`
+and retain the same compact JSON in one text content block. Tool failures set
+`isError=true`, put `{ "error": { "code", "detail", ... } }` in
+`structuredContent`, and include concise `code: detail` compatibility text.
+Callers should branch on `error.code`; malformed JSON-RPC, unknown tools, and
+request cancellation remain protocol errors rather than tool-error envelopes.
 
 Enable the full profile with a command argument:
 
@@ -140,7 +141,7 @@ is unavailable:
 | `Stage` | Stable phase: `process_discovery`, `attachment`, `architecture_detection`, `injection`, `pipe_connection`, `protocol`, or `target_shutdown`. |
 | `Detail` | Sanitized, human-readable summary. |
 | `Retryable` / `RetryAfterMs` | Optional retry guidance; an omitted value means no claim is made. |
-| `RecoveryActions` | Optional machine-readable next steps such as `retry`, `use_uia`, `reattach`, `restart_target`, `match_elevation`, `use_supported_architecture`, `repair_installation`, or `select_process_instance`. |
+| `RecoveryActions` | Optional machine-readable next steps such as `retry`, `use_uia`, `reattach`, `restart_target`, `restart_and_reattach`, `match_elevation`, `use_supported_architecture`, `repair_installation`, or `select_process_instance`. |
 
 When `backend=Auto` uses UIA for `get_visual_tree`, `find_elements`, or
 `resolve_element`, the response includes structured `Fallback` metadata:
@@ -153,10 +154,13 @@ and a cached retry gate report false even when the prior failure is included.
 and `Used` reports whether the returned payload came from that backend.
 
 Public actionable errors and trace entries use the failure code and sanitized
-detail. `list_sessions` and structured attach, launch, resolve, and fallback
-results expose the full failure object. None expose raw filesystem paths,
-injector stdout or stderr, or target-side stack traces; those diagnostics remain
-internal to the server.
+detail. `FailureInfo` remains embedded in backend capability and fallback
+metadata. A failed tool call instead uses the common `error` envelope, whose
+optional retry fields mirror the same semantics and whose context can include
+only validated session, window, element, backend, and bounded candidate
+identities. Neither form exposes raw filesystem paths, process command lines,
+window titles, element names or paths, injector output, arbitrary target
+exception messages, or target-side stack traces.
 
 ### Coherent Diagnostic Snapshots
 
@@ -530,8 +534,8 @@ value is not authoritative when its matching observation field is false.
 Each session is bound to one process instance, identified by PID and process
 start time. `attach_to_app` never guesses between multiple live processes with
 the same name. Instead it returns an `ambiguous_process` error with bounded,
-deterministically ordered candidates containing `processInstanceId`, PID, name,
-start time, and main-window identity. Retry with the opaque
+deterministically ordered candidates containing only their index, opaque
+`processInstanceId`, PID, and positive main-window handle. Retry with the opaque
 `processInstanceId` (preferred) or an explicit PID. Dotted process names are
 preserved; only a terminal `.exe` suffix is removed.
 
@@ -550,12 +554,11 @@ unless the call overrides it. A still-running target cannot be replaced, and
 an ambiguous or failed replacement leaves the old session untouched.
 
 Window handles and element IDs are scoped to their originating session and
-process instance. Calls through a replaced session fail with
-`stale_session: process_replaced`, name the successor session, and require
-window and element identities to be reacquired. Passing an old identity to the
-successor reports `stale_window: process_replaced` or
-`stale_element: process_replaced` rather than treating it as an unrelated or
-unknown identity. A raw numeric HWND cannot encode a process generation, so a
+process instance. Calls through a replaced session fail with `stale_session`
+and require window and element identities to be reacquired from the successful
+replacement response. Passing an old identity to the successor reports
+`stale_window` or `stale_element` rather than exposing its last-known target
+details. A raw numeric HWND cannot encode a process generation, so a
 value Windows has already reassigned to a live successor window represents that
 new window. Existing subscriptions are stopped during the successful
 replacement after the successor and predecessor tombstone are committed, and
@@ -687,10 +690,11 @@ as `maxResults`-truncated merely because it exactly fills the requested limit.
 When a strict non-XPath `resolve_element` locator matches more than one element,
 the tool returns an `ambiguous_element` tool error with structured,
 deterministically ordered candidate data for both WPF and UIA. Up to five
-candidates include their `index`, standard context, XPath, and reusable
-`elementId`; retry with an index or use a candidate handle directly. A bounded
-candidate summary remains in the text error for clients that do not consume
-structured error content. An ambiguous XPath segment instead returns a
+candidates include only their `index` and reusable `elementId`; the error
+context separately reports backend, window, returned/discovered counts, and
+truncation. Retry with an index or use a candidate handle directly. Compatibility
+text remains the fixed `ambiguous_element` code and sanitized detail. An
+ambiguous XPath segment instead returns a
 path-specific text error asking for a one-based `[n]` index on that segment.
 
 ### Response Budgets

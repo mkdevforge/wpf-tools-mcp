@@ -624,36 +624,27 @@ public sealed class ControllerStateRecoverySnapshots
                     Does.Contain("ambiguous_process"));
             });
 
-            var ambiguity = JsonSerializer.Deserialize<ProcessSelectionAmbiguity>(
+            var ambiguity = JsonSerializer.Deserialize<ToolErrorResponse>(
                 result.StructuredContent!.Value.GetRawText(),
-                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))?.Error;
 
             Assert.That(ambiguity, Is.Not.Null);
             Assert.Multiple(() =>
             {
                 Assert.That(ambiguity!.Code, Is.EqualTo("ambiguous_process"));
-                Assert.That(ambiguity.RequestedProcessName, Is.EqualTo(processName));
-                Assert.That(ambiguity.DiscoveredCandidates, Is.EqualTo(2));
-                Assert.That(ambiguity.ReturnedCandidates, Is.EqualTo(2));
-                Assert.That(ambiguity.Truncated, Is.False);
-                Assert.That(ambiguity.Candidates.Select(candidate => candidate.Pid),
+                Assert.That(ambiguity.Context!.DiscoveredCandidates, Is.EqualTo(2));
+                Assert.That(ambiguity.Context.ReturnedCandidates, Is.EqualTo(2));
+                Assert.That(ambiguity.Context.Truncated, Is.False);
+                Assert.That(ambiguity.Context.Candidates!.Select(candidate => candidate.Pid),
                     Is.EquivalentTo(new[] { first.Id, second.Id }));
-                Assert.That(ambiguity.Candidates.Select(candidate => candidate.Index), Is.EqualTo(new[] { 0, 1 }));
-                Assert.That(ambiguity.Candidates.All(candidate => candidate.ProcessInstanceId.Length > 0), Is.True);
-                Assert.That(ambiguity.Candidates.All(candidate => candidate.ProcessName == processName), Is.True);
-                Assert.That(ambiguity.Candidates.All(candidate => candidate.StartTimeUtc.Length > 0), Is.True);
-                Assert.That(ambiguity.Candidates.All(candidate => candidate.MainWindowHandle != 0), Is.True);
-                Assert.That(ambiguity.Candidates.All(candidate => candidate.MainWindowTitle.Length > 0), Is.True);
-                Assert.That(
-                    ambiguity.Candidates.Select(candidate => candidate.ProcessInstanceId),
-                    Is.EqualTo(ambiguity.Candidates
-                        .OrderByDescending(candidate => candidate.StartTimeUtc, StringComparer.Ordinal)
-                        .ThenByDescending(candidate => candidate.Pid)
-                        .Select(candidate => candidate.ProcessInstanceId)));
+                Assert.That(ambiguity.Context.Candidates!.Select(candidate => candidate.Index), Is.EqualTo(new[] { 0, 1 }));
+                Assert.That(ambiguity.Context.Candidates!.All(candidate => candidate.ProcessInstanceId?.Length > 0), Is.True);
+                Assert.That(ambiguity.Context.Candidates!.All(candidate => candidate.WindowHandle > 0), Is.True);
+                Assert.That(result.StructuredContent!.Value.GetRawText(), Does.Not.Contain(processName));
             });
 
-            var staleCandidate = ambiguity!.Candidates.Single(candidate => candidate.Pid == first.Id);
-            var liveCandidate = ambiguity.Candidates.Single(candidate => candidate.Pid == second.Id);
+            var staleCandidate = ambiguity!.Context!.Candidates!.Single(candidate => candidate.Pid == first.Id);
+            var liveCandidate = ambiguity.Context.Candidates!.Single(candidate => candidate.Pid == second.Id);
             KillProcessAndRequireExit(first.Id);
 
             var staleSelection = await CaptureToolFailureAsync(() =>
@@ -730,16 +721,16 @@ public sealed class ControllerStateRecoverySnapshots
                 ["waitForMainWindowMs"] = 1000,
                 ["reuseExistingInstance"] = true
             });
-            var ambiguity = JsonSerializer.Deserialize<ProcessSelectionAmbiguity>(
+            var ambiguity = JsonSerializer.Deserialize<ToolErrorResponse>(
                 ambiguousResult.StructuredContent!.Value.GetRawText(),
-                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))?.Error;
 
             Assert.Multiple(() =>
             {
                 Assert.That(ambiguousResult.IsError, Is.True);
                 Assert.That(ambiguity, Is.Not.Null);
                 Assert.That(ambiguity!.Code, Is.EqualTo("ambiguous_process"));
-                Assert.That(ambiguity.Candidates.Select(candidate => candidate.Pid),
+                Assert.That(ambiguity.Context!.Candidates!.Select(candidate => candidate.Pid),
                     Is.EquivalentTo(new[] { first.Id, second.Id }));
             });
         }
@@ -1018,15 +1009,15 @@ public sealed class ControllerStateRecoverySnapshots
                 Assert.That(result.StructuredContent, Is.Not.Null);
             });
 
-            var ambiguity = JsonSerializer.Deserialize<ProcessSelectionAmbiguity>(
+            var ambiguity = JsonSerializer.Deserialize<ToolErrorResponse>(
                 result.StructuredContent!.Value.GetRawText(),
-                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))?.Error;
             Assert.That(ambiguity, Is.Not.Null);
             Assert.Multiple(() =>
             {
                 Assert.That(ambiguity!.Code, Is.EqualTo("ambiguous_process"));
-                Assert.That(ambiguity.Recovery, Does.Contain(attached.SessionId));
-                Assert.That(ambiguity.Candidates.Select(candidate => candidate.Pid),
+                Assert.That(ambiguity.Context!.SessionId, Is.EqualTo(attached.SessionId));
+                Assert.That(ambiguity.Context.Candidates!.Select(candidate => candidate.Pid),
                     Is.EquivalentTo(new[] { replacementOne.Id, replacementTwo.Id }));
             });
 

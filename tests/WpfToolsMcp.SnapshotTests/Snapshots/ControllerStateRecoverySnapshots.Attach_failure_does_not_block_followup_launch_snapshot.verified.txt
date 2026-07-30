@@ -1,5 +1,5 @@
 ﻿{
-  AttachFailure: Tool 'attach_to_app' failed: tool=AttachToApp: attachment_failed: The target process could not be attached for UI automation.,
+  AttachFailure: Tool 'attach_to_app' failed: attachment_failed: The target process could not be attached for UI automation.,
   Launch: {
     SessionId: <session>,
     Pid: -1,

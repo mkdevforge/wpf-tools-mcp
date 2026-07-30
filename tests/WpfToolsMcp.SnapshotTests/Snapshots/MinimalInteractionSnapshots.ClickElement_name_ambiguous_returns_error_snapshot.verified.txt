@@ -1,1 +1,1 @@
-Tool 'click_element' failed: An error occurred invoking 'click_element': tool=ClickElement: ambiguous_element: Locator is ambiguous (found 4). Retry with a stricter locator or locator.index.
+Tool 'click_element' failed: ambiguous_element: The locator matched multiple elements.

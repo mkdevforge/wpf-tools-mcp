@@ -1352,7 +1352,23 @@ public sealed class ToolProfileTests
     private static string[] GetOutputPropertyNames(McpClientTool tool)
     {
         if (tool.ProtocolTool.OutputSchema is not { } schema ||
-            schema.ValueKind != JsonValueKind.Object ||
+            schema.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        if (schema.TryGetProperty("oneOf", out var branches) &&
+            branches.ValueKind == JsonValueKind.Array)
+        {
+            schema = branches.EnumerateArray().FirstOrDefault(branch =>
+                branch.ValueKind == JsonValueKind.Object &&
+                !branch.TryGetProperty("error", out _) &&
+                (!branch.TryGetProperty("required", out var required) ||
+                 required.ValueKind != JsonValueKind.Array ||
+                 !required.EnumerateArray().Any(item => item.GetString() == "error")));
+        }
+
+        if (schema.ValueKind != JsonValueKind.Object ||
             !schema.TryGetProperty("properties", out var properties) ||
             properties.ValueKind != JsonValueKind.Object)
         {

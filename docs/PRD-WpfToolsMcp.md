@@ -122,7 +122,7 @@ see `README.md` for the current profile split and configuration.
 | `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`), viewport evidence (`includeViewport=true`), and diagnostics-only point/region correlation (`correlation`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload, `ViewportConditions`, and bounded WPF/UIA correlation evidence |
 | `get_visual_tree` | Return an inspection tree (UIA or WPF) for the main window or a subtree | Structured JSON. Configurable depth. `visibleOnly=true` means **in-viewport**; use `includeOffViewport=true` to include offscreen elements. |
 | `find_elements` | Find elements without dumping the full tree; minimal or standard result context | Deterministically ordered matches, returned/discovered/scanned counts, truncation metadata, and optional `elementId`s |
-| `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef on success; non-XPath ambiguity returns an `ambiguous_element` tool error with up to five structured, index-addressable candidate ElementRefs; ambiguous XPath segments return a path-specific indexing error |
+| `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef on success; non-XPath ambiguity returns an `ambiguous_element` tool error with up to five index-addressable candidates containing only index and reusable element ID; ambiguous XPath segments return a path-specific indexing error |
 | `get_path_to_element` | Get the XPath for a resolved element | XPath string |
 | `pick_element_at_point` | Pick an element at a coordinate (`coordSpace`: screen/client) | ElementRef + optional ancestor chain |
 | `highlight_element` | Highlight an element on-screen. Can optionally return an annotated screenshot (`returnScreenshot=true`). | Highlight result + bounds + method used |
@@ -188,13 +188,12 @@ before the predecessor is atomically retired. Predecessor subscriptions are
 stopped after that registry commit and before the response is returned, so a
 failed pre-commit replacement does not remove them. The durable interaction
 policy is inherited unless explicitly overridden. Retired session IDs remain
-as bounded tombstones and report
-`stale_session: process_replaced` with the successor ID; every prior HWND and
-element ID is therefore explicitly stale and must be reacquired. The successor
-also recognizes transferred predecessor identities and reports
-`stale_window: process_replaced` or `stale_element: process_replaced` when one
-is reused directly. Ambiguous or failed preparation is atomic and leaves the
-predecessor unchanged.
+as bounded tombstones and report `stale_session`; every prior HWND and element
+ID is explicitly stale and must be reacquired from the successful replacement
+response. The successor also recognizes transferred predecessor identities and
+reports `stale_window` or `stale_element` without exposing last-known target
+details. Ambiguous or failed preparation is atomic and leaves the predecessor
+unchanged.
 
 `list_sessions` may verify or reconnect to an already-running WPF agent, but it
 does not inject one. WPF initialization occurs only for an explicit WPF
@@ -361,13 +360,16 @@ tree and search retain compatibility warning text. WPF-only diagnostics return
 a stable sanitized failure code and detail; callers can inspect `list_sessions`
 for the full structured backend failure state.
 
-Actionable failures use stable lower-snake-case `Code` and `Stage` values, a
-sanitized human-readable `Detail`, optional `Retryable` and `RetryAfterMs`
-guidance, and optional machine-readable `RecoveryActions`. Stages identify
-process discovery, attachment, architecture detection, injection, pipe
-connection, protocol, or target shutdown. Public error payloads, error text,
-and traces omit raw filesystem paths, injector stdout or stderr, and target-side
-stack traces.
+Every tool advertises a success-or-error `outputSchema`. Tool execution failures
+set `isError=true` and return `{ "error": { "code", "detail", ... } }` as
+structured content plus fixed `code: detail` compatibility text. The envelope
+can add optional `stage`, `retryable`, `retryAfterMs`, `recoveryActions`, and
+validated session/window/element/backend or bounded candidate context. Embedded
+backend `FailureInfo` values retain the same retry semantics. Malformed JSON-RPC,
+unknown tools, request cancellation, and server lifecycle failures remain
+protocol errors. Public failure payloads and compatibility text omit raw
+filesystem paths, command lines, names/titles, injector output, arbitrary target
+exception messages, and target-side stack traces.
 
 **Upgraded tools:**
 
@@ -416,8 +418,9 @@ such as `select_item.itemLocator`, have tool-specific schemas and semantics.
 ```
 
 If multiple elements match a strict non-XPath locator, the server returns a
-structured ambiguity error and asks the caller to narrow the query or provide
-an index. An ambiguous XPath segment instead asks the caller to add a one-based
+structured ambiguity error with bounded index and reusable-element-ID candidates,
+and asks the caller to narrow the query or provide an index. An ambiguous XPath
+segment instead asks the caller to add a one-based
 `[n]` index to that segment; `xpath` and locator `index` cannot be used together.
 AutomationId is the preferred stable identity when an application exposes one.
 

@@ -1,244 +1,37 @@
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
-using WpfToolsMcp.Automation;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.McpServer.Tools;
 
 internal static class McpToolErrors
 {
-    public static async Task<T> RunAsync<T>(Func<Task<T>> action, [CallerMemberName] string toolName = "")
-    {
-        try
-        {
-            return await action().ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (McpException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            throw CreateMcpException(ex, toolName);
-        }
-    }
+    public static Task<T> RunAsync<T>(Func<Task<T>> action) => action();
 
-    public static async Task<CallToolResult> RunResolveElementAsync(
-        Func<Task<ResolveElementResponse>> action,
-        [CallerMemberName] string toolName = "")
-    {
-        try
-        {
-            var response = await action().ConfigureAwait(false);
-            var structuredContent = JsonSerializer.SerializeToElement(
-                response,
-                McpJsonUtilities.DefaultOptions);
-            return new CallToolResult
-            {
-                Content =
-                [
-                    new TextContentBlock
-                    {
-                        Text = structuredContent.GetRawText()
-                    }
-                ],
-                StructuredContent = structuredContent
-            };
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (McpException)
-        {
-            throw;
-        }
-        catch (ElementResolutionAmbiguityException ex)
-        {
-            var tool = string.IsNullOrWhiteSpace(toolName) ? "unknown" : toolName;
-            return new CallToolResult
-            {
-                IsError = true,
-                Content = [new TextContentBlock { Text = $"tool={tool}: {ex.Message}" }],
-                StructuredContent = JsonSerializer.SerializeToElement(
-                    ex.Ambiguity,
-                    McpJsonUtilities.DefaultOptions)
-            };
-        }
-        catch (ActionableFailureException ex)
-        {
-            return CreateActionableFailureResult(ex, toolName);
-        }
-        catch (Exception ex)
-        {
-            throw CreateMcpException(ex, toolName);
-        }
-    }
+    public static Task<CallToolResult> RunResolveElementAsync(
+        Func<Task<ResolveElementResponse>> action) =>
+        RunStructuredSuccessAsync(action);
 
     public static Task<CallToolResult> RunAttachToAppAsync(
-        Func<Task<AttachToAppResponse>> action,
-        [CallerMemberName] string toolName = "") =>
-        RunProcessSelectionAsync(action, toolName);
+        Func<Task<AttachToAppResponse>> action) =>
+        RunStructuredSuccessAsync(action);
 
     public static Task<CallToolResult> RunLaunchAppAsync(
-        Func<Task<LaunchAppResponse>> action,
-        [CallerMemberName] string toolName = "") =>
-        RunProcessSelectionAsync(action, toolName);
+        Func<Task<LaunchAppResponse>> action) =>
+        RunStructuredSuccessAsync(action);
 
-    private static async Task<CallToolResult> RunProcessSelectionAsync<TResponse>(
-        Func<Task<TResponse>> action,
-        string toolName)
+    private static async Task<CallToolResult> RunStructuredSuccessAsync<TResponse>(
+        Func<Task<TResponse>> action)
     {
-        try
-        {
-            var response = await action().ConfigureAwait(false);
-            var structuredContent = JsonSerializer.SerializeToElement(
-                response,
-                McpJsonUtilities.DefaultOptions);
-            return new CallToolResult
-            {
-                Content =
-                [
-                    new TextContentBlock
-                    {
-                        Text = structuredContent.GetRawText()
-                    }
-                ],
-                StructuredContent = structuredContent
-            };
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (McpException)
-        {
-            throw;
-        }
-        catch (ProcessSelectionAmbiguityException ex)
-        {
-            var tool = string.IsNullOrWhiteSpace(toolName) ? "unknown" : toolName;
-            return new CallToolResult
-            {
-                IsError = true,
-                Content = [new TextContentBlock { Text = $"tool={tool}: {ex.Message}" }],
-                StructuredContent = JsonSerializer.SerializeToElement(
-                    ex.Ambiguity,
-                    McpJsonUtilities.DefaultOptions)
-            };
-        }
-        catch (ActionableFailureException ex)
-        {
-            return CreateActionableFailureResult(ex, toolName);
-        }
-        catch (Exception ex)
-        {
-            throw CreateMcpException(ex, toolName);
-        }
-    }
-
-    private static CallToolResult CreateActionableFailureResult(
-        ActionableFailureException exception,
-        string toolName)
-    {
+        var response = await action().ConfigureAwait(false);
         var structuredContent = JsonSerializer.SerializeToElement(
-            exception.Failure,
+            response,
             McpJsonUtilities.DefaultOptions);
         return new CallToolResult
         {
-            IsError = true,
-            Content =
-            [
-                new TextContentBlock
-                {
-                    Text = CreateActionableFailureText(exception.Failure, toolName)
-                }
-            ],
+            Content = [new TextContentBlock { Text = structuredContent.GetRawText() }],
             StructuredContent = structuredContent
-        };
-    }
-
-    private static McpException CreateMcpException(Exception ex, string toolName)
-    {
-        var actionable = ex as ActionableFailureException ??
-                         ex.GetBaseException() as ActionableFailureException;
-        if (actionable is not null)
-        {
-            return new McpException(
-                CreateActionableFailureText(actionable.Failure, toolName),
-                actionable);
-        }
-
-        var baseException = ex.GetBaseException();
-        var message = string.IsNullOrWhiteSpace(baseException.Message)
-            ? baseException.GetType().Name
-            : baseException.Message;
-        var innerMessage = ex.InnerException is not null && !ReferenceEquals(ex.InnerException, baseException)
-            ? ex.InnerException.Message
-            : null;
-        var code = GetKnownErrorCode(message);
-        var prefix = string.IsNullOrWhiteSpace(code) ||
-                     message.StartsWith(code + ":", StringComparison.OrdinalIgnoreCase)
-            ? ""
-            : $"{code}: ";
-        var detail = string.IsNullOrWhiteSpace(innerMessage) ? "" : $" Inner: {innerMessage}";
-        var tool = string.IsNullOrWhiteSpace(toolName) ? "unknown" : toolName;
-
-        return new McpException($"tool={tool}: {prefix}{message}{detail}", baseException);
-    }
-
-    private static string CreateActionableFailureText(FailureInfo failure, string toolName)
-    {
-        var tool = string.IsNullOrWhiteSpace(toolName) ? "unknown" : toolName;
-        return $"tool={tool}: {failure.Code}: {failure.Detail}";
-    }
-
-    private static string? GetKnownErrorCode(string message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-        {
-            return null;
-        }
-
-        var separators = new[] { ':', ' ' };
-        var first = message.Split(separators, 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(first))
-        {
-            return null;
-        }
-
-        return first switch
-        {
-            "stale_element" => first,
-            "timeout" => first,
-            "element_offscreen" => first,
-            "element_offscreen_after_scroll" => first,
-            "wpf_handle_stale" => first,
-            "no_hit_at_point" => first,
-            "invalid_request" => first,
-            "ambiguous_element" => first,
-            "ambiguous_process" => first,
-            "stale_process_candidate" => first,
-            "stale_session" => first,
-            "stale_window" => first,
-            "session_replacement_in_progress" => first,
-            "target_process_still_running" => first,
-            "process_not_found" => first,
-            "process_identity_unavailable" => first,
-            "process_state_unavailable" => first,
-            "active_window_unavailable" => first,
-            "interaction_policy_blocked" => first,
-            "screenshot_viewport_unstable" => first,
-            "viewport_conditions_unstable" => first,
-            "dpi_context_unavailable" => first,
-            "monitor_dpi_unavailable" => first,
-            _ => null
         };
     }
 }

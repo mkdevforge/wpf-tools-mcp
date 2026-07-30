@@ -156,45 +156,35 @@ public sealed class DirectSearchTests
                 {
                     Assert.That(result.IsError, Is.True);
                     Assert.That(fallback, Does.Contain("ambiguous_element"));
-                    Assert.That(fallback, Does.Contain("locator.index"));
                     Assert.That(result.StructuredContent, Is.Not.Null);
                 });
 
-                var ambiguity = JsonSerializer.Deserialize<ResolveElementAmbiguity>(
+                var ambiguity = JsonSerializer.Deserialize<ToolErrorResponse>(
                     result.StructuredContent!.Value.GetRawText(),
-                    JsonOptions);
+                    JsonOptions)?.Error;
 
                 Assert.That(ambiguity, Is.Not.Null);
                 Assert.Multiple(() =>
                 {
                     Assert.That(ambiguity!.Code, Is.EqualTo("ambiguous_element"));
-                    Assert.That(ambiguity.BackendUsed, Is.EqualTo(backend));
-                    Assert.That(ambiguity.ReturnedCandidates, Is.EqualTo(2));
-                    Assert.That(ambiguity.DiscoveredCandidates, Is.EqualTo(2));
-                    Assert.That(ambiguity.Truncated, Is.False);
-                    Assert.That(ambiguity.TruncatedReason, Is.Null);
-                    Assert.That(ambiguity.Candidates, Has.Count.EqualTo(2));
-                    Assert.That(ambiguity.Candidates.Select(candidate => candidate.Index), Is.EqualTo(new[] { 0, 1 }));
-                    Assert.That(ambiguity.Candidates.Select(candidate => candidate.Element.XPath), Is.Unique);
+                    Assert.That(ambiguity.Context!.Backend, Is.EqualTo(backend));
+                    Assert.That(ambiguity.Context.ReturnedCandidates, Is.EqualTo(2));
+                    Assert.That(ambiguity.Context.DiscoveredCandidates, Is.EqualTo(2));
+                    Assert.That(ambiguity.Context.Truncated, Is.False);
+                    Assert.That(ambiguity.Context.Candidates, Has.Count.EqualTo(2));
+                    Assert.That(ambiguity.Context.Candidates!.Select(candidate => candidate.Index), Is.EqualTo(new[] { 0, 1 }));
+                    Assert.That(ambiguity.Context.Candidates!.Select(candidate => candidate.ElementId), Is.Unique);
                 });
 
-                foreach (var candidate in ambiguity!.Candidates)
+                foreach (var candidate in ambiguity!.Context!.Candidates!)
                 {
-                    AssertStandardMatch(candidate.Element, backend, expectedOffscreen: false);
-
                     var reusable = await _mcp.CallToolAsync<GetPathToElementResponse>(
                         "get_path_to_element",
                         new Dictionary<string, object?>
                         {
                             ["sessionId"] = launch.SessionId,
-                            ["elementId"] = candidate.Element.ElementId
+                            ["elementId"] = candidate.ElementId
                         });
-
-                    Assert.Multiple(() =>
-                    {
-                        Assert.That(reusable.BackendUsed, Is.EqualTo(backend));
-                        Assert.That(reusable.XPath, Is.EqualTo(candidate.Element.XPath));
-                    });
 
                     var resolved = await _mcp.CallToolAsync<ResolveElementResponse>(
                         "resolve_element",
@@ -202,8 +192,9 @@ public sealed class DirectSearchTests
 
                     Assert.Multiple(() =>
                     {
+                        Assert.That(reusable.BackendUsed, Is.EqualTo(backend));
                         Assert.That(resolved.BackendUsed, Is.EqualTo(backend));
-                        Assert.That(resolved.Element.XPath, Is.EqualTo(candidate.Element.XPath));
+                        Assert.That(resolved.Element.XPath, Is.EqualTo(reusable.XPath));
                         Assert.That(resolved.Element.ElementId, Does.StartWith(GetElementIdPrefix(backend)));
                     });
                 }
@@ -218,49 +209,49 @@ public sealed class DirectSearchTests
                     Assert.That(cappedResult.StructuredContent, Is.Not.Null);
                 });
 
-                var capped = JsonSerializer.Deserialize<ResolveElementAmbiguity>(
+                var capped = JsonSerializer.Deserialize<ToolErrorResponse>(
                     cappedResult.StructuredContent!.Value.GetRawText(),
-                    JsonOptions);
+                    JsonOptions)?.Error;
 
                 Assert.That(capped, Is.Not.Null);
                 Assert.Multiple(() =>
                 {
                     Assert.That(capped!.Code, Is.EqualTo("ambiguous_element"));
-                    Assert.That(capped.BackendUsed, Is.EqualTo(backend));
-                    Assert.That(capped.ReturnedCandidates, Is.EqualTo(5));
-                    Assert.That(capped.DiscoveredCandidates, Is.GreaterThan(5));
-                    Assert.That(capped.Truncated, Is.True);
-                    Assert.That(capped.TruncatedReason, Is.EqualTo("maxCandidates"));
-                    Assert.That(capped.Candidates, Has.Count.EqualTo(5));
-                    Assert.That(capped.Candidates.Select(candidate => candidate.Index), Is.EqualTo(new[] { 0, 1, 2, 3, 4 }));
-                    Assert.That(capped.Candidates.Select(candidate => candidate.Element.XPath), Is.Unique);
+                    Assert.That(capped.Context!.Backend, Is.EqualTo(backend));
+                    Assert.That(capped.Context.ReturnedCandidates, Is.EqualTo(5));
+                    Assert.That(capped.Context.DiscoveredCandidates, Is.GreaterThan(5));
+                    Assert.That(capped.Context.Truncated, Is.True);
+                    Assert.That(capped.Context.Candidates, Has.Count.EqualTo(5));
+                    Assert.That(capped.Context.Candidates!.Select(candidate => candidate.Index), Is.EqualTo(new[] { 0, 1, 2, 3, 4 }));
+                    Assert.That(capped.Context.Candidates!.Select(candidate => candidate.ElementId), Is.Unique);
                 });
 
                 var expectedListItemType = backend == InspectionBackend.Wpf ? "ListBoxItem" : "ListItem";
-                foreach (var candidate in capped!.Candidates)
+                foreach (var candidate in capped!.Context!.Candidates!)
                 {
-                    Assert.Multiple(() =>
-                    {
-                        Assert.That(candidate.Element.Type, Is.EqualTo(expectedListItemType));
-                        Assert.That(candidate.Element.ClassName, Is.Not.Null.And.Not.Empty);
-                        Assert.That(candidate.Element.Bounds, Is.Not.Null);
-                        Assert.That(candidate.Element.IsVisible, Is.Not.Null);
-                        Assert.That(candidate.Element.IsOffscreen, Is.Not.Null);
-                        Assert.That(candidate.Element.ElementId, Does.StartWith(GetElementIdPrefix(backend)));
-                    });
-
                     var reusable = await _mcp.CallToolAsync<GetPathToElementResponse>(
                         "get_path_to_element",
                         new Dictionary<string, object?>
                         {
                             ["sessionId"] = launch.SessionId,
-                            ["elementId"] = candidate.Element.ElementId
+                            ["elementId"] = candidate.ElementId
                         });
+
+                    var resolved = await _mcp.CallToolAsync<ResolveElementResponse>(
+                        "resolve_element",
+                        CreateResolveArguments(launch.SessionId, backend, candidate.Index, listItems: true));
 
                     Assert.Multiple(() =>
                     {
                         Assert.That(reusable.BackendUsed, Is.EqualTo(backend));
-                        Assert.That(reusable.XPath, Is.EqualTo(candidate.Element.XPath));
+                        Assert.That(resolved.BackendUsed, Is.EqualTo(backend));
+                        Assert.That(resolved.Element.XPath, Is.EqualTo(reusable.XPath));
+                        Assert.That(resolved.Element.Type, Is.EqualTo(expectedListItemType));
+                        Assert.That(resolved.Element.ClassName, Is.Not.Null.And.Not.Empty);
+                        Assert.That(resolved.Element.Bounds, Is.Not.Null);
+                        Assert.That(resolved.Element.IsVisible, Is.Not.Null);
+                        Assert.That(resolved.Element.IsOffscreen, Is.Not.Null);
+                        Assert.That(resolved.Element.ElementId, Does.StartWith(GetElementIdPrefix(backend)));
                     });
                 }
             }

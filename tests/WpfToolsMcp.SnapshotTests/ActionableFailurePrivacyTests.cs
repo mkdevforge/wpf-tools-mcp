@@ -21,7 +21,7 @@ public sealed class ActionableFailurePrivacyTests
             ["exePath"] = Path.Combine(PrivateSentinel, "missing.exe")
         });
 
-        var failure = JsonSerializer.Deserialize<FailureInfo>(
+        var failure = JsonSerializer.Deserialize<ToolErrorResponse>(
             result.StructuredContent!.Value.GetRawText(),
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
         var text = result.Content.OfType<TextContentBlock>().Single().Text;
@@ -30,10 +30,10 @@ public sealed class ActionableFailurePrivacyTests
         {
             Assert.That(result.IsError, Is.True);
             Assert.That(failure, Is.Not.Null);
-            Assert.That(failure!.Code, Is.EqualTo("process_not_found"));
-            Assert.That(failure.Stage, Is.EqualTo("process_discovery"));
+            Assert.That(failure!.Error.Code, Is.EqualTo("process_not_found"));
+            Assert.That(failure.Error.Stage, Is.EqualTo("process_discovery"));
             Assert.That(text, Does.Contain("process_not_found"));
-            Assert.That(text, Does.Contain(failure.Detail));
+            Assert.That(text, Does.Contain(failure.Error.Detail));
             Assert.That(text, Does.Not.Contain(PrivateSentinel));
             Assert.That(result.StructuredContent!.Value.GetRawText(), Does.Not.Contain(PrivateSentinel));
         });
@@ -50,66 +50,43 @@ public sealed class ActionableFailurePrivacyTests
         {
             ["exePath"] = missingExecutable
         });
-        var failure = JsonSerializer.Deserialize<FailureInfo>(
+        var failure = JsonSerializer.Deserialize<ToolErrorResponse>(
             result.StructuredContent!.Value.GetRawText(),
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         Assert.Multiple(() =>
         {
             Assert.That(result.IsError, Is.True);
-            Assert.That(failure!.Code, Is.EqualTo("process_not_found"));
-            Assert.That(failure.Stage, Is.EqualTo("process_discovery"));
-            Assert.That(failure.Retryable, Is.False);
+            Assert.That(failure!.Error.Code, Is.EqualTo("process_not_found"));
+            Assert.That(failure.Error.Stage, Is.EqualTo("process_discovery"));
+            Assert.That(failure.Error.Retryable, Is.False);
             Assert.That(result.Content.OfType<TextContentBlock>().Single().Text, Does.Not.Contain(missingExecutable));
         });
     }
 
     [Test]
-    public async Task Generic_mcp_error_mapping_ignores_raw_messages_around_actionable_failures()
+    public void Unknown_tool_error_mapping_ignores_raw_exception_messages()
     {
         var serverAssemblyPath = Path.ChangeExtension(
             McpServerPaths.FindMcpServerExecutable(),
             ".dll");
         var serverAssembly = Assembly.LoadFrom(serverAssemblyPath);
         var errorBoundary = serverAssembly.GetType(
-            "WpfToolsMcp.McpServer.Tools.McpToolErrors",
+            "WpfToolsMcp.McpServer.Tools.McpToolErrorFilter",
             throwOnError: true)!;
-        var runAsync = errorBoundary
-            .GetMethods(BindingFlags.Public | BindingFlags.Static)
-            .Single(method => method.Name == "RunAsync" && method.IsGenericMethodDefinition)
-            .MakeGenericMethod(typeof(string));
-        var actionable = FailureDiagnostics.Exception(
-            FailureDiagnostics.Codes.InjectionFailed,
-            FailureDiagnostics.Stages.Injection,
-            "The WPF backend could not be initialized in the target process.",
-            retryable: false,
-            recoveryActions: [FailureDiagnostics.Recovery.UseUia],
-            inner: new InvalidOperationException(PrivateSentinel));
-        var wrapped = new InvalidOperationException(
-            "outer failure",
-            new InvalidOperationException(PrivateSentinel, actionable));
-        Func<Task<string>> action = () => Task.FromException<string>(wrapped);
-        var task = (Task<string>)runAsync.Invoke(null, [action, "test_tool"])!;
-
-        Exception? mapped = null;
-        try
-        {
-            await task;
-        }
-        catch (Exception ex)
-        {
-            mapped = ex;
-        }
+        var mapException = errorBoundary.GetMethod(
+            "MapException",
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+        var mapped = (ToolErrorInfo)mapException.Invoke(
+            null,
+            [new InvalidOperationException(PrivateSentinel), null])!;
+        var json = JsonSerializer.Serialize(mapped, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         Assert.Multiple(() =>
         {
-            Assert.That(mapped, Is.Not.Null);
-            Assert.That(
-                mapped!.Message,
-                Is.EqualTo(
-                    "tool=test_tool: injection_failed: " +
-                    "The WPF backend could not be initialized in the target process."));
-            Assert.That(mapped.ToString(), Does.Not.Contain(PrivateSentinel));
+            Assert.That(mapped.Code, Is.EqualTo("tool_failed"));
+            Assert.That(mapped.Detail, Is.EqualTo("The tool operation failed."));
+            Assert.That(json, Does.Not.Contain(PrivateSentinel));
         });
     }
 
@@ -155,6 +132,60 @@ public sealed class ActionableFailurePrivacyTests
         finally
         {
             File.Delete(outputPath);
+        }
+    }
+
+    [Test]
+    public async Task Trace_replaces_non_actionable_errors_without_reading_exception_messages()
+    {
+        using var controller = new AutomationController();
+        var traceStart = await controller.TraceStartAsync(resetIfRunning: false);
+        var outputPath = Path.Combine(
+            Path.GetTempPath(),
+            $"wpf-tools-mcp-private-trace-test-{Guid.NewGuid():N}.json");
+        var hostile = new HostileMessageException();
+
+        try
+        {
+            using (var trace = controller.BeginToolTrace("unknown_failure"))
+            {
+                trace!.SetError(new AggregateException(
+                    new InvalidOperationException(PrivateSentinel),
+                    hostile));
+            }
+
+            var response = await controller.TraceStopAsync(
+                traceStart.TraceId,
+                outputPath,
+                includeEvents: true);
+            var traceError = response.Events!.Single().Error;
+            var artifact = await File.ReadAllTextAsync(outputPath);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(traceError, Is.EqualTo("tool_failed: The tool operation failed."));
+                Assert.That(traceError, Does.Not.Contain(PrivateSentinel));
+                Assert.That(artifact, Does.Not.Contain(PrivateSentinel));
+                Assert.That(hostile.GetterCalls, Is.Zero);
+            });
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
+
+    private sealed class HostileMessageException : Exception
+    {
+        public int GetterCalls { get; private set; }
+
+        public override string Message
+        {
+            get
+            {
+                GetterCalls++;
+                throw new InvalidOperationException("Message getter must not be invoked.");
+            }
         }
     }
 }

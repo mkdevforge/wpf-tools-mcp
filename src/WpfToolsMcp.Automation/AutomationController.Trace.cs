@@ -123,6 +123,8 @@ public sealed partial class AutomationController
 
     public sealed class ToolTraceSpan : IDisposable
     {
+        private const int MaxTraversedExceptions = 16;
+
         private readonly TraceSession _trace;
         private readonly string _tool;
         private readonly DateTime _startedAtUtc;
@@ -150,19 +152,54 @@ public sealed partial class AutomationController
         {
             ArgumentNullException.ThrowIfNull(ex);
 
-            var actionable = ex as ActionableFailureException ??
-                             ex.GetBaseException() as ActionableFailureException;
+            var actionable = FindException<ActionableFailureException>(ex);
             if (actionable is not null)
             {
                 _error = $"{actionable.Failure.Code}: {actionable.Failure.Detail}";
                 return;
             }
 
-            var message = ex.GetBaseException().Message;
-            if (!string.IsNullOrWhiteSpace(message))
+            _error = "tool_failed: The tool operation failed.";
+        }
+
+        private static TException? FindException<TException>(Exception root)
+            where TException : Exception
+        {
+            var pending = new Stack<Exception>();
+            var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+            pending.Push(root);
+
+            while (pending.Count > 0 && visited.Count < MaxTraversedExceptions)
             {
-                _error = message.Trim();
+                var current = pending.Pop();
+                if (!visited.Add(current))
+                {
+                    continue;
+                }
+
+                if (current is TException match)
+                {
+                    return match;
+                }
+
+                if (current is AggregateException aggregate)
+                {
+                    var enqueueCount = Math.Min(
+                        aggregate.InnerExceptions.Count,
+                        MaxTraversedExceptions - visited.Count - pending.Count);
+                    for (var index = enqueueCount - 1; index >= 0; index--)
+                    {
+                        pending.Push(aggregate.InnerExceptions[index]);
+                    }
+                }
+                else if (current.InnerException is not null &&
+                         visited.Count + pending.Count < MaxTraversedExceptions)
+                {
+                    pending.Push(current.InnerException);
+                }
             }
+
+            return null;
         }
 
         public void Dispose()

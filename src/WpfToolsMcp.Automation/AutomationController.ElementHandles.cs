@@ -743,7 +743,7 @@ public sealed partial class AutomationController
                     $"stale_element: process_replaced for '{elementId}'. Call resolve_element again in the successor session.");
             }
 
-            throw new InvalidOperationException($"Unknown elementId '{elementId}'. Call resolve_element again.");
+            throw new InvalidOperationException($"stale_element: Unknown elementId '{elementId}'. Call resolve_element again.");
         }
 
         return handle;

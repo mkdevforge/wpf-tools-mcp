@@ -1303,7 +1303,7 @@ public sealed class SessionManager : IDisposable
                 "Use the successorSessionId and reacquire window handles and element IDs; all identities from the retired session are stale.");
         }
 
-        throw new InvalidOperationException($"Unknown sessionId '{sessionId}'.");
+        throw new InvalidOperationException($"stale_session: Unknown sessionId '{sessionId}'.");
     }
 
     private static SessionInfo ToSessionInfo(
