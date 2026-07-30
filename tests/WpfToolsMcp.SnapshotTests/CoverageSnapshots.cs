@@ -77,13 +77,17 @@ public sealed class CoverageSnapshots
             ["maxFindings"] = 50
         });
 
-        Assert.That(result.Findings.Any(f => f.IssueCode == "no_automation_peer"), Is.True);
+        var noPeerFindings = result.Findings
+            .Where(f => f.IssueCode == "no_automation_peer" && f.Element.Type == "NoPeerControl")
+            .ToArray();
+
+        Assert.That(noPeerFindings, Has.Length.EqualTo(1));
 
         var stable = new
         {
             result.Summary.Truncated,
             result.Summary.TruncatedReason,
-            Findings = result.Findings
+            Findings = noPeerFindings
                 .Select(f => new
                 {
                     f.IssueCode,
@@ -99,6 +103,50 @@ public sealed class CoverageSnapshots
                 .OrderBy(f => f.IssueCode, StringComparer.Ordinal)
                 .ThenBy(f => f.Element.Type, StringComparer.Ordinal)
                 .ToArray()
+        };
+
+        await Verifier.Verify(stable);
+    }
+
+    [Test]
+    public async Task UiaCoverageReport_automation_id_does_not_satisfy_accessible_name_snapshot()
+    {
+        var result = await _mcp.CallToolAsync<GetUiaCoverageReportResponse>("uia_coverage_report", new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["interactiveOnly"] = true,
+            ["maxNodes"] = 3000,
+            ["maxFindings"] = 50
+        });
+
+        var fixtureFindings = result.Findings
+            .Where(f => f.IssueCode == "missing_accessible_name")
+            .Where(f => f.Element.AutomationId?.StartsWith("Accessibility_", StringComparison.Ordinal) == true)
+            .OrderBy(f => f.Element.AutomationId, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(fixtureFindings, Has.Length.EqualTo(1));
+            Assert.That(fixtureFindings[0].Element.AutomationId, Is.EqualTo("Accessibility_AutomationIdOnly"));
+        });
+
+        var stable = new
+        {
+            result.Summary.Truncated,
+            result.Summary.TruncatedReason,
+            Findings = fixtureFindings.Select(f => new
+            {
+                f.IssueCode,
+                f.Severity,
+                Element = new
+                {
+                    f.Element.Type,
+                    f.Element.AutomationId,
+                    f.Element.Name
+                },
+                f.Details
+            }).ToArray()
         };
 
         await Verifier.Verify(stable);

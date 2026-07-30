@@ -3874,7 +3874,6 @@ internal static partial class WpfVisualTreeInspector
         }
 
         var hasAutomationPropertiesName = !string.IsNullOrWhiteSpace(automationName);
-        var hasAutomationId = !string.IsNullOrWhiteSpace(elementRef.AutomationId);
 
         if (isInteractive && !HasAnyActionablePattern(peer))
         {
@@ -3902,28 +3901,63 @@ internal static partial class WpfVisualTreeInspector
                 ]));
         }
 
-        if (isInteractive && !hasPeerName && !hasAutomationPropertiesName && !hasAutomationId)
+        var accessibleNameFinding = CreateMissingAccessibleNameFinding(
+            elementRef,
+            isInteractive,
+            isInteractive &&
+            !hasPeerName &&
+            !hasAutomationPropertiesName &&
+            IsLikelyInteractiveCoverageElement(element, peer),
+            hasPeerName ? peerName : null,
+            hasAutomationPropertiesName ? automationName : null);
+        if (accessibleNameFinding is not null)
         {
-            var severity = IsLikelyInteractiveCoverageElement(element, peer) ? "warning" : "info";
-            findings.Add(new UiaCoverageFinding(
-                IssueCode: "missing_accessible_name",
-                Severity: severity,
-                Element: elementRef,
-                Details:
-                [
-                    "Element has no accessible name (UIA Name / AutomationProperties.Name) and no AutomationId.",
-                    "peer_name_empty",
-                    "automation_properties_name_empty",
-                    "automation_id_empty"
-                ],
-                Suggestions:
-                [
-                    "Set AutomationProperties.Name to an accessible, user-facing label.",
-                    "Optionally set AutomationProperties.AutomationId to a stable identifier for automation."
-                ]));
+            findings.Add(accessibleNameFinding);
         }
 
         return findings;
+    }
+
+    internal static UiaCoverageFinding? CreateMissingAccessibleNameFinding(
+        ElementRef element,
+        bool isInteractive,
+        bool isLikelyInteractive,
+        string? peerName,
+        string? automationPropertiesName)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        if (!isInteractive ||
+            !string.IsNullOrWhiteSpace(peerName) ||
+            !string.IsNullOrWhiteSpace(automationPropertiesName))
+        {
+            return null;
+        }
+
+        var hasAutomationId = !string.IsNullOrWhiteSpace(element.AutomationId);
+        var automationIdState = hasAutomationId ? "automation_id_present" : "automation_id_empty";
+        IReadOnlyList<string> suggestions = hasAutomationId
+            ?
+            [
+                "Set AutomationProperties.Name to an accessible, user-facing label.",
+                "Keep AutomationProperties.AutomationId as a stable automation identifier; it does not provide an accessible name."
+            ]
+            :
+            [
+                "Set AutomationProperties.Name to an accessible, user-facing label.",
+                "Optionally set AutomationProperties.AutomationId to a stable identifier for automation."
+            ];
+        return new UiaCoverageFinding(
+            IssueCode: "missing_accessible_name",
+            Severity: isLikelyInteractive ? "warning" : "info",
+            Element: element,
+            Details:
+            [
+                "Element has no accessible name (UIA Name / AutomationProperties.Name).",
+                "peer_name_empty",
+                "automation_properties_name_empty",
+                automationIdState
+            ],
+            Suggestions: suggestions);
     }
 
     private static bool IsLikelyInteractiveCoverageElement(DependencyObject element, AutomationPeer peer)

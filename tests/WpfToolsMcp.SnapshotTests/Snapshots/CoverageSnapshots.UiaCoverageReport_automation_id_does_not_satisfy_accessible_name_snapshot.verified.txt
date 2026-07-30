@@ -1,0 +1,19 @@
+{
+  Truncated: false,
+  Findings: [
+    {
+      IssueCode: missing_accessible_name,
+      Severity: warning,
+      Element: {
+        Type: Button,
+        AutomationId: Accessibility_AutomationIdOnly
+      },
+      Details: [
+        Element has no accessible name (UIA Name / AutomationProperties.Name).,
+        peer_name_empty,
+        automation_properties_name_empty,
+        automation_id_present
+      ]
+    }
+  ]
+}

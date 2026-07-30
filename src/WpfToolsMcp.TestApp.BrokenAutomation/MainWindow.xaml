@@ -37,10 +37,22 @@
                                  Height="160"
                                  Margin="0,0,0,12" />
 
+            <Button AutomationProperties.AutomationId="Accessibility_AutomationIdOnly"
+                    Width="160"
+                    Height="32"
+                    HorizontalAlignment="Left"
+                    Margin="0,0,0,12" />
+
+            <Button AutomationProperties.AutomationId="Accessibility_ExplicitName"
+                    AutomationProperties.Name="Explicitly named accessibility control"
+                    Content="Named Button"
+                    Width="160"
+                    HorizontalAlignment="Left"
+                    Margin="0,0,0,12" />
+
             <Button Content="Normal Button"
                     Width="160"
                     HorizontalAlignment="Left" />
         </StackPanel>
     </Grid>
 </Window>
-
