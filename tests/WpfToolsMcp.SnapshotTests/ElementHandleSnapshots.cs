@@ -575,26 +575,25 @@ public sealed class ElementHandleSnapshots
                 }
             }
 
-            string? mappingError = null;
-            try
-            {
-                _ = await _mcp.CallToolAsync<GetUiaLocatorsResponse>("get_uia_locators", new Dictionary<string, object?>
+            var mappingResult = await _mcp.CallToolResultAsync(
+                "get_uia_locators",
+                new Dictionary<string, object?>
                 {
                     ["sessionId"] = _sessionId,
                     ["elementId"] = resolved.Element.ElementId
                 });
-            }
-            catch (InvalidOperationException ex)
-            {
-                mappingError = ex.Message;
-            }
+            var mappingErrorCode = mappingResult.StructuredContent is { } structuredContent
+                ? structuredContent.GetProperty("error").GetProperty("code").GetString()
+                : null;
 
             Assert.Multiple(() =>
             {
                 Assert.That(error, Does.Contain("stale_element"));
                 Assert.That(error, Does.Not.Contain("Last agent error"));
                 Assert.That(error, Does.Not.Contain("wpf_resolve:not_found"));
-                Assert.That(mappingError, Does.StartWith("stale_element:"));
+                Assert.That(mappingResult.IsError, Is.True);
+                Assert.That(mappingResult.StructuredContent, Is.Not.Null);
+                Assert.That(mappingErrorCode, Is.EqualTo("stale_element"));
             });
 
             await Verifier.Verify(new
