@@ -52,8 +52,8 @@ agent workflows:
 
 | Profile | Tools | Purpose |
 |---|---:|---|
-| `core` (default) | 31 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 54 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `core` (default) | 32 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
+| `diagnostics` | 55 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Every advertised tool includes an MCP `outputSchema`. Successful calls return
 their typed result as an object in `structuredContent` and also retain the same
@@ -94,7 +94,8 @@ The `core` profile exposes:
   `send_keys`, `set_value`, `select_item`, `scroll_to_element`, `drag`,
   `wait_for`.
 - **WPF diagnostics:** `get_binding_info`, `get_binding_errors`,
-  `get_data_context`, `get_computed_properties`, `get_layout_context`.
+  `get_validation_errors`, `get_data_context`, `get_computed_properties`,
+  `get_layout_context`.
 
 The `diagnostics` profile additionally exposes:
 
@@ -109,6 +110,16 @@ The `diagnostics` profile additionally exposes:
 
 Its expanded `take_screenshot` schema also exposes capture controls and the
 opt-in screenshot-correlation workflow described below.
+
+`get_validation_errors` is a bounded, read-only snapshot of the current
+`Validation.Errors` attached state in one WPF visual-tree scope. It does not
+subscribe, retain history, move focus, send input, or invoke
+`IDataErrorInfo`/`INotifyDataErrorInfo` directly. The response reports the
+observed validation rule, active binding metadata, safely formatted scalar
+error content, bounded exception type/message, and whether a validation
+adorner was active, not observed, or unavailable. Source classification marks
+public WPF rule evidence as exact and the internal conversion-rule name match
+as best effort.
 
 ### Backend Status and Failures
 
@@ -698,6 +709,7 @@ complete controls live in the `diagnostics` profile when exposing them in
 | `find_elements` | At most 25 matches while scanning at most 5,000 nodes; minimal fields | Set `maxResults` or `returnFields`; `diagnostics` also exposes backend, root, scan limit, and ID controls | `ReturnedMatches`, `DiscoveredMatches`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_element_properties` | Summary preset, at most 25 selected UIA properties; values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, with one shared 20,000-character serialized-value budget. XPaths over 2,000 characters are omitted rather than returned incomplete. | Select the `full` preset and an explicit `maxProperties` in `diagnostics` | `ReturnedProperties`, `SelectedProperties`, `ScannedProperties`, `Truncated`, `TruncatedReason`, `TruncatedReasons` |
 | `get_binding_errors` | Depth 6, at most 200 errors while scanning at most 2,000 nodes | Set the error, depth, and scan limits in `diagnostics` | `ScannedNodes`, `Truncated`, `TruncatedReason` |
+| `get_validation_errors` | Current state at depth 6; at most 100 errors while scanning 2,000 nodes; safe scalar content is capped at 500 characters; hidden visual-tree elements are included | In `diagnostics`, set `visibleOnly`, `depth`, `maxErrors`, `maxNodes`, and `maxValueLength`. Hard caps are depth 100, 1,000 returned errors, 200,000 scanned nodes, and 2,000 characters per value | `ReturnedErrors`, `DiscoveredErrors`, `ScannedNodes`, `ScanComplete`, `TruncatedReasons`; response root XPath is capped at 2,000 characters, binding metadata is bounded with a per-error `Truncated` flag, and warnings report returned/discovered counts with a fixed 20-entry cap |
 | `get_data_context` | Summary mode, depth 2, at most 50 properties per object and 2,000 characters per string | Use the additional mode and size controls in `diagnostics` | `Truncated` and bounded warnings |
 | `get_computed_properties` | Legacy compact fields; structured provenance is off | In `diagnostics`, set `includeProvenance=true`; at most 100 properties and 20 provenance scan units/candidates by default, with a hard nested limit of 50 | Outer `TruncatedReason`; nested returned/discovered counts, scan counts, `ScanComplete`, `Truncated`, and stable evidence reasons |
 | `get_layout_context` | 6 nearest ancestors, 8 relevant siblings, 32 Grid definitions, and up to 128 unavailable-evidence records | Set `maxAncestors`, `maxSiblings`, or `maxGridDefinitions` in `diagnostics`; unavailable evidence keeps its fixed 128-record cap | Discovered/returned counts for ancestors, siblings, Grid contexts, definitions, and unavailable evidence; ordered `TruncatedReasons` including `maxUnavailableEvidence` |

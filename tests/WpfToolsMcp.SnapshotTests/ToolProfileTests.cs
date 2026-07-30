@@ -30,6 +30,7 @@ public sealed class ToolProfileTests
         "get_layout_context",
         "get_uia_locators",
         "get_uia_tree",
+        "get_validation_errors",
         "get_visual_tree",
         "invoke",
         "launch_app",
@@ -220,6 +221,8 @@ public sealed class ToolProfileTests
             new[] { "elementId", "locator", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_binding_errors"]), Is.EqualTo(
             new[] { "depth", "rootXPath", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["get_validation_errors"]), Is.EqualTo(
+            new[] { "depth", "rootXPath", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_data_context"]), Is.EqualTo(
             new[] { "elementId", "locator", "maxDepth", "properties", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_computed_properties"]), Is.EqualTo(
@@ -259,6 +262,7 @@ public sealed class ToolProfileTests
                      "get_uia_tree",
                      "get_element_properties",
                      "get_binding_errors",
+                     "get_validation_errors",
                      "get_data_context",
                      "get_computed_properties",
                      "get_layout_context",
@@ -829,6 +833,18 @@ public sealed class ToolProfileTests
         Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Does.Contain("maxGridDefinitions"));
         Assert.That(GetInputPropertyNames(tools["trace_stop"]), Does.Contain("includeEvents"));
         Assert.That(GetInputPropertyNames(tools["trace_stop"]), Does.Contain("maxEvents"));
+        Assert.That(GetInputPropertyNames(tools["get_validation_errors"]), Is.EqualTo(
+            new[]
+            {
+                "depth",
+                "maxErrors",
+                "maxNodes",
+                "maxValueLength",
+                "rootXPath",
+                "sessionId",
+                "visibleOnly",
+                "windowHandle"
+            }));
     }
 
     [Test]

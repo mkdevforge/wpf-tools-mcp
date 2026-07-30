@@ -68,6 +68,34 @@ public static class AgentTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "get_validation_errors", UseStructuredContent = true), Description("Inspect the current WPF Validation.Errors state in a visual-tree scope via the injected agent.")]
+    public static Task<GetValidationErrorsResponse> GetValidationErrors(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Native window handle")] long? windowHandle = null,
+        [Description("Optional WPF XPath root for subtree")] string? rootXPath = null,
+        [Description("Maximum depth (1 = root only)")] int depth = 6,
+        [Description("Only inspect visible elements")] bool visibleOnly = false,
+        [Description("Maximum validation errors returned")] int maxErrors = 100,
+        [Description("Maximum nodes scanned")] int maxNodes = 2000,
+        [Description("Maximum characters returned for safe scalar error content")] int maxValueLength = 500,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.GetValidationErrorsAsync(
+                    effectiveWindowHandle,
+                    rootXPath,
+                    depth,
+                    visibleOnly,
+                    maxErrors,
+                    maxNodes,
+                    maxValueLength,
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "uia_coverage_report", UseStructuredContent = true), Description("Report UIA automation coverage gaps for WPF visual elements via the injected agent. Requires inject_agent.")]
     public static Task<GetUiaCoverageReportResponse> GetUiaCoverageReport(
         SessionManager sessions,

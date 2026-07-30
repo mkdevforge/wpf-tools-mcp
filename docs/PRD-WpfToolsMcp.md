@@ -110,7 +110,7 @@ The MCP server manages both channels in Phase 2. Backend-neutral inspection tool
 ## MCP Tools
 
 The tables below describe the full `diagnostics` profile. The default `core`
-profile intentionally exposes a smaller 31-tool surface with compact schemas;
+profile intentionally exposes a smaller 32-tool surface with compact schemas;
 see `README.md` for the current profile split and configuration.
 
 ### Phase 1 — Inspection (FlaUI / UIA)
@@ -385,6 +385,7 @@ stack traces.
 | `release_element` | Explicitly release a reusable element handle | Release result |
 | `get_binding_info` | Inspect bindings on an element | For each binding: path, source, mode, converter, current value, status (Active/Error/Detached), and error message if broken |
 | `get_binding_errors` | List broken or non-active bindings in the current visual tree | Binding path, target element/property, binding status, and available validation error details |
+| `get_validation_errors` | Read the current `Validation.Errors` attached state in a bounded visual-tree scope without invoking validators | Deterministic element/error order; exact, best-effort, or unavailable source evidence; bounded binding, content, exception, and adorner evidence; returned/discovered/scan counts and ordered truncation reasons |
 | `subscribe_binding_errors` | Subscribe to binding errors (poll-based) | Subscription ID |
 | `subscribe_property_changes` | Observe an allowlist of dependency properties and dotted DataContext paths on one WPF element using target-side change notifications | Subscription ID, effective bounds, selected watches, and start/expiry metadata |
 | `poll_subscription` | Poll bounded subscription events and delivery-loss metadata | Ordered event batch; dropped, coalesced, and truncated counts; completion state |
@@ -632,6 +633,11 @@ The MCP tool surface is extended — new tools are added and existing inspection
   exact/best-effort/unavailable evidence)
 - New tool: `get_binding_info` — per-element binding details (path, source, mode, converter, status, error)
 - New tool: `get_binding_errors` — broken and non-active bindings across the tree
+- New tool: `get_validation_errors` — capability-gated, read-only current WPF
+  validation state. Core fixes depth/error/node/value budgets at 6/100/2,000/500;
+  diagnostics exposes those controls plus `visibleOnly`, with hard caps of
+  100/1,000/200,000/2,000. The tool does not subscribe, focus, send input, or
+  call `IDataErrorInfo`/`INotifyDataErrorInfo` directly.
 - Snapshot tests for all upgraded/new inspection tools
 
 #### P2-M2 — Deep diagnostics

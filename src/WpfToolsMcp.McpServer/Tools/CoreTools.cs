@@ -396,6 +396,30 @@ public static class CoreInspectionTools
 
 public static class CoreWpfDiagnosticsTools
 {
+    [McpServerTool(Name = "get_validation_errors", UseStructuredContent = true), Description("Inspect the current WPF Validation.Errors state in a bounded visual-tree scope.")]
+    public static Task<GetValidationErrorsResponse> GetValidationErrors(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Optional WPF XPath root")] string? rootXPath = null,
+        [Description("Maximum depth")] int depth = 6,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.GetValidationErrorsAsync(
+                    effectiveWindowHandle,
+                    rootXPath,
+                    depth,
+                    visibleOnly: false,
+                    maxErrors: 100,
+                    maxNodes: 2000,
+                    maxValueLength: 500,
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "get_binding_errors", UseStructuredContent = true), Description("List WPF binding errors in the visual tree.")]
     public static Task<GetBindingErrorsResponse> GetBindingErrors(
         SessionManager sessions,

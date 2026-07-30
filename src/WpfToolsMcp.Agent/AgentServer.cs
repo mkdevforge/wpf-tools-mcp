@@ -401,6 +401,21 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case AgentProtocolCapabilities.GetValidationErrors:
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetValidationErrorsRequest>(JsonOptions)
+                            ?? new GetValidationErrorsRequest();
+
+                        var response = WpfVisualTreeInspector.GetValidationErrors(
+                            ownerId,
+                            typedRequest,
+                            cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
                 case "wpf/uia_coverage_report":
                     return await RunOnUiAsync(() =>
                     {

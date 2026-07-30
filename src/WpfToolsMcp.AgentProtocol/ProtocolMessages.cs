@@ -25,6 +25,7 @@ public static class AgentProtocolCapabilities
     public const string SetValueTextModes = "wpf/set_value:text-modes-v1";
     public const string FocusElement = "wpf/focus_element:v1";
     public const string ObserveState = "wpf/observe_state:v1";
+    public const string GetValidationErrors = "wpf/get_validation_errors:v1";
 
     public static IReadOnlyList<string> Current { get; } = Array.AsReadOnly<string>(
     [
@@ -36,6 +37,7 @@ public static class AgentProtocolCapabilities
         CorrelateScreenshotRegion,
         SetValueTextModes,
         FocusElement,
-        ObserveState
+        ObserveState,
+        GetValidationErrors
     ]);
 }

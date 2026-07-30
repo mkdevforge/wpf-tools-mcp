@@ -3262,32 +3262,14 @@ internal static partial class WpfVisualTreeInspector
             {
                 if (ReferenceEquals(error.BindingInError, expression))
                 {
-                    if (error.ErrorContent is not null)
-                    {
-                        return error.ErrorContent.ToString();
-                    }
-
-                    if (error.Exception is not null)
-                    {
-                        return error.Exception.Message;
-                    }
-
-                    return "Validation error";
+                    return FormatValidationErrorMessage(error, maxValueLength: 2000);
                 }
             }
 
             if (expression.HasError)
             {
                 var first = errors[0];
-                if (first.ErrorContent is not null)
-                {
-                    return first.ErrorContent.ToString();
-                }
-
-                if (first.Exception is not null)
-                {
-                    return first.Exception.Message;
-                }
+                return FormatValidationErrorMessage(first, maxValueLength: 2000);
             }
         }
         catch

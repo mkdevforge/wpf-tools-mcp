@@ -831,6 +831,51 @@ public sealed partial class AutomationController
         }
     }
 
+    public async Task<GetValidationErrorsResponse> GetValidationErrorsAsync(
+        long? windowHandle = null,
+        string? rootXPath = null,
+        int depth = 6,
+        bool visibleOnly = false,
+        int maxErrors = 100,
+        int maxNodes = 2000,
+        int maxValueLength = 500,
+        CancellationToken cancellationToken = default)
+    {
+        var trace = BeginTraceSpan("get_validation_errors");
+        try
+        {
+            var client = await EnsureAgentConnectedAsync(cancellationToken);
+            var request = new GetValidationErrorsRequest(
+                WindowHandle: windowHandle,
+                RootXPath: rootXPath,
+                Depth: depth,
+                VisibleOnly: visibleOnly,
+                MaxErrors: maxErrors,
+                MaxNodes: maxNodes,
+                MaxValueLength: maxValueLength);
+
+            var response = await CallGetValidationErrorsWhenSupportedAsync(
+                GetAgentCapabilities(client),
+                () => client.CallAsync<GetValidationErrorsResponse>(
+                    AgentProtocolCapabilities.GetValidationErrors,
+                    request,
+                    cancellationToken));
+            trace?.SetSummary(
+                $"errors={response.ReturnedErrors}/{response.DiscoveredErrors} " +
+                $"nodes={response.ScannedNodes} complete={response.ScanComplete} truncated={response.Truncated}");
+            return response;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
+    }
+
     public async Task<GetUiaCoverageReportResponse> GetUiaCoverageReportAsync(
         long? windowHandle = null,
         string? rootXPath = null,
@@ -1504,6 +1549,24 @@ public sealed partial class AutomationController
         new(
             "agent_capability_unavailable: get_computed_properties with includeProvenance=true requires the current WPF agent. " +
             "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
+
+    internal static InvalidOperationException CreateGetValidationErrorsCapabilityException() =>
+        new(
+            "agent_capability_unavailable: get_validation_errors requires the current WPF agent. " +
+            "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
+
+    internal static Task<T> CallGetValidationErrorsWhenSupportedAsync<T>(
+        AgentCapabilitiesResponse? capabilities,
+        Func<Task<T>> call)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+        return capabilities is not null &&
+               capabilities.Capabilities.Contains(
+                   AgentProtocolCapabilities.GetValidationErrors,
+                   StringComparer.Ordinal)
+            ? call()
+            : Task.FromException<T>(CreateGetValidationErrorsCapabilityException());
+    }
 
     internal static InvalidOperationException CreateObserveStateCapabilityException() =>
         new(

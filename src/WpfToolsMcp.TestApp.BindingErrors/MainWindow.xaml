@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:WpfToolsMcp.TestApp.BindingErrors"
         mc:Ignorable="d"
         Title="WPF Tools MCP BindingErrors TestApp"
         Width="900"
@@ -27,7 +28,8 @@
                    FontWeight="SemiBold"
                    Margin="0,0,0,16" />
 
-        <StackPanel Grid.Row="1" Width="520">
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <StackPanel Width="620">
             <TextBlock Text="The TextBlock below intentionally binds to a missing property to trigger BindingStatus.PathError."
                        Foreground="Gray"
                        Margin="0,0,0,12" />
@@ -45,7 +47,56 @@
                      Width="260"
                      Text="{Binding OkText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                      Margin="0,0,0,12" />
+
+            <Separator Margin="0,4,0,12" />
+
+            <TextBlock Text="Current WPF validation state fixtures"
+                       FontSize="18"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,8" />
+
+            <TextBox x:Name="RuleTextBox"
+                     AutomationProperties.AutomationId="BindingErrors_ValidationRule"
+                     Margin="0,0,0,8">
+                <TextBox.Text>
+                    <Binding Path="RuleText" Mode="TwoWay" UpdateSourceTrigger="Explicit">
+                        <Binding.ValidationRules>
+                            <local:NonEmptyValidationRule />
+                        </Binding.ValidationRules>
+                    </Binding>
+                </TextBox.Text>
+            </TextBox>
+
+            <TextBox x:Name="ConversionTextBox"
+                     AutomationProperties.AutomationId="BindingErrors_Conversion"
+                     Text="{Binding IntegerValue, Mode=TwoWay, UpdateSourceTrigger=Explicit}"
+                     Margin="0,0,0,8" />
+
+            <TextBox x:Name="ExceptionTextBox"
+                     AutomationProperties.AutomationId="BindingErrors_Exception"
+                     Text="{Binding ThrowingText, Mode=TwoWay, UpdateSourceTrigger=Explicit, ValidatesOnExceptions=True}"
+                     Margin="0,0,0,8" />
+
+            <TextBox x:Name="DataErrorTextBox"
+                     AutomationProperties.AutomationId="BindingErrors_DataError"
+                     Text="{Binding DataErrorText, Mode=TwoWay, UpdateSourceTrigger=Explicit, ValidatesOnDataErrors=True}"
+                     Margin="0,0,0,8" />
+
+            <TextBox x:Name="NotifyErrorTextBox"
+                     AutomationProperties.AutomationId="BindingErrors_NotifyDataError"
+                     Text="{Binding NotifyErrorText, Mode=TwoWay, UpdateSourceTrigger=Explicit, ValidatesOnNotifyDataErrors=True}"
+                     Margin="0,0,0,12" />
+
+            <StackPanel Orientation="Horizontal">
+                <Button AutomationProperties.AutomationId="BindingErrors_ApplyValidation"
+                        Content="Apply validation errors"
+                        Click="ApplyValidationErrors"
+                        Margin="0,0,8,0" />
+                <Button AutomationProperties.AutomationId="BindingErrors_ClearValidation"
+                        Content="Clear validation errors"
+                        Click="ClearValidationErrors" />
+            </StackPanel>
         </StackPanel>
+        </ScrollViewer>
     </Grid>
 </Window>
-

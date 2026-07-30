@@ -1316,6 +1316,101 @@ public sealed record GetBindingErrorsResponse(
     bool Truncated,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
 
+public sealed record GetValidationErrorsRequest(
+    long? WindowHandle = null,
+    string? RootXPath = null,
+    int Depth = 6,
+    bool VisibleOnly = false,
+    int MaxErrors = 100,
+    int MaxNodes = 2000,
+    int MaxValueLength = 500);
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ValidationSourceKind
+{
+    ValidationRule,
+    Conversion,
+    Exception,
+    DataError,
+    NotifyDataError,
+    Unknown
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ValidationBindingKind
+{
+    Binding,
+    MultiBinding,
+    PriorityBinding,
+    BindingGroup,
+    Unknown
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ValidationAdornerState
+{
+    Active,
+    NotObserved,
+    Unavailable
+}
+
+public sealed record ValidationSourceInfo(
+    ValidationSourceKind Kind,
+    ProvenanceEvidence Evidence,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RuleType = null);
+
+public sealed record ValidationBindingInfo(
+    ValidationBindingKind Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TargetProperty = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Path = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Status = null,
+    bool Truncated = false);
+
+public sealed record ValidationErrorContentInfo(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Type,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Value,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UnavailableReason = null);
+
+public sealed record ValidationExceptionInfo(
+    string Type,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Message,
+    bool MessageTruncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MessageUnavailableReason = null);
+
+public sealed record ValidationVisualInfo(
+    bool HasError,
+    bool ErrorTemplateConfigured,
+    ValidationAdornerState AdornerState,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AdornerReason = null);
+
+public sealed record WpfValidationErrorInfo(
+    ElementRef Element,
+    int ErrorIndex,
+    ValidationSourceInfo Source,
+    ValidationBindingInfo Binding,
+    ValidationErrorContentInfo Content,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ValidationExceptionInfo? Exception,
+    ValidationVisualInfo Visual);
+
+public sealed record GetValidationErrorsResponse(
+    InspectionBackend BackendUsed,
+    long WindowHandleUsed,
+    string RootXPath,
+    bool RootXPathTruncated,
+    int DepthUsed,
+    IReadOnlyList<WpfValidationErrorInfo> Errors,
+    int ReturnedErrors,
+    int DiscoveredErrors,
+    int ScannedNodes,
+    bool ScanComplete,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? TruncatedReasons = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null,
+    int ReturnedWarnings = 0,
+    int DiscoveredWarnings = 0,
+    bool WarningsTruncated = false);
+
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SubscriptionKind
 {
