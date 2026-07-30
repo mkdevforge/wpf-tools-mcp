@@ -234,7 +234,7 @@ public sealed class UiaLocatorSnapshots
                 ["includeOffViewport"] = true
             });
 
-            await Verifier.Verify(result);
+            await Verifier.Verify(result with { WindowHandleUsed = 0 });
         }
         finally
         {
@@ -358,6 +358,7 @@ public sealed class UiaLocatorSnapshots
     private static GetUiaLocatorsResponse Scrub(GetUiaLocatorsResponse response) =>
         response with
         {
+            WindowHandleUsed = 0,
             Wpf = response.Wpf is null
                 ? null
                 : response.Wpf with

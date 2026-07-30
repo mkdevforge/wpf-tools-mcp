@@ -498,7 +498,7 @@ public sealed class ElementHandleSnapshots
                     WindowHandleUsed = 0,
                     Element = ScrubResolvedElementRefForSnapshot(resolved.Element)
                 },
-                Path = path
+                Path = path with { WindowHandleUsed = 0 }
             });
         }
         finally

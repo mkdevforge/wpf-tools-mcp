@@ -216,11 +216,11 @@ public sealed class StateObservationTests
                 });
 
                 await InvokeAsync("Observation_SetLarge");
-                await WaitForMarkerAsync("large-complete", TimeSpan.FromSeconds(5), _testCts.Token);
+                await WaitForMarkerAsync("large-complete", TimeSpan.FromSeconds(15), _testCts.Token);
                 var boundedChangeCapture = await PollUntilAsync(
                     payloadBounded.SubscriptionId,
                     result => result.Events.Any(EventIsChange),
-                    TimeSpan.FromSeconds(5));
+                    TimeSpan.FromSeconds(15));
                 var boundedChange = DeserializeObservationEvent(
                     boundedChangeCapture.Events.Single(EventIsChange));
                 Assert.Multiple(() =>

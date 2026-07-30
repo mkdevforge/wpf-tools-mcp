@@ -164,6 +164,11 @@ public sealed class AutoBackendRoutingTests
                 Is.True);
             Assert.That(
                 AutomationController.ShouldFallbackFromAutoWpfResolveFailure(
+                    new TimeoutException(),
+                    agentConnectionHealthy: true),
+                Is.True);
+            Assert.That(
+                AutomationController.ShouldFallbackFromAutoWpfResolveFailure(
                     locatorMiss,
                     agentConnectionHealthy: true),
                 Is.False);

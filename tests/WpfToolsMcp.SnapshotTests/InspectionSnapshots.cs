@@ -68,7 +68,7 @@ public sealed class InspectionSnapshots
             ["maxNodes"] = 200
         });
 
-        await Verifier.Verify(result);
+        await Verifier.Verify(result with { WindowHandleUsed = 0 });
     }
 
     [Test]

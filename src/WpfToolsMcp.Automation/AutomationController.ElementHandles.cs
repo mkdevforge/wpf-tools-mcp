@@ -556,6 +556,10 @@ public sealed partial class AutomationController
         {
             return null;
         }
+        catch (Exception ex) when (ShouldFallbackFromAutoWpfResolveFailure(ex, IsAgentConnected))
+        {
+            return null;
+        }
 
         var elementId = _elementHandles.RegisterWpf(
             windowHandle,
@@ -599,9 +603,9 @@ public sealed partial class AutomationController
             return false;
         }
 
-        return exception is AgentRemoteException or System.Text.Json.JsonException ||
+        return exception is AgentRemoteException or System.Text.Json.JsonException or TimeoutException ||
                (!agentConnectionHealthy &&
-                exception is TimeoutException or IOException or InvalidOperationException);
+                exception is IOException or InvalidOperationException);
     }
 
     internal static ElementResolutionAmbiguityException CreateLegacyWpfAmbiguityException(
