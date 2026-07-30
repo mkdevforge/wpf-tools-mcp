@@ -234,7 +234,8 @@ public sealed class MinimalInteractionSnapshots
                 Assert.That(result.LastObservedValue?.Value?.GetValue<string>(), Is.EqualTo("Clicks: 0"));
             });
 
-            var defaultTimeout = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            InvalidOperationException? defaultTimeout = null;
+            try
             {
                 _ = await _mcp.CallToolAsync<WaitForResponse>("wait_for", new Dictionary<string, object?>
                 {
@@ -247,7 +248,13 @@ public sealed class MinimalInteractionSnapshots
                     ["expectedText"] = "Clicks: 999",
                     ["timeoutMs"] = 0
                 });
-            });
+                Assert.Fail("Expected the default timeout to throw.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                defaultTimeout = ex;
+            }
+
             Assert.That(defaultTimeout!.Message, Does.Contain("timeout"));
 
             await Verifier.Verify(ToStableStructuredWait(result));
