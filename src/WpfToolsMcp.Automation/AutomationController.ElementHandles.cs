@@ -40,6 +40,7 @@ public sealed partial class AutomationController
 
             var effectiveBackend = backend;
             AutoBackendRoute? autoRoute = null;
+            BackendFallbackInfo? fallback = null;
             if (backend == InspectionBackend.Auto)
             {
                 var application = EnsureAttached();
@@ -50,6 +51,7 @@ public sealed partial class AutomationController
 
                 autoRoute = GetAutoBackendRoute(window);
                 var wpfBackendAvailable = false;
+                var attemptSequence = GetAutoAgentAttemptSequence();
                 if (autoRoute != AutoBackendRoute.Uia)
                 {
                     wpfBackendAvailable = autoInject
@@ -58,6 +60,16 @@ public sealed partial class AutomationController
                 }
 
                 effectiveBackend = SelectAutoBackend(autoRoute.Value, wpfBackendAvailable);
+                if (effectiveBackend == InspectionBackend.Uia)
+                {
+                    var attempted = autoRoute != AutoBackendRoute.Uia &&
+                                    autoInject &&
+                                    GetAutoAgentAttemptSequence() != attemptSequence;
+                    var failure = autoRoute == AutoBackendRoute.Uia
+                        ? null
+                        : GetWpfBackendFailure();
+                    fallback = CreateWpfToUiaFallback(attempted, failure);
+                }
             }
 
             ResolveElementResponse response;
@@ -72,7 +84,22 @@ public sealed partial class AutomationController
                  autoRoute == AutoBackendRoute.ProbeWpfThenUia && IsAutoWpfLocatorMiss(ex)))
             {
                 response = await ResolveElementWithBackendAsync(InspectionBackend.Uia).ConfigureAwait(false);
+                fallback = CreateWpfToUiaFallback(
+                    attempted: true,
+                    failure: ClassifyAutoWpfFallbackFailure(ex));
             }
+            catch (Exception ex) when (
+                backend == InspectionBackend.Auto &&
+                effectiveBackend == InspectionBackend.Wpf &&
+                ShouldFallbackFromAutoWpfResolveFailure(ex, IsAgentConnected))
+            {
+                response = await ResolveElementWithBackendAsync(InspectionBackend.Uia).ConfigureAwait(false);
+                fallback = CreateWpfToUiaFallback(
+                    attempted: true,
+                    failure: ClassifyAutoWpfFallbackFailure(ex));
+            }
+
+            response = response with { Fallback = fallback };
 
             trace?.SetSummary($"{response.BackendUsed} {response.Element.Type} {response.Element.XPath}");
             return response;
@@ -419,7 +446,7 @@ public sealed partial class AutomationController
         return await client.CallAsync<ElementRef>("wpf/resolve_element", request, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<ElementRef> ResolveWpfElementRefDetailedAsync(
+    internal async Task<ElementRef> ResolveWpfElementRefDetailedAsync(
         ElementLocator locator,
         long windowHandle,
         bool visibleOnly,
@@ -442,10 +469,17 @@ public sealed partial class AutomationController
         var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
         if (!AgentSupportsCapability(client, AgentProtocolCapabilities.ResolveElementDetailed))
         {
-            return await client.CallAsync<ElementRef>(
-                "wpf/resolve_element",
-                request,
-                cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await client.CallAsync<ElementRef>(
+                    "wpf/resolve_element",
+                    request,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (AgentRemoteException ex) when (IsAutoWpfLocatorAmbiguous(ex))
+            {
+                throw CreateLegacyWpfAmbiguityException(ex, windowHandle);
+            }
         }
 
         var response = await client.CallAsync<ResolveWpfElementDetailedResponse>(
@@ -512,7 +546,7 @@ public sealed partial class AutomationController
         }
         catch (InvalidOperationException ex) when (IsAutoWpfLocatorAmbiguous(ex))
         {
-            throw new InvalidOperationException(CleanAutoWpfResolveMessage(ex));
+            throw CreateLegacyWpfAmbiguityException(ex, windowHandle);
         }
         catch (InvalidOperationException ex) when (IsAutoWpfLocatorMiss(ex))
         {
@@ -538,29 +572,73 @@ public sealed partial class AutomationController
 
     private static bool IsAutoWpfLocatorMiss(InvalidOperationException ex)
     {
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        var message = GetInternalFailureMessage(ex);
         return message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("timeout: element not found", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsAutoWpfLocatorAmbiguous(InvalidOperationException ex)
     {
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
+        var message = GetInternalFailureMessage(ex);
         return message.Contains("wpf_resolve:ambiguous:", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string CleanAutoWpfResolveMessage(InvalidOperationException ex)
+    internal static bool ShouldFallbackFromAutoWpfResolveFailure(
+        Exception exception,
+        bool agentConnectionHealthy)
     {
-        var message = ex.GetBaseException().Message ?? ex.Message ?? string.Empty;
-        var firstLine = message
-            .Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)
-            .FirstOrDefault() ?? message;
+        ArgumentNullException.ThrowIfNull(exception);
+        if (exception is OperationCanceledException or ElementResolutionAmbiguityException)
+        {
+            return false;
+        }
 
-        const string prefix = "wpf_resolve:ambiguous:";
-        var index = firstLine.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-        return index >= 0
-            ? firstLine[(index + prefix.Length)..].Trim()
-            : firstLine.Trim();
+        if (exception is InvalidOperationException invalidOperation &&
+            (IsAutoWpfLocatorMiss(invalidOperation) || IsAutoWpfLocatorAmbiguous(invalidOperation)))
+        {
+            return false;
+        }
+
+        return exception is AgentRemoteException or System.Text.Json.JsonException ||
+               (!agentConnectionHealthy &&
+                exception is TimeoutException or IOException or InvalidOperationException);
+    }
+
+    internal static ElementResolutionAmbiguityException CreateLegacyWpfAmbiguityException(
+        InvalidOperationException exception,
+        long windowHandle)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        var ambiguity = new ResolveElementAmbiguity(
+            Code: "ambiguous_element",
+            BackendUsed: InspectionBackend.Wpf,
+            WindowHandleUsed: windowHandle,
+            ReturnedCandidates: 0,
+            DiscoveredCandidates: GetLegacyWpfAmbiguityCount(exception),
+            Truncated: true,
+            Candidates: [],
+            TruncatedReason: "legacyAgent");
+        return new ElementResolutionAmbiguityException(ambiguity);
+    }
+
+    private static int GetLegacyWpfAmbiguityCount(InvalidOperationException exception)
+    {
+        var message = GetInternalFailureMessage(exception);
+        const string marker = "(found ";
+        var markerIndex = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex >= 0)
+        {
+            var countStart = markerIndex + marker.Length;
+            var countEnd = message.IndexOf(')', countStart);
+            if (countEnd > countStart &&
+                int.TryParse(message.AsSpan(countStart, countEnd - countStart), out var count) &&
+                count >= 2)
+            {
+                return count;
+            }
+        }
+
+        return 2;
     }
 
     private static ElementLocator CreateWpfHandleRecoveryLocator(ElementHandle handle)
@@ -651,7 +729,7 @@ public sealed partial class AutomationController
 
     private static bool IsWaitableWpfNotFound(InvalidOperationException ex)
     {
-        var message = ex.Message ?? string.Empty;
+        var message = GetInternalFailureMessage(ex);
         return message.Contains("wpf_resolve:not_found:", StringComparison.OrdinalIgnoreCase);
     }
 

@@ -5,6 +5,33 @@ using WpfToolsMcp.AgentProtocol;
 
 namespace WpfToolsMcp.Automation;
 
+internal sealed class AgentRemoteException : InvalidOperationException
+{
+    private const string SafeMessage = "Agent call failed.";
+
+    internal AgentRemoteException(string method, string? remoteMessage, string? remoteDetails)
+        : base(GetPublicMessage(method, remoteMessage))
+    {
+        Method = method;
+        RemoteMessage = remoteMessage;
+        RemoteDetails = remoteDetails;
+    }
+
+    internal string Method { get; }
+
+    internal string? RemoteMessage { get; }
+
+    internal string? RemoteDetails { get; }
+
+    private static string GetPublicMessage(string method, string? remoteMessage)
+    {
+        var unknownMethodMessage = $"Unknown method '{method}'.";
+        return string.Equals(remoteMessage, unknownMethodMessage, StringComparison.Ordinal)
+            ? unknownMethodMessage
+            : SafeMessage;
+    }
+}
+
 internal sealed class AgentClient : IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -69,6 +96,12 @@ internal sealed class AgentClient : IAsyncDisposable
             await pipe.ConnectAsync(cts.Token);
             return new AgentClient(pipe);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            pipe.Dispose();
+            throw new TimeoutException(
+                $"Agent pipe connection timed out after {timeout.TotalSeconds:0.###}s.");
+        }
         catch
         {
             pipe.Dispose();
@@ -80,9 +113,20 @@ internal sealed class AgentClient : IAsyncDisposable
     {
         var paramsNode = @params is null ? null : JsonSerializer.SerializeToNode(@params, JsonOptions);
         var result = await CallRawAsync(method, paramsNode, cancellationToken);
-        var value = result is null ? default : result.Deserialize<T>(JsonOptions);
+        T? value;
+        try
+        {
+            value = result is null ? default : result.Deserialize<T>(JsonOptions);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            PoisonConnection();
+            throw new InvalidOperationException($"Agent call '{method}' returned an invalid result.", ex);
+        }
+
         if (value is null)
         {
+            PoisonConnection();
             throw new InvalidOperationException($"Agent call '{method}' returned null.");
         }
 
@@ -132,14 +176,10 @@ internal sealed class AgentClient : IAsyncDisposable
 
             if (!response.Ok)
             {
-                var message = response.Error?.Message ?? "Agent call failed.";
-                var details = response.Error?.Details;
-                if (!string.IsNullOrWhiteSpace(details))
-                {
-                    message += $"{Environment.NewLine}{details}";
-                }
-
-                throw new InvalidOperationException(message);
+                throw new AgentRemoteException(
+                    method,
+                    response.Error?.Message,
+                    response.Error?.Details);
             }
 
             return response.Result;

@@ -97,8 +97,12 @@ internal static class ProcessTargetResolver
         var candidates = GetCandidatesByName(normalizedName);
         if (candidates.Count == 0)
         {
-            throw new InvalidOperationException(
-                $"process_not_found: no live process matches '{normalizedName}'. Start the application or retry with pid.");
+            throw FailureDiagnostics.Exception(
+                code: "process_not_found",
+                stage: "process_discovery",
+                detail: "No live process matched the requested process name.",
+                retryable: true,
+                recoveryActions: ["retry"]);
         }
 
         if (candidates.Count > 1)
@@ -131,10 +135,15 @@ internal static class ProcessTargetResolver
             using var process = Process.GetProcessById(pid);
             return CreateTarget(process);
         }
-        catch (ArgumentException)
+        catch (Exception ex) when (ex is ArgumentException or ProcessExitedDuringDiscoveryException)
         {
-            throw new InvalidOperationException(
-                $"process_not_found: process {pid} is not running. Discover the replacement process and retry.");
+            throw FailureDiagnostics.Exception(
+                code: "process_not_found",
+                stage: "process_discovery",
+                detail: "The requested process is not running.",
+                retryable: false,
+                recoveryActions: [FailureDiagnostics.Recovery.SelectProcessInstance],
+                inner: ex);
         }
     }
 
@@ -192,18 +201,26 @@ internal static class ProcessTargetResolver
         {
             current = ResolveByPid(identity.Pid);
         }
-        catch (InvalidOperationException ex) when (
-            ex.Message.StartsWith("process_not_found:", StringComparison.Ordinal))
+        catch (ActionableFailureException ex) when (
+            string.Equals(ex.Failure.Code, "process_not_found", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException(
-                $"stale_process_candidate: '{processInstanceId}' is no longer running. Discover candidates again.");
+            throw FailureDiagnostics.Exception(
+                code: "stale_process_candidate",
+                stage: "process_discovery",
+                detail: "The selected process candidate is no longer running.",
+                retryable: false,
+                recoveryActions: ["select_process_instance"],
+                inner: ex);
         }
 
         if (current.Identity != identity)
         {
-            throw new InvalidOperationException(
-                $"stale_process_candidate: pid {identity.Pid} now belongs to a different process instance. " +
-                "Discover candidates again; no fallback target was selected.");
+            throw FailureDiagnostics.Exception(
+                code: "stale_process_candidate",
+                stage: "process_discovery",
+                detail: "The selected PID now belongs to a different process instance.",
+                retryable: false,
+                recoveryActions: ["select_process_instance"]);
         }
 
         return current;
@@ -218,9 +235,13 @@ internal static class ProcessTargetResolver
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException(
-                $"process_discovery_failed: unable to enumerate processes named '{normalizedName}'.",
-                ex);
+            throw FailureDiagnostics.Exception(
+                code: "process_discovery_failed",
+                stage: "process_discovery",
+                detail: "Live processes could not be enumerated.",
+                retryable: true,
+                recoveryActions: ["retry"],
+                inner: ex);
         }
 
         var candidates = new List<ResolvedProcessTarget>(processes.Length);
@@ -274,10 +295,33 @@ internal static class ProcessTargetResolver
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            throw new InvalidOperationException(
-                $"process_identity_unavailable: unable to establish a stable identity for process {process.Id}.");
+            ProcessIntegrityLevelComparison? integrityComparison = null;
+            if (ProcessIntegrityLevelInspector.TryCompareWithCurrentProcess(
+                    process.Id,
+                    out var measuredIntegrity))
+            {
+                integrityComparison = measuredIntegrity;
+            }
+
+            var classified = FailureDiagnostics.Classify(
+                ex,
+                FailureDiagnostics.Stages.ProcessDiscovery,
+                integrityComparison);
+            if (classified.Code is FailureDiagnostics.Codes.AccessDenied or
+                FailureDiagnostics.Codes.ElevationMismatch)
+            {
+                throw new ActionableFailureException(classified, ex);
+            }
+
+            throw FailureDiagnostics.Exception(
+                code: FailureDiagnostics.Codes.ProcessIdentityUnavailable,
+                stage: FailureDiagnostics.Stages.ProcessDiscovery,
+                detail: "A stable identity could not be established for a candidate process.",
+                retryable: true,
+                recoveryActions: [FailureDiagnostics.Recovery.Retry, FailureDiagnostics.Recovery.SelectProcessInstance],
+                inner: ex);
         }
     }
 

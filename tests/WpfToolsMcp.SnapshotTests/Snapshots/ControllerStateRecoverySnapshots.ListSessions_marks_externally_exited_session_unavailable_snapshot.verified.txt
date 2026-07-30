@@ -17,11 +17,31 @@
     BackendCapabilityStates: [
       {
         Backend: uia,
-        State: unavailable
+        State: unavailable,
+        Failure: {
+          Code: target_exited,
+          Stage: target_shutdown,
+          Detail: The target process exited before the operation completed.,
+          Retryable: false,
+          RecoveryActions: [
+            restart_target,
+            reattach
+          ]
+        }
       },
       {
         Backend: wpf,
-        State: unavailable
+        State: unavailable,
+        Failure: {
+          Code: target_exited,
+          Stage: target_shutdown,
+          Detail: The target process exited before the operation completed.,
+          Retryable: false,
+          RecoveryActions: [
+            restart_target,
+            reattach
+          ]
+        }
       }
     ],
     InteractionPolicy: {

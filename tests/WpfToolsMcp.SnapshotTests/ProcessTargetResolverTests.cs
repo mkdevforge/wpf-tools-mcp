@@ -39,7 +39,7 @@ public sealed class ProcessTargetResolverTests
             current.Identity.Pid,
             current.Identity.StartTimeFileTimeUtc - 1).Value;
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        var exception = Assert.Catch<InvalidOperationException>(() =>
             ProcessTargetResolver.Resolve(new AttachToAppRequest(ProcessInstanceId: staleId)));
 
         Assert.That(exception!.Message, Does.StartWith("stale_process_candidate:"));

@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.IO.Pipes;
+using System.Text.Json;
 using System.Threading;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Automation;
 using WpfToolsMcp.Contracts;
 
@@ -10,6 +13,113 @@ namespace WpfToolsMcp.SnapshotTests;
 [Apartment(ApartmentState.STA)]
 public sealed class SessionManagerLifecycleTests
 {
+    [Test]
+    public void Backend_capability_projection_reports_unavailable_process_state_for_both_backends()
+    {
+        var capabilities = SessionManager.ProjectBackendCapabilityStates(
+            ProcessInstanceState.Unavailable,
+            controllerAttached: true);
+
+        Assert.That(capabilities, Has.Count.EqualTo(2));
+        Assert.Multiple(() =>
+        {
+            foreach (var capability in capabilities)
+            {
+                Assert.That(capability.State, Is.EqualTo("unavailable"));
+                Assert.That(capability.Failure?.Code, Is.EqualTo("process_state_unavailable"));
+                Assert.That(capability.Failure?.Stage, Is.EqualTo("target_shutdown"));
+                Assert.That(capability.Failure?.Retryable, Is.True);
+                Assert.That(capability.Failure?.RecoveryActions, Is.EqualTo(new[] { "retry" }));
+            }
+        });
+    }
+
+    [Test]
+    public void PreCanceled_list_sessions_preserves_cancellation()
+    {
+        using var sessions = new SessionManager();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            _ = await sessions.ListSessionsAsync(cancellation.Token));
+    }
+
+    [Test]
+    public async Task List_sessions_reobserves_target_after_passive_backend_refresh()
+    {
+        using var sessions = new SessionManager();
+        var markerPath = CreateMarkerPath();
+        LaunchAppResponse? launch = null;
+
+        try
+        {
+            launch = await LaunchLifecycleProbeAsync(sessions, markerPath);
+            var identity = ProcessTargetResolver.ResolveByPid(launch.Pid).Identity;
+            var pipeName = AgentPipeName.Compute(identity);
+            await using var server = new NamedPipeServerStream(
+                pipeName,
+                PipeDirection.InOut,
+                maxNumberOfServerInstances: 1,
+                PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+            var acceptTask = server.WaitForConnectionAsync(timeout.Token);
+            var listTask = sessions.ListSessionsAsync(timeout.Token);
+            await acceptTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+            var pingRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(pingRequest.Method, Is.EqualTo("ping"));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(pingRequest.Id, Ok: true, Result: JsonSerializer.SerializeToNode("pong")),
+                timeout.Token);
+
+            var capabilitiesRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(
+                capabilitiesRequest.Method,
+                Is.EqualTo(AgentProtocolCapabilities.GetCapabilitiesMethod));
+
+            KillProcessIfRunning(launch.Pid);
+            Assert.That(IsProcessAlive(launch.Pid), Is.False);
+
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    capabilitiesRequest.Id,
+                    Ok: true,
+                    Result: JsonSerializer.SerializeToNode(
+                        new AgentCapabilitiesResponse(
+                            AgentProtocolCapabilities.CurrentProtocolVersion,
+                            []))),
+                timeout.Token);
+
+            var listed = await listTask.WaitAsync(TimeSpan.FromSeconds(2));
+            var session = listed.Sessions.Single(item => item.SessionId == launch.SessionId);
+            Assert.That(session.BackendCapabilities, Is.Empty);
+            Assert.That(session.BackendCapabilityStates, Has.Count.EqualTo(2));
+            Assert.Multiple(() =>
+            {
+                foreach (var capability in session.BackendCapabilityStates!)
+                {
+                    Assert.That(capability.State, Is.EqualTo("unavailable"));
+                    Assert.That(capability.Failure?.Code, Is.EqualTo("target_exited"));
+                    Assert.That(capability.Failure?.Stage, Is.EqualTo("target_shutdown"));
+                }
+            });
+        }
+        finally
+        {
+            if (launch is not null)
+            {
+                KillProcessIfRunning(launch.Pid);
+            }
+
+            DeleteFileBestEffort(markerPath);
+        }
+    }
+
     [Test]
     public async Task Detach_retires_session_before_releasing_resources()
     {

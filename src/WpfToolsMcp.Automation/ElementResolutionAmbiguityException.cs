@@ -17,9 +17,11 @@ public sealed class ElementResolutionAmbiguityException : InvalidOperationExcept
     {
         ArgumentNullException.ThrowIfNull(ambiguity);
 
+        var recovery = ambiguity.Candidates.Count > 0
+            ? "Retry with locator.index using a candidate index, or reuse a candidate elementId."
+            : "Retry with a stricter locator or locator.index.";
         var builder = new StringBuilder(
-            $"{ambiguity.Code}: Locator is ambiguous (found {ambiguity.DiscoveredCandidates}). " +
-            "Retry with locator.index using a candidate index, or reuse a candidate elementId.");
+            $"{ambiguity.Code}: Locator is ambiguous (found {ambiguity.DiscoveredCandidates}). {recovery}");
 
         foreach (var candidate in ambiguity.Candidates.Take(5))
         {

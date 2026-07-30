@@ -191,7 +191,12 @@ public sealed partial class AutomationController : IDisposable
 
         if (Path.IsPathRooted(request.ExePath) && !File.Exists(request.ExePath))
         {
-            throw new FileNotFoundException($"Executable not found: '{request.ExePath}'.", request.ExePath);
+            throw FailureDiagnostics.Exception(
+                code: "process_not_found",
+                stage: "process_discovery",
+                detail: "The requested executable was not found.",
+                retryable: false,
+                recoveryActions: [FailureDiagnostics.Recovery.RepairInstallation]);
         }
 
         var waitMs = Math.Clamp(request.WaitForMainWindowMs, 1000, 120000);
@@ -209,9 +214,9 @@ public sealed partial class AutomationController : IDisposable
                 {
                     launchedTarget = ProcessTargetResolver.ResolveByPid(_application.ProcessId);
                 }
-                catch (InvalidOperationException ex) when (
+                catch (ActionableFailureException ex) when (
                     request.ReuseExistingInstance &&
-                    ex.Message.StartsWith("process_not_found:", StringComparison.Ordinal))
+                    string.Equals(ex.Failure.Code, "process_not_found", StringComparison.Ordinal))
                 {
                     launchInitError = ex;
                 }
@@ -257,9 +262,43 @@ public sealed partial class AutomationController : IDisposable
             }
         }
 
-        throw new InvalidOperationException(
-            "Launch failed for all launch strategies (shellExecute and directProcess).",
-            lastLaunchError);
+        if (lastLaunchError is ActionableFailureException actionable)
+        {
+            throw actionable;
+        }
+
+        if (IsExecutableNotFound(lastLaunchError))
+        {
+            throw FailureDiagnostics.Exception(
+                code: FailureDiagnostics.Codes.ProcessNotFound,
+                stage: FailureDiagnostics.Stages.ProcessDiscovery,
+                detail: "The requested executable was not found.",
+                retryable: false,
+                recoveryActions: [FailureDiagnostics.Recovery.RepairInstallation],
+                inner: lastLaunchError);
+        }
+
+        throw FailureDiagnostics.Exception(
+            code: "attachment_failed",
+            stage: "attachment",
+            detail: "The application could not be launched and attached.",
+            retryable: true,
+            recoveryActions: ["retry", "reattach"],
+            inner: lastLaunchError);
+    }
+
+    private static bool IsExecutableNotFound(Exception? exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is FileNotFoundException or DirectoryNotFoundException ||
+                current is Win32Exception { NativeErrorCode: 2 or 3 })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static IReadOnlyList<(ProcessStartInfo StartInfo, string Name)> CreateLaunchStartInfos(LaunchAppRequest request)
@@ -471,10 +510,18 @@ public sealed partial class AutomationController : IDisposable
     {
         EnsureNotAttached();
         cancellationToken.ThrowIfCancellationRequested();
+        ProcessIntegrityLevelComparison? integrityComparison = null;
 
         try
         {
             var target = ProcessTargetResolver.Resolve(request);
+            if (ProcessIntegrityLevelInspector.TryCompareWithCurrentProcess(
+                    target.Identity.Pid,
+                    out var measuredIntegrity))
+            {
+                integrityComparison = measuredIntegrity;
+            }
+
             (_application, _automation) = CreateAttachment(target.Identity.Pid);
 
             EnsureCurrentProcessInstance(target.Identity, "attachment initialization");
@@ -486,10 +533,28 @@ public sealed partial class AutomationController : IDisposable
             };
             return Task.FromResult(response);
         }
-        catch
+        catch (OperationCanceledException)
         {
             Cleanup();
             throw;
+        }
+        catch (ProcessSelectionAmbiguityException)
+        {
+            Cleanup();
+            throw;
+        }
+        catch (ActionableFailureException)
+        {
+            Cleanup();
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Cleanup();
+            throw FailureDiagnostics.CreateException(
+                ex,
+                FailureDiagnostics.Stages.Attachment,
+                integrityComparison);
         }
     }
 
@@ -520,13 +585,19 @@ public sealed partial class AutomationController : IDisposable
             case ProcessInstanceState.Current:
                 return;
             case ProcessInstanceState.ExitedOrReused:
-                throw new InvalidOperationException(
-                    $"stale_process_candidate: process {identity.Pid} exited or was reused during {operation}. " +
-                    "Discover candidates again; no fallback target was selected.");
+                throw FailureDiagnostics.Exception(
+                    code: "stale_process_candidate",
+                    stage: "process_discovery",
+                    detail: "The selected process exited or its PID was reused before attachment completed.",
+                    retryable: false,
+                    recoveryActions: ["select_process_instance"]);
             default:
-                throw new InvalidOperationException(
-                    $"process_identity_unavailable: process {identity.Pid} could not be verified during {operation}. " +
-                    "No fallback target was selected.");
+                throw FailureDiagnostics.Exception(
+                    code: "process_identity_unavailable",
+                    stage: "process_discovery",
+                    detail: "The selected process identity could not be verified before attachment completed.",
+                    retryable: true,
+                    recoveryActions: ["retry", "select_process_instance"]);
         }
     }
 
@@ -1307,12 +1378,14 @@ public sealed partial class AutomationController : IDisposable
                         capture = await CaptureWithViewportAsync(wpfElementBounds).ConfigureAwait(false);
                         recovered = true;
                     }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
                     catch (Exception fallbackEx)
                     {
                         throw new InvalidOperationException(
-                            "take_screenshot failed using UIA and WPF fallback. " +
-                            $"UIA error: {ex.GetBaseException().Message}. " +
-                            $"WPF error: {fallbackEx.GetBaseException().Message}",
+                            "take_screenshot failed using both UIA and WPF fallback.",
                             fallbackEx);
                     }
                 }
@@ -1429,13 +1502,14 @@ public sealed partial class AutomationController : IDisposable
         }
     }
 
-    private static bool IsEligibleAutoScreenshotFallback(Exception ex)
+    internal static bool IsEligibleAutoScreenshotFallback(Exception ex)
     {
         if (IsPerWindowAutoWpfMiss(ex))
         {
             return true;
         }
 
+        var message = GetInternalFailureMessage(ex);
         ex = ex.GetBaseException();
 
         if (ex is ArgumentException)
@@ -1448,7 +1522,6 @@ public sealed partial class AutomationController : IDisposable
             return false;
         }
 
-        var message = ex.Message ?? "";
         if (message.Contains("ambiguous", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -5400,9 +5473,9 @@ public sealed partial class AutomationController : IDisposable
         return trimmed;
     }
 
-    private static bool IsWaitableWpfXPathNotFound(InvalidOperationException ex)
+    internal static bool IsWaitableWpfXPathNotFound(InvalidOperationException ex)
     {
-        var message = ex.Message ?? string.Empty;
+        var message = GetInternalFailureMessage(ex);
         return message.Contains("XPath segment", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -8381,6 +8454,7 @@ public sealed partial class AutomationController : IDisposable
 
             maxNodes = Math.Clamp(maxNodes, 1, 5000);
             IReadOnlyList<string>? warnings = null;
+            BackendFallbackInfo? fallback = null;
             Window? autoWindow = null;
 
             if (backend == InspectionBackend.Wpf)
@@ -8420,10 +8494,12 @@ public sealed partial class AutomationController : IDisposable
                 if (!canTryWpf)
                 {
                     warnings = [GetNativeAutoRoutingWarning(autoWindow)];
+                    fallback = CreateWpfToUiaFallback(attempted: false);
                 }
 
                 if (canTryWpf && root is not null && string.IsNullOrWhiteSpace(wpfRootXPath))
                 {
+                    var attemptSequence = GetAutoAgentAttemptSequence();
                     var client = autoInject
                         ? await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false)
                         : await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
@@ -8432,6 +8508,10 @@ public sealed partial class AutomationController : IDisposable
                     {
                         canTryWpf = false;
                         warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                        var failure = GetWpfBackendFailure();
+                        fallback = CreateWpfToUiaFallback(
+                            attempted: autoInject && GetAutoAgentAttemptSequence() != attemptSequence,
+                            failure: failure);
                     }
                     else
                     {
@@ -8439,10 +8519,20 @@ public sealed partial class AutomationController : IDisposable
                         {
                             wpfRootXPath = await ResolveWpfRootXPathAsync(root, resolvedWindowHandle, cancellationToken).ConfigureAwait(false);
                         }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
                         catch (Exception ex)
                         {
                             canTryWpf = false;
-                            warnings = [$"backend=auto: WPF root locator could not be resolved; used UIA. {ex.GetBaseException().Message}"];
+                            var failure = ClassifyAutoWpfFallbackFailure(ex);
+                            warnings = IsAutoWpfScopeMiss(ex)
+                                ? ["backend=auto: WPF root locator could not be resolved; used UIA."]
+                                : [$"backend=auto: WPF backend unavailable ({failure.Code} at {failure.Stage}); used UIA."];
+                            fallback = CreateWpfToUiaFallback(
+                                attempted: true,
+                                failure: failure);
                         }
                     }
                 }
@@ -8461,23 +8551,39 @@ public sealed partial class AutomationController : IDisposable
                         Preset: preset,
                         Fields: fields);
 
-                    GetVisualTreeResponse? wpf = null;
+                    (GetVisualTreeResponse? Response, bool Attempted, FailureInfo? Failure) wpfAttempt =
+                        (null, false, null);
                     try
                     {
-                        wpf = await TryGetVisualTreeWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                        wpfAttempt = await TryGetVisualTreeWpfAsync(
+                            request,
+                            cancellationToken,
+                            autoInject).ConfigureAwait(false);
                     }
                     catch (Exception ex) when (IsPerWindowAutoWpfMiss(ex))
                     {
                         warnings = [GetPerWindowAutoRoutingWarning()];
+                        fallback = CreateWpfToUiaFallback(
+                            attempted: true,
+                            failure: ClassifyAutoWpfFallbackFailure(ex));
                     }
 
-                    if (wpf is not null)
+                    if (wpfAttempt.Response is { } wpf)
                     {
                         trace?.SetSummary($"{wpf.BackendUsed} returned={wpf.ReturnedNodes} truncated={wpf.Truncated}");
                         return wpf;
                     }
 
-                    warnings ??= [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                    warnings ??=
+                    [
+                        autoInject || wpfAttempt.Failure is not null
+                            ? GetAutoAgentFallbackWarning(wpfAttempt.Failure)
+                            : "backend=auto: WPF agent not connected; used UIA."
+                    ];
+                    var failure = wpfAttempt.Failure ?? GetWpfBackendFailure();
+                    fallback ??= CreateWpfToUiaFallback(
+                        attempted: wpfAttempt.Attempted,
+                        failure: failure);
                 }
             }
 
@@ -8539,7 +8645,10 @@ public sealed partial class AutomationController : IDisposable
                 ScannedNodes: context.ScannedNodes,
                 Truncated: context.Truncated,
                 TruncatedReason: context.TruncatedReason,
-                Warnings: warnings);
+                Warnings: warnings)
+            {
+                Fallback = fallback
+            };
 
             trace?.SetSummary($"{responseUia.BackendUsed} returned={responseUia.ReturnedNodes} truncated={responseUia.Truncated}");
             return responseUia;
@@ -8580,6 +8689,7 @@ public sealed partial class AutomationController : IDisposable
             maxResults = Math.Clamp(maxResults, 1, 5000);
             maxNodes = Math.Clamp(maxNodes, 1, 200_000);
             IReadOnlyList<string>? warnings = null;
+            BackendFallbackInfo? fallback = null;
             Window? autoWindow = null;
 
             if (backend == InspectionBackend.Wpf)
@@ -8632,10 +8742,12 @@ public sealed partial class AutomationController : IDisposable
                 if (!canTryWpf)
                 {
                     warnings = [GetNativeAutoRoutingWarning(autoWindow)];
+                    fallback = CreateWpfToUiaFallback(attempted: false);
                 }
 
                 if (canTryWpf && root is not null && string.IsNullOrWhiteSpace(wpfRootXPath))
                 {
+                    var attemptSequence = GetAutoAgentAttemptSequence();
                     var client = autoInject
                         ? await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false)
                         : await EnsureAgentConnectedOrNullAsync(cancellationToken).ConfigureAwait(false);
@@ -8644,6 +8756,10 @@ public sealed partial class AutomationController : IDisposable
                     {
                         canTryWpf = false;
                         warnings = [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                        var failure = GetWpfBackendFailure();
+                        fallback = CreateWpfToUiaFallback(
+                            attempted: autoInject && GetAutoAgentAttemptSequence() != attemptSequence,
+                            failure: failure);
                     }
                     else
                     {
@@ -8651,10 +8767,20 @@ public sealed partial class AutomationController : IDisposable
                         {
                             wpfRootXPath = await ResolveWpfRootXPathAsync(root, resolvedWindowHandle, cancellationToken).ConfigureAwait(false);
                         }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
                         catch (Exception ex)
                         {
                             canTryWpf = false;
-                            warnings = [$"backend=auto: WPF root locator could not be resolved; used UIA. {ex.GetBaseException().Message}"];
+                            var failure = ClassifyAutoWpfFallbackFailure(ex);
+                            warnings = IsAutoWpfScopeMiss(ex)
+                                ? ["backend=auto: WPF root locator could not be resolved; used UIA."]
+                                : [$"backend=auto: WPF backend unavailable ({failure.Code} at {failure.Stage}); used UIA."];
+                            fallback = CreateWpfToUiaFallback(
+                                attempted: true,
+                                failure: failure);
                         }
                     }
                 }
@@ -8674,17 +8800,24 @@ public sealed partial class AutomationController : IDisposable
                         ReturnFields: returnFields,
                         IncludeElementIds: includeElementIds);
 
-                    FindElementsResponse? wpf = null;
+                    (FindElementsResponse? Response, bool Attempted, FailureInfo? Failure) wpfAttempt =
+                        (null, false, null);
                     try
                     {
-                        wpf = await TryFindElementsWpfAsync(request, cancellationToken, autoInject).ConfigureAwait(false);
+                        wpfAttempt = await TryFindElementsWpfAsync(
+                            request,
+                            cancellationToken,
+                            autoInject).ConfigureAwait(false);
                     }
                     catch (Exception ex) when (IsPerWindowAutoWpfMiss(ex))
                     {
                         warnings = [GetPerWindowAutoRoutingWarning()];
+                        fallback = CreateWpfToUiaFallback(
+                            attempted: true,
+                            failure: ClassifyAutoWpfFallbackFailure(ex));
                     }
 
-                    if (wpf is not null)
+                    if (wpfAttempt.Response is { } wpf)
                     {
                         var responseWpf = includeElementIds
                             ? AttachWpfElementIds(wpf, resolvedWindowHandle)
@@ -8702,7 +8835,16 @@ public sealed partial class AutomationController : IDisposable
                         return responseWpf;
                     }
 
-                    warnings ??= [autoInject ? GetAutoAgentFallbackWarning() : "backend=auto: WPF agent not connected; used UIA."];
+                    warnings ??=
+                    [
+                        autoInject || wpfAttempt.Failure is not null
+                            ? GetAutoAgentFallbackWarning(wpfAttempt.Failure)
+                            : "backend=auto: WPF agent not connected; used UIA."
+                    ];
+                    var failure = wpfAttempt.Failure ?? GetWpfBackendFailure();
+                    fallback ??= CreateWpfToUiaFallback(
+                        attempted: wpfAttempt.Attempted,
+                        failure: failure);
                 }
             }
 
@@ -8734,7 +8876,11 @@ public sealed partial class AutomationController : IDisposable
                 windowHwnd,
                 cancellationToken);
 
-            var finalResponse = warnings is null ? response : response with { Warnings = warnings };
+            var finalResponse = response with
+            {
+                Warnings = warnings ?? response.Warnings,
+                Fallback = fallback
+            };
             if (!includeElementIds)
             {
                 finalResponse = StripElementIds(finalResponse);
@@ -9486,11 +9632,72 @@ public sealed partial class AutomationController : IDisposable
         var application = _application;
         if (IsApplicationRunning(application))
         {
-            return application!;
+            if (_processIdentity is null)
+            {
+                return application!;
+            }
+
+            var runningState = ProcessTargetResolver.Observe(_processIdentity.Value);
+            if (runningState == ProcessInstanceState.Current)
+            {
+                return application!;
+            }
+
+            if (runningState == ProcessInstanceState.Unavailable)
+            {
+                throw FailureDiagnostics.Exception(
+                    code: FailureDiagnostics.Codes.ProcessStateUnavailable,
+                    stage: FailureDiagnostics.Stages.TargetShutdown,
+                    detail: "The target process state could not be observed, so the session was not discarded.",
+                    retryable: true,
+                    recoveryActions: [FailureDiagnostics.Recovery.Retry]);
+            }
+        }
+
+        var identity = _processIdentity;
+        var processState = identity is null
+            ? ProcessInstanceState.ExitedOrReused
+            : ProcessTargetResolver.Observe(identity.Value);
+        if (processState == ProcessInstanceState.Unavailable)
+        {
+            throw FailureDiagnostics.Exception(
+                code: "process_state_unavailable",
+                stage: "target_shutdown",
+                detail: "The target process state could not be observed, so the session was not discarded.",
+                retryable: true,
+                recoveryActions: ["retry"]);
         }
 
         Cleanup();
-        throw new InvalidOperationException("No application is attached. Call launch_app or attach_to_app first.");
+        throw FailureDiagnostics.Exception(
+            code: "target_exited",
+            stage: "target_shutdown",
+            detail: "The target process exited or was replaced, so this session can no longer be used.",
+            retryable: false,
+            recoveryActions: ["reattach", "restart_target"]);
+    }
+
+    private ProcessInstanceIdentity EnsureAttachedProcessIdentityCurrent(int expectedPid)
+    {
+        var identity = _processIdentity ?? ProcessTargetResolver.ResolveByPid(expectedPid).Identity;
+        if (identity.Pid != expectedPid)
+        {
+            throw new ActionableFailureException(FailureDiagnostics.TargetExited(processReplaced: true));
+        }
+
+        return ProcessTargetResolver.Observe(identity) switch
+        {
+            ProcessInstanceState.Current => identity,
+            ProcessInstanceState.ExitedOrReused => throw new ActionableFailureException(
+                FailureDiagnostics.TargetExited()),
+            ProcessInstanceState.Unavailable => throw FailureDiagnostics.Exception(
+                code: FailureDiagnostics.Codes.ProcessStateUnavailable,
+                stage: FailureDiagnostics.Stages.TargetShutdown,
+                detail: "The target process identity could not be verified.",
+                retryable: true,
+                recoveryActions: [FailureDiagnostics.Recovery.Retry]),
+            _ => throw new ArgumentOutOfRangeException()
+        };
     }
 
     private static bool IsApplicationRunning(Application? application)

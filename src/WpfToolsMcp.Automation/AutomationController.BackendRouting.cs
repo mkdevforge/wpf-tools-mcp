@@ -35,12 +35,76 @@ public sealed partial class AutomationController
     internal static bool IsPerWindowAutoWpfMiss(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
-        var message = exception.GetBaseException().Message ?? exception.Message ?? string.Empty;
+        var message = GetInternalFailureMessage(exception);
         return message.Contains("wpf_window_not_found:", StringComparison.OrdinalIgnoreCase);
     }
 
-    internal static bool ShouldRecordAutoAgentFailure(Exception exception) =>
-        !IsPerWindowAutoWpfMiss(exception);
+    internal static bool IsAutoWpfScopeMiss(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return IsPerWindowAutoWpfMiss(exception) ||
+               exception is InvalidOperationException invalidOperation &&
+               (IsAutoWpfLocatorMiss(invalidOperation) || IsAutoWpfLocatorAmbiguous(invalidOperation));
+    }
+
+    internal static bool ShouldRecordAutoAgentFailure(
+        Exception exception,
+        bool agentConnectionHealthy) =>
+        !agentConnectionHealthy && !IsAutoWpfScopeMiss(exception);
+
+    internal static string GetInternalFailureMessage(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        Exception? current = exception;
+        for (var depth = 0; current is not null && depth < 8; depth++)
+        {
+            if (current is AgentRemoteException remote &&
+                !string.IsNullOrWhiteSpace(remote.RemoteMessage))
+            {
+                return remote.RemoteMessage;
+            }
+
+            current = current is ActionableFailureException { DiagnosticCause: { } diagnosticCause }
+                ? diagnosticCause
+                : current.InnerException;
+        }
+
+        return exception.GetBaseException().Message ?? exception.Message ?? string.Empty;
+    }
+
+    private static BackendFallbackInfo CreateWpfToUiaFallback(
+        bool attempted,
+        FailureInfo? failure = null) =>
+        new(
+            FromBackend: "wpf",
+            ToBackend: "uia",
+            Attempted: attempted,
+            Available: true,
+            Used: true)
+        {
+            Failure = failure
+        };
+
+    private static FailureInfo CreateWpfScopeFailure(string detail) =>
+        FailureDiagnostics.BackendScopeUnavailable(detail);
+
+    private FailureInfo ClassifyAutoWpfFallbackFailure(Exception exception)
+    {
+        var connectionHealthy = IsAgentConnected;
+        var failure = IsAutoWpfScopeMiss(exception)
+            ? CreateWpfScopeFailure("The requested scope is unavailable through the WPF backend.")
+            : exception is AgentRemoteException
+                ? FailureDiagnostics.BackendOperationFailure()
+                : FailureDiagnostics.Classify(exception, FailureDiagnostics.Stages.Protocol);
+        failure = PreferTargetStateFailure(failure);
+        if (ShouldRecordAutoAgentFailure(exception, connectionHealthy))
+        {
+            SetAutoAgentFailure(failure);
+        }
+
+        return failure;
+    }
 
     private static AutoBackendRoute GetAutoBackendRoute(Window window)
     {

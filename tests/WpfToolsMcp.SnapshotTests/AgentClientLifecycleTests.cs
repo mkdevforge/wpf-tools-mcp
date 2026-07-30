@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.Reflection;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Automation;
@@ -10,6 +11,30 @@ namespace WpfToolsMcp.SnapshotTests;
 [TestFixture]
 public sealed class AgentClientLifecycleTests
 {
+    [Test]
+    public void Connect_timeout_is_distinct_from_caller_cancellation()
+    {
+        var unavailablePipe = $"wpf-tools-mcp-unavailable-{Guid.NewGuid():N}";
+        var timeout = Assert.ThrowsAsync<TimeoutException>(async () =>
+            _ = await AgentClient.ConnectAsync(
+                unavailablePipe,
+                TimeSpan.FromMilliseconds(25),
+                CancellationToken.None));
+
+        using var callerCancellation = new CancellationTokenSource();
+        callerCancellation.Cancel();
+        Assert.Multiple(() =>
+        {
+            Assert.That(timeout!.Message, Does.Contain("timed out"));
+            Assert.That(timeout.Message, Does.Not.Contain(unavailablePipe));
+            Assert.CatchAsync<OperationCanceledException>(async () =>
+                _ = await AgentClient.ConnectAsync(
+                    unavailablePipe,
+                    TimeSpan.FromSeconds(1),
+                    callerCancellation.Token));
+        });
+    }
+
     [Test]
     public async Task Controller_dispose_waits_for_in_flight_work_and_rejects_later_work()
     {
@@ -138,6 +163,121 @@ public sealed class AgentClientLifecycleTests
             var readBuffer = new byte[1];
             var bytesRead = await server.ReadAsync(readBuffer, disconnectTimeout.Token);
             Assert.That(bytesRead, Is.Zero, "The server should observe EOF after the agent client is disposed.");
+        }
+        finally
+        {
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+        }
+    }
+
+    [Test]
+    public async Task Remote_error_hides_diagnostics_but_retains_them_for_internal_handling()
+    {
+        const string method = "wpf/private_operation";
+        const string remoteMessage = @"Backend failed at C:\work\secret-project with api-key=message-secret.";
+        const string remoteDetails = @"stderr: token=details-secret; source=C:\Users\operator\private.log";
+        var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+
+        AgentClient? client = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var acceptTask = server.WaitForConnectionAsync(timeout.Token);
+            var clientTask = AgentClient.ConnectAsync(pipeName, TimeSpan.FromSeconds(2), timeout.Token);
+            await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
+            client = await clientTask;
+
+            var callTask = client.CallAsync<string>(method, null, timeout.Token);
+            var request = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(request.Method, Is.EqualTo(method));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    request.Id,
+                    Ok: false,
+                    Error: new AgentError(remoteMessage, remoteDetails)),
+                timeout.Token);
+
+            var exception = Assert.ThrowsAsync<AgentRemoteException>(async () =>
+                _ = await callTask.WaitAsync(TimeSpan.FromSeconds(2)));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exception!.Message, Is.EqualTo("Agent call failed."));
+                Assert.That(exception.Message, Does.Not.Contain("message-secret"));
+                Assert.That(exception.Message, Does.Not.Contain("details-secret"));
+                Assert.That(exception.Message, Does.Not.Contain(@"C:\work\secret-project"));
+                Assert.That(exception.Method, Is.EqualTo(method));
+                Assert.That(exception.RemoteMessage, Is.EqualTo(remoteMessage));
+                Assert.That(exception.RemoteDetails, Is.EqualTo(remoteDetails));
+            });
+        }
+        finally
+        {
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+        }
+    }
+
+    [Test]
+    public async Task Capability_handshake_rejects_an_incompatible_positive_protocol_version()
+    {
+        var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+
+        AgentClient? client = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var acceptTask = server.WaitForConnectionAsync(timeout.Token);
+            var clientTask = AgentClient.ConnectAsync(pipeName, TimeSpan.FromSeconds(2), timeout.Token);
+            await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
+            client = await clientTask;
+
+            var verifyTask = AutomationController.VerifyAgentAndGetCapabilitiesAsync(client, timeout.Token);
+            var pingRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(pingRequest.Id, Ok: true, Result: JsonValue.Create("pong")),
+                timeout.Token);
+
+            var capabilitiesRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            var incompatible = new AgentCapabilitiesResponse(
+                AgentProtocolCapabilities.CurrentProtocolVersion + 1,
+                []);
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    capabilitiesRequest.Id,
+                    Ok: true,
+                    Result: JsonSerializer.SerializeToNode(incompatible)),
+                timeout.Token);
+
+            var exception = Assert.ThrowsAsync<ActionableFailureException>(async () =>
+                _ = await verifyTask.WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.Multiple(() =>
+            {
+                Assert.That(exception!.Failure.Code, Is.EqualTo("protocol_mismatch"));
+                Assert.That(exception.Failure.Stage, Is.EqualTo("protocol"));
+                Assert.That(exception.Failure.Retryable, Is.False);
+                Assert.That(exception.Message, Does.Not.Contain((AgentProtocolCapabilities.CurrentProtocolVersion + 1).ToString()));
+            });
         }
         finally
         {
@@ -377,6 +517,467 @@ public sealed class AgentClientLifecycleTests
                 await client.DisposeAsync();
             }
         }
+    }
+
+    [Test]
+    public async Task Auto_wpf_request_failure_is_local_and_caller_cancellation_is_propagated()
+    {
+        var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+
+        AutomationController? controller = null;
+        AgentClient? client = null;
+        try
+        {
+            using var testTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var acceptTask = server.WaitForConnectionAsync(testTimeout.Token);
+            var clientTask = AgentClient.ConnectAsync(
+                pipeName,
+                TimeSpan.FromSeconds(2),
+                testTimeout.Token);
+            await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
+            client = await clientTask;
+
+            controller = new AutomationController();
+            SetPrivateField(
+                controller,
+                "_application",
+                FlaUI.Core.Application.Attach(Environment.ProcessId));
+            SetPrivateField(controller, "_agentClient", client);
+            SetPrivateField(controller, "_agentPipeName", pipeName);
+            SetPrivateField(controller, "_agentPid", (int?)Environment.ProcessId);
+
+            var capabilities = new AgentCapabilitiesResponse(ProtocolVersion: 1, Capabilities: []);
+            var failedCall = controller.TryGetVisualTreeWpfAsync(
+                new GetWpfVisualTreeRequestV2(),
+                testTimeout.Token,
+                autoInject: true);
+
+            await RespondToHandshakeAsync(capabilities);
+            var failedTreeRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, testTimeout.Token);
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    failedTreeRequest.Id,
+                    Ok: false,
+                    Error: new AgentError(
+                        "The requested operation failed.",
+                        "private target stack")),
+                testTimeout.Token);
+
+            var failedAttempt = await failedCall.WaitAsync(TimeSpan.FromSeconds(2));
+            var healthyCapability = controller.GetWpfBackendCapabilityState();
+            Assert.Multiple(() =>
+            {
+                Assert.That(failedAttempt.Response, Is.Null);
+                Assert.That(failedAttempt.Attempted, Is.True);
+                Assert.That(failedAttempt.Failure?.Code, Is.EqualTo("backend_operation_failed"));
+                Assert.That(failedAttempt.Failure?.Retryable, Is.Null);
+                Assert.That(healthyCapability.State, Is.EqualTo("ready"));
+                Assert.That(healthyCapability.Failure, Is.Null);
+            });
+
+            using var callerCancellation = new CancellationTokenSource();
+            var canceledCall = controller.TryGetVisualTreeWpfAsync(
+                new GetWpfVisualTreeRequestV2(),
+                callerCancellation.Token,
+                autoInject: true);
+            await RespondToHandshakeAsync(capabilities);
+            var canceledTreeRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, testTimeout.Token);
+            Assert.That(canceledTreeRequest.Method, Is.EqualTo("wpf/get_visual_tree"));
+            callerCancellation.Cancel();
+
+            Assert.ThrowsAsync<OperationCanceledException>(async () =>
+                _ = await canceledCall.WaitAsync(TimeSpan.FromSeconds(2)));
+            var capability = controller.GetWpfBackendCapabilityState();
+            Assert.Multiple(() =>
+            {
+                Assert.That(capability.State, Is.EqualTo("not_initialized"));
+                Assert.That(capability.Failure, Is.Null);
+            });
+
+            async Task RespondToHandshakeAsync(AgentCapabilitiesResponse response)
+            {
+                var pingRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, testTimeout.Token);
+                Assert.That(pingRequest.Method, Is.EqualTo("ping"));
+                await PipeProtocol.WriteAsync(
+                    server,
+                    new AgentResponse(pingRequest.Id, Ok: true, Result: JsonValue.Create("pong")),
+                    testTimeout.Token);
+
+                var capabilitiesRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, testTimeout.Token);
+                Assert.That(
+                    capabilitiesRequest.Method,
+                    Is.EqualTo(AgentProtocolCapabilities.GetCapabilitiesMethod));
+                await PipeProtocol.WriteAsync(
+                    server,
+                    new AgentResponse(
+                        capabilitiesRequest.Id,
+                        Ok: true,
+                        Result: JsonSerializer.SerializeToNode(response)),
+                    testTimeout.Token);
+            }
+        }
+        finally
+        {
+            if (controller is not null)
+            {
+                controller.Dispose();
+                client = null;
+            }
+
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+        }
+    }
+
+    [Test]
+    public async Task Malformed_auto_wpf_result_marks_the_backend_unavailable()
+    {
+        var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+
+        AutomationController? controller = null;
+        AgentClient? client = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var acceptTask = server.WaitForConnectionAsync(timeout.Token);
+            var clientTask = AgentClient.ConnectAsync(
+                pipeName,
+                TimeSpan.FromSeconds(2),
+                timeout.Token);
+            await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
+            client = await clientTask;
+
+            controller = new AutomationController();
+            SetPrivateField(
+                controller,
+                "_application",
+                FlaUI.Core.Application.Attach(Environment.ProcessId));
+            SetPrivateField(controller, "_agentClient", client);
+            SetPrivateField(controller, "_agentPipeName", pipeName);
+            SetPrivateField(controller, "_agentPid", (int?)Environment.ProcessId);
+
+            var call = controller.TryGetVisualTreeWpfAsync(
+                new GetWpfVisualTreeRequestV2(),
+                timeout.Token,
+                autoInject: true);
+
+            var pingRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(pingRequest.Method, Is.EqualTo("ping"));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(pingRequest.Id, Ok: true, Result: JsonValue.Create("pong")),
+                timeout.Token);
+
+            var capabilitiesRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(
+                capabilitiesRequest.Method,
+                Is.EqualTo(AgentProtocolCapabilities.GetCapabilitiesMethod));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    capabilitiesRequest.Id,
+                    Ok: true,
+                    Result: JsonSerializer.SerializeToNode(
+                        new AgentCapabilitiesResponse(
+                            AgentProtocolCapabilities.CurrentProtocolVersion,
+                            []))),
+                timeout.Token);
+
+            var treeRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(treeRequest.Method, Is.EqualTo("wpf/get_visual_tree"));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    treeRequest.Id,
+                    Ok: true,
+                    Result: JsonValue.Create("not-a-visual-tree-response")),
+                timeout.Token);
+
+            var attempt = await call.WaitAsync(TimeSpan.FromSeconds(2));
+            var capability = controller.GetWpfBackendCapabilityState();
+            Assert.Multiple(() =>
+            {
+                Assert.That(attempt.Response, Is.Null);
+                Assert.That(attempt.Attempted, Is.True);
+                Assert.That(attempt.Failure?.Code, Is.EqualTo("protocol_error"));
+                Assert.That(capability.State, Is.EqualTo("unavailable"));
+                Assert.That(capability.Failure?.Code, Is.EqualTo("protocol_error"));
+            });
+        }
+        finally
+        {
+            if (controller is not null)
+            {
+                controller.Dispose();
+                client = null;
+            }
+
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+        }
+    }
+
+    [Test]
+    public async Task Legacy_agent_ambiguity_returns_a_structured_safe_error()
+    {
+        var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+
+        AutomationController? controller = null;
+        AgentClient? client = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var acceptTask = server.WaitForConnectionAsync(timeout.Token);
+            var clientTask = AgentClient.ConnectAsync(
+                pipeName,
+                TimeSpan.FromSeconds(2),
+                timeout.Token);
+            await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
+            client = await clientTask;
+
+            var identity = ProcessTargetResolver.ResolveByPid(Environment.ProcessId).Identity;
+            controller = new AutomationController();
+            SetPrivateField(
+                controller,
+                "_application",
+                FlaUI.Core.Application.Attach(Environment.ProcessId));
+            SetPrivateField(controller, "_processIdentity", (ProcessInstanceIdentity?)identity);
+            SetPrivateField(controller, "_agentClient", client);
+            SetPrivateField(controller, "_agentPipeName", pipeName);
+            SetPrivateField(controller, "_agentPid", (int?)Environment.ProcessId);
+            SetPrivateField(
+                controller,
+                "_agentCapabilities",
+                new AgentCapabilitiesResponse(
+                    AgentProtocolCapabilities.CurrentProtocolVersion,
+                    []));
+
+            const long windowHandle = 42;
+            var resolveTask = controller.ResolveWpfElementRefDetailedAsync(
+                new ElementLocator(Name: "Save", Strict: true),
+                windowHandle,
+                visibleOnly: true,
+                includeOffViewport: true,
+                interactiveOnly: false,
+                InteractiveMode.Heuristic,
+                timeout.Token);
+            var request = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            Assert.That(request.Method, Is.EqualTo("wpf/resolve_element"));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    request.Id,
+                    Ok: false,
+                    Error: new AgentError(
+                        @"wpf_resolve:ambiguous: Locator is ambiguous (found 4). Secret C:\work\customer",
+                        "private target stack")),
+                timeout.Token);
+
+            var exception = Assert.ThrowsAsync<ElementResolutionAmbiguityException>(async () =>
+                _ = await resolveTask.WaitAsync(TimeSpan.FromSeconds(2)));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(exception!.Ambiguity.Code, Is.EqualTo("ambiguous_element"));
+                Assert.That(exception.Ambiguity.BackendUsed, Is.EqualTo(InspectionBackend.Wpf));
+                Assert.That(exception.Ambiguity.WindowHandleUsed, Is.EqualTo(windowHandle));
+                Assert.That(exception.Ambiguity.ReturnedCandidates, Is.Zero);
+                Assert.That(exception.Ambiguity.DiscoveredCandidates, Is.EqualTo(4));
+                Assert.That(exception.Ambiguity.Truncated, Is.True);
+                Assert.That(exception.Ambiguity.TruncatedReason, Is.EqualTo("legacyAgent"));
+                Assert.That(exception.Message, Does.Not.Contain("customer"));
+                Assert.That(exception.Message, Does.Not.Contain("private target stack"));
+            });
+        }
+        finally
+        {
+            if (controller is not null)
+            {
+                controller.Dispose();
+                client = null;
+            }
+
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+        }
+    }
+
+    [Test]
+    public async Task Agent_handshake_revalidates_the_attached_process_before_reporting_ready()
+    {
+        var markerPath = Path.Combine(
+            Path.GetTempPath(),
+            $"wpf-tools-mcp-handshake-{Guid.NewGuid():N}.log");
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = TestAppPaths.FindLifecycleProbeTestAppExecutable(),
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add("--marker-path");
+        startInfo.ArgumentList.Add(markerPath);
+
+        using var target = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start lifecycle probe.");
+        var identity = ProcessTargetResolver.ResolveByPid(target.Id).Identity;
+        var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+
+        AgentClient? client = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var acceptTask = server.WaitForConnectionAsync(timeout.Token);
+            var clientTask = AgentClient.ConnectAsync(
+                pipeName,
+                TimeSpan.FromSeconds(2),
+                timeout.Token);
+            await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
+            client = await clientTask;
+
+            using var controller = new AutomationController();
+            SetPrivateField(controller, "_processIdentity", (ProcessInstanceIdentity?)identity);
+            var verifyTask = controller.VerifyAgentForAttachedProcessAsync(
+                client,
+                target.Id,
+                timeout.Token);
+
+            var pingRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(pingRequest.Id, Ok: true, Result: JsonValue.Create("pong")),
+                timeout.Token);
+            var capabilitiesRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+
+            target.Kill(entireProcessTree: true);
+            await target.WaitForExitAsync(timeout.Token).WaitAsync(TimeSpan.FromSeconds(2));
+            await PipeProtocol.WriteAsync(
+                server,
+                new AgentResponse(
+                    capabilitiesRequest.Id,
+                    Ok: true,
+                    Result: JsonSerializer.SerializeToNode(
+                        new AgentCapabilitiesResponse(
+                            AgentProtocolCapabilities.CurrentProtocolVersion,
+                            []))),
+                timeout.Token);
+
+            var exception = Assert.ThrowsAsync<ActionableFailureException>(async () =>
+                _ = await verifyTask.WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.Multiple(() =>
+            {
+                Assert.That(exception!.Failure.Code, Is.EqualTo("target_exited"));
+                Assert.That(exception.Failure.Stage, Is.EqualTo("target_shutdown"));
+            });
+        }
+        finally
+        {
+            if (!target.HasExited)
+            {
+                target.Kill(entireProcessTree: true);
+                _ = target.WaitForExit(2_000);
+            }
+
+            if (client is not null)
+            {
+                await client.DisposeAsync();
+            }
+
+            try
+            {
+                File.Delete(markerPath);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Test]
+    [NonParallelizable]
+    public async Task Passive_agent_refresh_clears_a_transient_unavailable_failure_after_reconnect()
+    {
+        var identity = ProcessTargetResolver.ResolveByPid(Environment.ProcessId).Identity;
+        var pipeName = AgentPipeName.Compute(identity);
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+
+        using var controller = new AutomationController();
+        SetPrivateField(
+            controller,
+            "_application",
+            FlaUI.Core.Application.Attach(Environment.ProcessId));
+        SetPrivateField(controller, "_processIdentity", (ProcessInstanceIdentity?)identity);
+        SetPrivateField(controller, "_agentAutoConnectFailure", FailureDiagnostics.PipeFailure());
+        SetPrivateField(
+            controller,
+            "_agentAutoConnectFailureAtUtc",
+            (DateTimeOffset?)DateTimeOffset.UtcNow);
+
+        Assert.That(controller.GetWpfBackendCapabilityState().State, Is.EqualTo("unavailable"));
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var acceptTask = server.WaitForConnectionAsync(timeout.Token);
+        var refreshTask = controller.RefreshWpfBackendCapabilityAsync(timeout.Token);
+        await acceptTask.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var pingRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+        await PipeProtocol.WriteAsync(
+            server,
+            new AgentResponse(pingRequest.Id, Ok: true, Result: JsonValue.Create("pong")),
+            timeout.Token);
+        var capabilitiesRequest = await PipeProtocol.ReadAsync<AgentRequest>(server, timeout.Token);
+        await PipeProtocol.WriteAsync(
+            server,
+            new AgentResponse(
+                capabilitiesRequest.Id,
+                Ok: true,
+                Result: JsonSerializer.SerializeToNode(
+                    new AgentCapabilitiesResponse(
+                        AgentProtocolCapabilities.CurrentProtocolVersion,
+                        []))),
+            timeout.Token);
+
+        Assert.That(await refreshTask.WaitAsync(TimeSpan.FromSeconds(2)), Is.True);
+        var capability = controller.GetWpfBackendCapabilityState();
+        Assert.Multiple(() =>
+        {
+            Assert.That(capability.State, Is.EqualTo("ready"));
+            Assert.That(capability.Failure, Is.Null);
+        });
     }
 
     private static async Task WaitUntilControllerDisposalStartsAsync(AutomationController controller)
