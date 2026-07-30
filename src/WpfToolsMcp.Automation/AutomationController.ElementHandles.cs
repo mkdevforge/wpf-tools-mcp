@@ -884,7 +884,7 @@ public sealed partial class AutomationController
         ITreeWalker rawWalker,
         string elementId,
         out string xpathUsed,
-        bool requireStableIdentity = false)
+        UiaHandleResolutionMode resolutionMode)
     {
         var handle = RequireHandle(elementId);
         if (handle.Backend != InspectionBackend.Uia)
@@ -903,21 +903,14 @@ public sealed partial class AutomationController
                 var actual = TryGetRuntimeId(resolved);
                 if (actual is null || !actual.SequenceEqual(storedRuntimeId))
                 {
-                    if (requireStableIdentity)
+                    if (resolutionMode == UiaHandleResolutionMode.RequireRegisteredIdentity)
                     {
                         throw new InvalidOperationException(
                             $"stale_element: identity_changed for '{elementId}'. Call resolve_element again.");
                     }
-
-                    // UIA runtime ids can legitimately change for templated/virtualized elements.
-                    // Prefer "healing" the handle by updating the stored runtime id as long as the XPath still resolves.
-                    if (actual is not null)
-                    {
-                        _elementHandles.TryUpdateUiaRuntimeId(elementId, actual);
-                    }
                 }
             }
-            else if (requireStableIdentity)
+            else if (resolutionMode == UiaHandleResolutionMode.RequireRegisteredIdentity)
             {
                 throw new InvalidOperationException(
                     $"stale_element: identity_unverifiable for '{elementId}'. Call resolve_element again.");
@@ -929,6 +922,12 @@ public sealed partial class AutomationController
         {
             throw new InvalidOperationException($"stale_element: not_found for '{elementId}'. Call resolve_element again.");
         }
+    }
+
+    private enum UiaHandleResolutionMode
+    {
+        ObserveCurrentXPathOccupant,
+        RequireRegisteredIdentity
     }
 
     private AutomationElement ResolveUiaElementByWpfHandle(
@@ -1275,29 +1274,6 @@ public sealed partial class AutomationController
                 return (
                     _entries.Keys.ToArray(),
                     _entries.Values.Select(entry => entry.WindowHandle).Distinct().ToArray());
-            }
-        }
-
-        public bool TryUpdateUiaRuntimeId(string elementId, int[] runtimeId)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(elementId);
-            ArgumentNullException.ThrowIfNull(runtimeId);
-
-            lock (_sync)
-            {
-                if (!_entries.TryGetValue(elementId, out var existing))
-                {
-                    return false;
-                }
-
-                if (existing.Backend != InspectionBackend.Uia)
-                {
-                    return false;
-                }
-
-                _entries[elementId] = existing with { UiaRuntimeId = runtimeId };
-                Touch(elementId);
-                return true;
             }
         }
 

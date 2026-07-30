@@ -23,10 +23,13 @@ public sealed partial class AutomationController
 
             var preparedSequence = KeyboardInputEngine.BuildSequence(request.Sequence);
             var policy = InteractionPolicyResolver.Resolve(request.InteractionPolicy);
-            EnsurePhysicalInputAllowed(
-                operation: "send_keys",
-                policy,
-                semanticAlternative: "send_keys has no semantic-input path.");
+            if (!hasElementId)
+            {
+                EnsurePhysicalInputAllowed(
+                    operation: "send_keys",
+                    policy,
+                    semanticAlternative: "send_keys has no semantic-input path.");
+            }
 
             var application = EnsureAttached();
             var automation = EnsureAutomation();
@@ -123,7 +126,12 @@ public sealed partial class AutomationController
                 }
                 else if (handle.Backend == InspectionBackend.Uia)
                 {
-                    uiaElement = ResolveUiaElementById(window, rawWalker, elementId, out _);
+                    uiaElement = ResolveUiaElementById(
+                        window,
+                        rawWalker,
+                        elementId,
+                        out _,
+                        UiaHandleResolutionMode.RequireRegisteredIdentity);
                 }
                 else
                 {
@@ -186,6 +194,14 @@ public sealed partial class AutomationController
                             rawWalker,
                             ActionKind.Inspect);
                 }
+            }
+
+            if (hasElementId)
+            {
+                EnsurePhysicalInputAllowed(
+                    operation: "send_keys",
+                    policy,
+                    semanticAlternative: "send_keys has no semantic-input path.");
             }
 
             var targetEffects = new InteractionEffectTracker();

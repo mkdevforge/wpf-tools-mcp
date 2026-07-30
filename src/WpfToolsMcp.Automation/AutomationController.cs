@@ -1006,7 +1006,9 @@ public sealed partial class AutomationController : IDisposable
                             rawWalker,
                             elementId,
                             out _,
-                            request.RequireStableElementIdentity);
+                            request.RequireStableElementIdentity || autoScroll
+                                ? UiaHandleResolutionMode.RequireRegisteredIdentity
+                                : UiaHandleResolutionMode.ObserveCurrentXPathOccupant);
 
                         if (autoScroll)
                         {
@@ -2304,7 +2306,12 @@ public sealed partial class AutomationController : IDisposable
 
             if (handle.Backend == InspectionBackend.Uia)
             {
-                element = ResolveUiaElementById(window, rawWalker, elementId, out _);
+                element = ResolveUiaElementById(
+                    window,
+                    rawWalker,
+                    elementId,
+                    out _,
+                    UiaHandleResolutionMode.RequireRegisteredIdentity);
             }
             else if (handle.Backend != InspectionBackend.Wpf)
             {
@@ -2824,7 +2831,12 @@ public sealed partial class AutomationController : IDisposable
                 }
                 else if (handle.Backend == InspectionBackend.Uia)
                 {
-                    element = ResolveUiaElementById(window, rawWalker, elementId, out _);
+                    element = ResolveUiaElementById(
+                        window,
+                        rawWalker,
+                        elementId,
+                        out _,
+                        UiaHandleResolutionMode.RequireRegisteredIdentity);
                 }
                 else
                 {
@@ -3147,7 +3159,12 @@ public sealed partial class AutomationController : IDisposable
                 }
                 else if (handle.Backend == InspectionBackend.Uia)
                 {
-                    element = ResolveUiaElementById(window, rawWalker, elementId, out _);
+                    element = ResolveUiaElementById(
+                        window,
+                        rawWalker,
+                        elementId,
+                        out _,
+                        UiaHandleResolutionMode.RequireRegisteredIdentity);
                 }
                 else
                 {
@@ -3512,7 +3529,12 @@ public sealed partial class AutomationController : IDisposable
                 }
                 else if (handle.Backend == InspectionBackend.Uia)
                 {
-                    element = ResolveUiaElementById(window, rawWalker, elementId, out _);
+                    element = ResolveUiaElementById(
+                        window,
+                        rawWalker,
+                        elementId,
+                        out _,
+                        UiaHandleResolutionMode.RequireRegisteredIdentity);
                 }
                 else
                 {
@@ -3821,6 +3843,8 @@ public sealed partial class AutomationController : IDisposable
 
         var controlWalker = automation.TreeWalkerFactory.GetControlViewWalker();
         var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+        ElementHandle? itemHandleFromId = null;
+        AutomationElement? itemFromElementId = null;
 
         if (hasElementId)
         {
@@ -3853,7 +3877,12 @@ public sealed partial class AutomationController : IDisposable
             }
             else if (handle.Backend == InspectionBackend.Uia)
             {
-                container = ResolveUiaElementById(window, rawWalker, elementId, out _);
+                container = ResolveUiaElementById(
+                    window,
+                    rawWalker,
+                    elementId,
+                    out _,
+                    UiaHandleResolutionMode.RequireRegisteredIdentity);
             }
             else
             {
@@ -3877,6 +3906,31 @@ public sealed partial class AutomationController : IDisposable
                     ActionKind.SelectItem,
                     cancellationToken)
                 : ResolveElement(window, request.Locator!, controlWalker, rawWalker, ActionKind.SelectItem);
+        }
+
+        if (hasItemElementId)
+        {
+            var itemElementId = request.ItemElementId!.Trim();
+            itemHandleFromId = RequireHandle(itemElementId);
+
+            if (itemHandleFromId.WindowHandle != window.Properties.NativeWindowHandle.Value.ToInt64())
+            {
+                throw new ArgumentException("itemElementId window does not match container window.");
+            }
+
+            if (itemHandleFromId.Backend == InspectionBackend.Uia)
+            {
+                itemFromElementId = ResolveUiaElementById(
+                    window,
+                    rawWalker,
+                    itemElementId,
+                    out _,
+                    UiaHandleResolutionMode.RequireRegisteredIdentity);
+            }
+            else if (itemHandleFromId.Backend != InspectionBackend.Wpf)
+            {
+                throw new InvalidOperationException($"itemElementId '{itemElementId}' has unsupported backend '{itemHandleFromId.Backend}'.");
+            }
         }
 
         TryScrollIntoView(container);
@@ -3911,32 +3965,15 @@ public sealed partial class AutomationController : IDisposable
         if (hasItemElementId)
         {
             var itemElementId = request.ItemElementId!.Trim();
-            var itemHandle = RequireHandle(itemElementId);
-
-            if (itemHandle.WindowHandle != window.Properties.NativeWindowHandle.Value.ToInt64())
-            {
-                throw new ArgumentException("itemElementId window does not match container window.");
-            }
-
-            AutomationElement item;
-            if (itemHandle.Backend == InspectionBackend.Wpf)
-            {
-                item = ResolveUiaElementByWpfHandle(
+            var item = itemHandleFromId!.Backend == InspectionBackend.Wpf
+                ? ResolveUiaElementByWpfHandle(
                     window,
                     controlWalker,
                     rawWalker,
                     itemElementId,
-                    itemHandle,
-                    out _);
-            }
-            else if (itemHandle.Backend == InspectionBackend.Uia)
-            {
-                item = ResolveUiaElementById(window, rawWalker, itemElementId, out _);
-            }
-            else
-            {
-                throw new InvalidOperationException($"itemElementId '{itemElementId}' has unsupported backend '{itemHandle.Backend}'.");
-            }
+                    itemHandleFromId,
+                    out _)
+                : itemFromElementId!;
             TryScrollIntoView(item);
             var methodUsed = await SelectItemElementAsync(
                 window,
@@ -4123,6 +4160,7 @@ public sealed partial class AutomationController : IDisposable
         string? idForWindow = null;
         long? windowHandleFromId = null;
         ElementHandle? elementHandleFromId = null;
+        ElementHandle? containerHandleFromId = null;
         if (hasElementId)
         {
             idForWindow = request.ElementId!.Trim();
@@ -4130,11 +4168,19 @@ public sealed partial class AutomationController : IDisposable
             windowHandleFromId = handle.WindowHandle;
             elementHandleFromId = handle;
         }
-        else if (!string.IsNullOrWhiteSpace(request.ContainerElementId))
+
+        if (!string.IsNullOrWhiteSpace(request.ContainerElementId))
         {
-            idForWindow = request.ContainerElementId!.Trim();
-            var handle = RequireHandle(idForWindow);
-            windowHandleFromId = handle.WindowHandle;
+            var containerElementId = request.ContainerElementId!.Trim();
+            var handle = RequireHandle(containerElementId);
+            idForWindow ??= containerElementId;
+            windowHandleFromId ??= handle.WindowHandle;
+            containerHandleFromId = handle;
+
+            if (handle.WindowHandle != windowHandleFromId)
+            {
+                throw new ArgumentException("elementId and containerElementId must refer to the same window.");
+            }
         }
 
         if (windowHandleFromId is long resolvedHandle)
@@ -4158,6 +4204,45 @@ public sealed partial class AutomationController : IDisposable
             window = request.WindowHandle is long requestedHandle
                 ? FindWindowByHandle(application, automation, requestedHandle)
                 : FindMainWindow(application, automation);
+        }
+
+        AutomationElement? elementFromId = null;
+        string? targetXPathFromId = null;
+        if (elementHandleFromId is not null)
+        {
+            if (elementHandleFromId.Backend == InspectionBackend.Uia)
+            {
+                elementFromId = ResolveUiaElementById(
+                    window,
+                    rawWalker,
+                    request.ElementId!.Trim(),
+                    out targetXPathFromId,
+                    UiaHandleResolutionMode.RequireRegisteredIdentity);
+            }
+            else if (elementHandleFromId.Backend != InspectionBackend.Wpf)
+            {
+                throw new InvalidOperationException(
+                    $"elementId '{request.ElementId!.Trim()}' has unsupported backend '{elementHandleFromId.Backend}'.");
+            }
+        }
+
+        AutomationElement? uiaContainerFromElementId = null;
+        if (containerHandleFromId is not null)
+        {
+            if (containerHandleFromId.Backend == InspectionBackend.Uia)
+            {
+                uiaContainerFromElementId = ResolveUiaElementById(
+                    window,
+                    rawWalker,
+                    request.ContainerElementId!.Trim(),
+                    out _,
+                    UiaHandleResolutionMode.RequireRegisteredIdentity);
+            }
+            else if (containerHandleFromId.Backend != InspectionBackend.Wpf)
+            {
+                throw new InvalidOperationException(
+                    $"containerElementId '{request.ContainerElementId!.Trim()}' has unsupported backend '{containerHandleFromId.Backend}'.");
+            }
         }
 
         if (hasLocator)
@@ -4246,7 +4331,7 @@ public sealed partial class AutomationController : IDisposable
         if (!string.IsNullOrWhiteSpace(request.ContainerElementId))
         {
             var containerElementId = request.ContainerElementId!.Trim();
-            var containerHandle = RequireHandle(containerElementId);
+            var containerHandle = containerHandleFromId!;
 
             if (containerHandle.Backend == InspectionBackend.Wpf)
             {
@@ -4279,7 +4364,7 @@ public sealed partial class AutomationController : IDisposable
             }
             else if (containerHandle.Backend == InspectionBackend.Uia)
             {
-                container = ResolveUiaElementById(window, rawWalker, containerElementId, out _);
+                container = uiaContainerFromElementId!;
             }
             else
             {
@@ -4300,8 +4385,10 @@ public sealed partial class AutomationController : IDisposable
 
         if (hasElementId)
         {
-            element = ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out var xpathUsed);
-            targetXPath = xpathUsed;
+            element = elementFromId
+                ?? throw new InvalidOperationException(
+                    $"elementId '{request.ElementId!.Trim()}' could not be resolved through UI Automation.");
+            targetXPath = targetXPathFromId;
         }
         else if (container is not null && string.IsNullOrWhiteSpace(request.Locator!.XPath))
         {
@@ -4430,10 +4517,6 @@ public sealed partial class AutomationController : IDisposable
         {
         var policy = InteractionPolicyResolver.Resolve(request.InteractionPolicy);
         var effects = new InteractionEffectTracker();
-        EnsurePhysicalInputAllowed(
-            operation: "drag",
-            policy,
-            semanticAlternative: "Drag has no semantic automation equivalent.");
         var hasLocator = request.Locator is not null;
         var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
         if (hasLocator == hasElementId)
@@ -4444,6 +4527,13 @@ public sealed partial class AutomationController : IDisposable
         var hasTargetLocator = request.TargetLocator is not null;
         var hasTargetElementId = !string.IsNullOrWhiteSpace(request.TargetElementId);
         var hasAnyCoordinate = request.ToX is not null || request.ToY is not null;
+        if (!hasElementId && !hasTargetElementId)
+        {
+            EnsurePhysicalInputAllowed(
+                operation: "drag",
+                policy,
+                semanticAlternative: "Drag has no semantic automation equivalent.");
+        }
 
         if (hasTargetLocator && (hasTargetElementId || hasAnyCoordinate))
         {
@@ -4499,9 +4589,7 @@ public sealed partial class AutomationController : IDisposable
 
         if (hasElementId && hasTargetElementId)
         {
-            var sourceHandle = RequireHandle(request.ElementId!.Trim());
-            var targetHandle = RequireHandle(request.TargetElementId!.Trim());
-            if (sourceHandle.WindowHandle != targetHandle.WindowHandle)
+            if (sourceHandleFromId!.WindowHandle != targetHandleFromId!.WindowHandle)
             {
                 throw new ArgumentException("elementId and targetElementId must refer to the same window.");
             }
@@ -4530,6 +4618,52 @@ public sealed partial class AutomationController : IDisposable
                 : FindMainWindow(application, automation);
         }
 
+        AutomationElement? sourceElementFromId = null;
+        if (sourceHandleFromId is not null)
+        {
+            if (sourceHandleFromId.Backend == InspectionBackend.Uia)
+            {
+                sourceElementFromId = ResolveUiaElementById(
+                    window,
+                    rawWalker,
+                    request.ElementId!.Trim(),
+                    out _,
+                    UiaHandleResolutionMode.RequireRegisteredIdentity);
+            }
+            else if (sourceHandleFromId.Backend != InspectionBackend.Wpf)
+            {
+                throw new InvalidOperationException(
+                    $"elementId '{request.ElementId!.Trim()}' has unsupported backend '{sourceHandleFromId.Backend}'.");
+            }
+        }
+
+        AutomationElement? targetElementFromId = null;
+        if (targetHandleFromId is not null)
+        {
+            if (targetHandleFromId.Backend == InspectionBackend.Uia)
+            {
+                targetElementFromId = ResolveUiaElementById(
+                    window,
+                    rawWalker,
+                    request.TargetElementId!.Trim(),
+                    out _,
+                    UiaHandleResolutionMode.RequireRegisteredIdentity);
+            }
+            else if (targetHandleFromId.Backend != InspectionBackend.Wpf)
+            {
+                throw new InvalidOperationException(
+                    $"targetElementId '{request.TargetElementId!.Trim()}' has unsupported backend '{targetHandleFromId.Backend}'.");
+            }
+        }
+
+        if (hasElementId || hasTargetElementId)
+        {
+            EnsurePhysicalInputAllowed(
+                operation: "drag",
+                policy,
+                semanticAlternative: "Drag has no semantic automation equivalent.");
+        }
+
         await PrepareWindowForPhysicalInputAsync(
             window,
             operation: "drag",
@@ -4556,7 +4690,7 @@ public sealed partial class AutomationController : IDisposable
             }
             else if (handle.Backend == InspectionBackend.Uia)
             {
-                var source = ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out _);
+                var source = sourceElementFromId!;
                 TryScrollIntoView(source);
                 EnsureEnabledOrThrow(source, "drag");
 
@@ -4654,7 +4788,7 @@ public sealed partial class AutomationController : IDisposable
             }
             else if (handle.Backend == InspectionBackend.Uia)
             {
-                var target = ResolveUiaElementById(window, rawWalker, request.TargetElementId!.Trim(), out _);
+                var target = targetElementFromId!;
                 TryScrollIntoView(target);
                 if (request.AutoWait)
                 {
@@ -5001,7 +5135,12 @@ public sealed partial class AutomationController : IDisposable
             {
                 if (hasElementId)
                 {
-                    element = ResolveUiaElementById(window, rawWalker, request.ElementId!.Trim(), out _);
+                    element = ResolveUiaElementById(
+                        window,
+                        rawWalker,
+                        request.ElementId!.Trim(),
+                        out _,
+                        UiaHandleResolutionMode.ObserveCurrentXPathOccupant);
                 }
                 else
                 {
@@ -8615,7 +8754,9 @@ public sealed partial class AutomationController : IDisposable
                     rawWalker,
                     id,
                     out rootXPath,
-                    requireStableRootIdentity);
+                    requireStableRootIdentity
+                        ? UiaHandleResolutionMode.RequireRegisteredIdentity
+                        : UiaHandleResolutionMode.ObserveCurrentXPathOccupant);
             }
             else
             {
@@ -8998,7 +9139,12 @@ public sealed partial class AutomationController : IDisposable
             }
 
             var resolvedWalker = automation.TreeWalkerFactory.GetRawViewWalker();
-            _ = ResolveUiaElementById(resolvedWindow, resolvedWalker, id, out _);
+            _ = ResolveUiaElementById(
+                resolvedWindow,
+                resolvedWalker,
+                id,
+                out _,
+                UiaHandleResolutionMode.ObserveCurrentXPathOccupant);
             var uiaResponseFromId = new GetPathToElementResponse(InspectionBackend.Uia, handle.XPath);
             trace?.SetSummary($"{uiaResponseFromId.BackendUsed} {uiaResponseFromId.XPath}");
             return uiaResponseFromId;
@@ -9123,7 +9269,9 @@ public sealed partial class AutomationController : IDisposable
                     rawWalker,
                     id,
                     out xpath,
-                    requireStableElementIdentity);
+                    requireStableElementIdentity
+                        ? UiaHandleResolutionMode.RequireRegisteredIdentity
+                        : UiaHandleResolutionMode.ObserveCurrentXPathOccupant);
             }
             else
             {
@@ -9346,7 +9494,12 @@ public sealed partial class AutomationController : IDisposable
                 }
                 else
                 {
-                    element = ResolveUiaElementById(window, rawWalker, id, out uiaXPath);
+                    element = ResolveUiaElementById(
+                        window,
+                        rawWalker,
+                        id,
+                        out uiaXPath,
+                        UiaHandleResolutionMode.ObserveCurrentXPathOccupant);
                 }
             }
             else

@@ -315,7 +315,12 @@ public sealed partial class AutomationController
 
         if (!string.IsNullOrWhiteSpace(elementId))
         {
-            element = ResolveUiaElementById(window, rawWalker, elementId.Trim(), out _);
+            element = ResolveUiaElementById(
+                window,
+                rawWalker,
+                elementId.Trim(),
+                out _,
+                UiaHandleResolutionMode.RequireRegisteredIdentity);
         }
         else
         {
