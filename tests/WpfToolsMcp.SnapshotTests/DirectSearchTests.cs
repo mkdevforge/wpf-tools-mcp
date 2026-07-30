@@ -161,7 +161,7 @@ public sealed class DirectSearchTests
                 });
 
                 var ambiguity = JsonSerializer.Deserialize<ResolveElementAmbiguity>(
-                    result.StructuredContent!.ToJsonString(),
+                    result.StructuredContent!.Value.GetRawText(),
                     JsonOptions);
 
                 Assert.That(ambiguity, Is.Not.Null);
@@ -219,7 +219,7 @@ public sealed class DirectSearchTests
                 });
 
                 var capped = JsonSerializer.Deserialize<ResolveElementAmbiguity>(
-                    cappedResult.StructuredContent!.ToJsonString(),
+                    cappedResult.StructuredContent!.Value.GetRawText(),
                     JsonOptions);
 
                 Assert.That(capped, Is.Not.Null);

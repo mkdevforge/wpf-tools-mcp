@@ -8,7 +8,7 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class WaitTools
 {
-    [McpServerTool(Name = "wait_for"), Description("Wait for an element or window to satisfy a legacy state or structured condition.")]
+    [McpServerTool(Name = "wait_for", UseStructuredContent = true), Description("Wait for an element or window to satisfy a legacy state or structured condition.")]
     public static Task<WaitForResponse> WaitFor(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

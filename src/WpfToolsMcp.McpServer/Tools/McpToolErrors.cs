@@ -36,7 +36,7 @@ internal static class McpToolErrors
         try
         {
             var response = await action().ConfigureAwait(false);
-            var structuredContent = JsonSerializer.SerializeToNode(
+            var structuredContent = JsonSerializer.SerializeToElement(
                 response,
                 McpJsonUtilities.DefaultOptions);
             return new CallToolResult
@@ -45,8 +45,7 @@ internal static class McpToolErrors
                 [
                     new TextContentBlock
                     {
-                        Text = structuredContent?.ToJsonString(McpJsonUtilities.DefaultOptions)
-                            ?? "null"
+                        Text = structuredContent.GetRawText()
                     }
                 ],
                 StructuredContent = structuredContent
@@ -67,7 +66,7 @@ internal static class McpToolErrors
             {
                 IsError = true,
                 Content = [new TextContentBlock { Text = $"tool={tool}: {ex.Message}" }],
-                StructuredContent = JsonSerializer.SerializeToNode(
+                StructuredContent = JsonSerializer.SerializeToElement(
                     ex.Ambiguity,
                     McpJsonUtilities.DefaultOptions)
             };
@@ -99,7 +98,7 @@ internal static class McpToolErrors
         try
         {
             var response = await action().ConfigureAwait(false);
-            var structuredContent = JsonSerializer.SerializeToNode(
+            var structuredContent = JsonSerializer.SerializeToElement(
                 response,
                 McpJsonUtilities.DefaultOptions);
             return new CallToolResult
@@ -108,7 +107,7 @@ internal static class McpToolErrors
                 [
                     new TextContentBlock
                     {
-                        Text = structuredContent?.ToJsonString(McpJsonUtilities.DefaultOptions) ?? "null"
+                        Text = structuredContent.GetRawText()
                     }
                 ],
                 StructuredContent = structuredContent
@@ -129,7 +128,7 @@ internal static class McpToolErrors
             {
                 IsError = true,
                 Content = [new TextContentBlock { Text = $"tool={tool}: {ex.Message}" }],
-                StructuredContent = JsonSerializer.SerializeToNode(
+                StructuredContent = JsonSerializer.SerializeToElement(
                     ex.Ambiguity,
                     McpJsonUtilities.DefaultOptions)
             };
@@ -148,7 +147,7 @@ internal static class McpToolErrors
         ActionableFailureException exception,
         string toolName)
     {
-        var structuredContent = JsonSerializer.SerializeToNode(
+        var structuredContent = JsonSerializer.SerializeToElement(
             exception.Failure,
             McpJsonUtilities.DefaultOptions);
         return new CallToolResult

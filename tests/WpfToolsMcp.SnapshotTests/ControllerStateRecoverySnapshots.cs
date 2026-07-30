@@ -625,7 +625,7 @@ public sealed class ControllerStateRecoverySnapshots
             });
 
             var ambiguity = JsonSerializer.Deserialize<ProcessSelectionAmbiguity>(
-                result.StructuredContent!.ToJsonString(),
+                result.StructuredContent!.Value.GetRawText(),
                 new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
             Assert.That(ambiguity, Is.Not.Null);
@@ -731,7 +731,7 @@ public sealed class ControllerStateRecoverySnapshots
                 ["reuseExistingInstance"] = true
             });
             var ambiguity = JsonSerializer.Deserialize<ProcessSelectionAmbiguity>(
-                ambiguousResult.StructuredContent!.ToJsonString(),
+                ambiguousResult.StructuredContent!.Value.GetRawText(),
                 new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
             Assert.Multiple(() =>
@@ -1019,7 +1019,7 @@ public sealed class ControllerStateRecoverySnapshots
             });
 
             var ambiguity = JsonSerializer.Deserialize<ProcessSelectionAmbiguity>(
-                result.StructuredContent!.ToJsonString(),
+                result.StructuredContent!.Value.GetRawText(),
                 new JsonSerializerOptions(JsonSerializerDefaults.Web));
             Assert.That(ambiguity, Is.Not.Null);
             Assert.Multiple(() =>

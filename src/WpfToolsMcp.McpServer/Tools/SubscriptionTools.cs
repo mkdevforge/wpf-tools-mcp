@@ -9,7 +9,7 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class SubscriptionTools
 {
-    [McpServerTool(Name = "subscribe_property_changes"), Description("Capture event-driven WPF dependency-property and DataContext changes for one element. cadenceMs controls bounded delivery, not sampling. Diagnostics profile only; the WPF agent is injected automatically when needed.")]
+    [McpServerTool(Name = "subscribe_property_changes", UseStructuredContent = true), Description("Capture event-driven WPF dependency-property and DataContext changes for one element. cadenceMs controls bounded delivery, not sampling. Diagnostics profile only; the WPF agent is injected automatically when needed.")]
     public static Task<SubscribePropertyChangesResponse> SubscribePropertyChanges(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -102,7 +102,7 @@ public static class SubscriptionTools
             }, cancellationToken).ConfigureAwait(false);
         });
 
-    [McpServerTool(Name = "subscribe_binding_errors"), Description("Subscribe to binding errors in the WPF visual tree (poll-based). Requires inject_agent.")]
+    [McpServerTool(Name = "subscribe_binding_errors", UseStructuredContent = true), Description("Subscribe to binding errors in the WPF visual tree (poll-based). Requires inject_agent.")]
     public static Task<SubscribeBindingErrorsResponse> SubscribeBindingErrors(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -162,7 +162,7 @@ public static class SubscriptionTools
             }, cancellationToken);
         });
 
-    [McpServerTool(Name = "poll_subscription"), Description("Poll a subscription for queued events.")]
+    [McpServerTool(Name = "poll_subscription", UseStructuredContent = true), Description("Poll a subscription for queued events.")]
     public static Task<PollSubscriptionResponse> PollSubscription(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -210,7 +210,7 @@ public static class SubscriptionTools
             }
         });
 
-    [McpServerTool(Name = "unsubscribe"), Description("Unsubscribe a subscription.")]
+    [McpServerTool(Name = "unsubscribe", UseStructuredContent = true), Description("Unsubscribe a subscription.")]
     public static Task<UnsubscribeResponse> Unsubscribe(
         SessionManager sessions,
         SubscriptionManager subscriptions,

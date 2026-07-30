@@ -8,7 +8,7 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class AgentTools
 {
-    [McpServerTool(Name = "inject_agent"), Description("Inject the WPF Tools MCP in-process inspection agent (Snoop-based) into the attached application.")]
+    [McpServerTool(Name = "inject_agent", UseStructuredContent = true), Description("Inject the WPF Tools MCP in-process inspection agent (Snoop-based) into the attached application.")]
     public static Task<InjectAgentResponse> InjectAgent(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -19,7 +19,7 @@ public static class AgentTools
             return automation.RunExclusiveAsync(() => automation.InjectAgentAsync(cancellationToken), cancellationToken);
         });
 
-    [McpServerTool(Name = "agent_ping"), Description("Ping the injected agent over the named pipe.")]
+    [McpServerTool(Name = "agent_ping", UseStructuredContent = true), Description("Ping the injected agent over the named pipe.")]
     public static Task<AgentPingResponse> AgentPing(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -30,7 +30,7 @@ public static class AgentTools
             return automation.RunExclusiveAsync(() => automation.AgentPingAsync(cancellationToken), cancellationToken);
         });
 
-    [McpServerTool(Name = "get_binding_info"), Description("Inspect bindings for a WPF element via the injected agent.")]
+    [McpServerTool(Name = "get_binding_info", UseStructuredContent = true), Description("Inspect bindings for a WPF element via the injected agent.")]
     public static Task<GetBindingInfoResponse> GetBindingInfo(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -50,7 +50,7 @@ public static class AgentTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_binding_errors"), Description("List binding errors in the WPF visual tree via the injected agent.")]
+    [McpServerTool(Name = "get_binding_errors", UseStructuredContent = true), Description("List binding errors in the WPF visual tree via the injected agent.")]
     public static Task<GetBindingErrorsResponse> GetBindingErrors(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -68,7 +68,7 @@ public static class AgentTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "uia_coverage_report"), Description("Report UIA automation coverage gaps for WPF visual elements via the injected agent. Requires inject_agent.")]
+    [McpServerTool(Name = "uia_coverage_report", UseStructuredContent = true), Description("Report UIA automation coverage gaps for WPF visual elements via the injected agent. Requires inject_agent.")]
     public static Task<GetUiaCoverageReportResponse> GetUiaCoverageReport(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -98,7 +98,7 @@ public static class AgentTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_data_context"), Description("Serialize the DataContext of a WPF element via the injected agent.")]
+    [McpServerTool(Name = "get_data_context", UseStructuredContent = true), Description("Serialize the DataContext of a WPF element via the injected agent.")]
     public static Task<GetDataContextResponse> GetDataContext(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -133,7 +133,7 @@ public static class AgentTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_computed_properties"), Description("Inspect computed dependency property values for a WPF element via the injected agent.")]
+    [McpServerTool(Name = "get_computed_properties", UseStructuredContent = true), Description("Inspect computed dependency property values for a WPF element via the injected agent.")]
     public static Task<GetComputedPropertiesResponse> GetComputedProperties(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -170,7 +170,7 @@ public static class AgentTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_layout_context"), Description("Inspect WPF layout metrics, transforms, clipping, ancestors, nearby siblings, and Grid allocation via the injected agent.")]
+    [McpServerTool(Name = "get_layout_context", UseStructuredContent = true), Description("Inspect WPF layout metrics, transforms, clipping, ancestors, nearby siblings, and Grid allocation via the injected agent.")]
     public static Task<GetLayoutContextResponse> GetLayoutContext(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -197,7 +197,7 @@ public static class AgentTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_style_chain"), Description("Inspect the style chain for a WPF element via the injected agent.")]
+    [McpServerTool(Name = "get_style_chain", UseStructuredContent = true), Description("Inspect the style chain for a WPF element via the injected agent.")]
     public static Task<GetStyleChainResponse> GetStyleChain(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -217,7 +217,7 @@ public static class AgentTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_template_info"), Description("Inspect the applied template for a WPF element via the injected agent.")]
+    [McpServerTool(Name = "get_template_info", UseStructuredContent = true), Description("Inspect the applied template for a WPF element via the injected agent.")]
     public static Task<GetTemplateInfoResponse> GetTemplateInfo(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

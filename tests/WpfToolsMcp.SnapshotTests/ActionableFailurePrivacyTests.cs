@@ -22,7 +22,7 @@ public sealed class ActionableFailurePrivacyTests
         });
 
         var failure = JsonSerializer.Deserialize<FailureInfo>(
-            result.StructuredContent!.ToJsonString(),
+            result.StructuredContent!.Value.GetRawText(),
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
         var text = result.Content.OfType<TextContentBlock>().Single().Text;
 
@@ -35,7 +35,7 @@ public sealed class ActionableFailurePrivacyTests
             Assert.That(text, Does.Contain("process_not_found"));
             Assert.That(text, Does.Contain(failure.Detail));
             Assert.That(text, Does.Not.Contain(PrivateSentinel));
-            Assert.That(result.StructuredContent!.ToJsonString(), Does.Not.Contain(PrivateSentinel));
+            Assert.That(result.StructuredContent!.Value.GetRawText(), Does.Not.Contain(PrivateSentinel));
         });
     }
 
@@ -51,7 +51,7 @@ public sealed class ActionableFailurePrivacyTests
             ["exePath"] = missingExecutable
         });
         var failure = JsonSerializer.Deserialize<FailureInfo>(
-            result.StructuredContent!.ToJsonString(),
+            result.StructuredContent!.Value.GetRawText(),
             new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         Assert.Multiple(() =>

@@ -8,7 +8,7 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class TraceTools
 {
-    [McpServerTool(Name = "trace_start"), Description("Start a lightweight trace of MCP tool actions for a session.")]
+    [McpServerTool(Name = "trace_start", UseStructuredContent = true), Description("Start a lightweight trace of MCP tool actions for a session.")]
     public static Task<TraceStartResponse> TraceStart(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -20,7 +20,7 @@ public static class TraceTools
             return automation.RunExclusiveAsync(() => automation.TraceStartAsync(resetIfRunning, cancellationToken), cancellationToken);
         });
 
-    [McpServerTool(Name = "trace_stop"), Description("Stop an active trace, write it to a JSON file, and return a summary.")]
+    [McpServerTool(Name = "trace_stop", UseStructuredContent = true), Description("Stop an active trace, write it to a JSON file, and return a summary.")]
     public static Task<TraceStopResponse> TraceStop(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

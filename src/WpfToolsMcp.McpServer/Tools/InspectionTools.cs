@@ -9,7 +9,7 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class InspectionTools
 {
-    [McpServerTool(Name = "get_visual_tree"), Description("Return an inspection tree (UIA or WPF) for the main window or a subtree.")]
+    [McpServerTool(Name = "get_visual_tree", UseStructuredContent = true), Description("Return an inspection tree (UIA or WPF) for the main window or a subtree.")]
     public static Task<GetVisualTreeResponse> GetVisualTree(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -45,7 +45,7 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_element_properties"), Description("Return bounded UIA properties and supported patterns. Values cap strings at 2,000 characters, collections at 50 items, depth at 2, and share a 20,000-character budget; oversized XPaths are omitted.")]
+    [McpServerTool(Name = "get_element_properties", UseStructuredContent = true), Description("Return bounded UIA properties and supported patterns. Values cap strings at 2,000 characters, collections at 50 items, depth at 2, and share a 20,000-character budget; oversized XPaths are omitted.")]
     public static Task<GetElementPropertiesResponse> GetElementProperties(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -70,7 +70,7 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_uia_locators"), Description("Return UIA locator suggestions and FlaUI snippets for a WPF or UIA element.")]
+    [McpServerTool(Name = "get_uia_locators", UseStructuredContent = true), Description("Return UIA locator suggestions and FlaUI snippets for a WPF or UIA element.")]
     public static Task<GetUiaLocatorsResponse> GetUiaLocators(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -87,7 +87,7 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_uia_tree"), Description("Return a bounded UIA automation tree for a window or subtree.")]
+    [McpServerTool(Name = "get_uia_tree", UseStructuredContent = true), Description("Return a bounded UIA automation tree for a window or subtree.")]
     public static Task<GetUiaTreeResponse> GetUiaTree(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -106,7 +106,7 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "find_elements"), Description("Find deterministic, bounded matches without dumping the full tree.")]
+    [McpServerTool(Name = "find_elements", UseStructuredContent = true), Description("Find deterministic, bounded matches without dumping the full tree.")]
     public static Task<FindElementsResponse> FindElements(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -144,7 +144,7 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_path_to_element"), Description("Get the XPath for a resolved element (UIA or WPF).")]
+    [McpServerTool(Name = "get_path_to_element", UseStructuredContent = true), Description("Get the XPath for a resolved element (UIA or WPF).")]
     public static Task<GetPathToElementResponse> GetPathToElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -162,7 +162,7 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "resolve_element"), Description("Resolve an element for re-use; ambiguity returns structured candidates.")]
+    [McpServerTool(Name = "resolve_element", UseStructuredContent = true, OutputSchemaType = typeof(ResolveElementResponse)), Description("Resolve an element for re-use; ambiguity returns structured candidates.")]
     public static Task<CallToolResult> ResolveElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -196,7 +196,7 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "release_element"), Description("Release an elementId handle.")]
+    [McpServerTool(Name = "release_element", UseStructuredContent = true), Description("Release an elementId handle.")]
     public static Task<ReleaseElementResponse> ReleaseElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -208,7 +208,7 @@ public static class InspectionTools
             return automation.RunExclusiveAsync(() => automation.ReleaseElementAsync(elementId), cancellationToken);
         });
 
-    [McpServerTool(Name = "pick_element_at_point"), Description("Pick an element at a coordinate (UIA or WPF).")]
+    [McpServerTool(Name = "pick_element_at_point", UseStructuredContent = true), Description("Pick an element at a coordinate (UIA or WPF).")]
     public static Task<PickElementAtPointResponse> PickElementAtPoint(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -239,7 +239,7 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "highlight_element"), Description("Highlight an element on-screen (locator or elementId).")]
+    [McpServerTool(Name = "highlight_element", UseStructuredContent = true), Description("Highlight an element on-screen (locator or elementId).")]
     public static Task<HighlightElementResponse> HighlightElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

@@ -8,7 +8,7 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class DiagnosticTools
 {
-    [McpServerTool(Name = "capture_diagnostic_snapshot"), Description("Capture selected, bounded diagnostic evidence for one pinned window or element. WPF sections share one dispatcher turn; cross-backend timing skew is reported.")]
+    [McpServerTool(Name = "capture_diagnostic_snapshot", UseStructuredContent = true), Description("Capture selected, bounded diagnostic evidence for one pinned window or element. WPF sections share one dispatcher turn; cross-backend timing skew is reported.")]
     public static Task<CaptureDiagnosticSnapshotResponse> CaptureDiagnosticSnapshot(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

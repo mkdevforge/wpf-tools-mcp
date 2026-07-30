@@ -10,7 +10,7 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class AppTools
 {
-    [McpServerTool(Name = "launch_app"), Description("Start a WPF application. Existing-instance fallback returns structured candidates when ambiguous.")]
+    [McpServerTool(Name = "launch_app", UseStructuredContent = true, OutputSchemaType = typeof(LaunchAppResponse)), Description("Start a WPF application. Existing-instance fallback returns structured candidates when ambiguous.")]
     public static Task<CallToolResult> LaunchApp(
         SessionManager sessions,
         [Description("Executable path")] string exePath,
@@ -31,7 +31,7 @@ public static class AppTools
                     interactionPolicy),
                 cancellationToken));
 
-    [McpServerTool(Name = "attach_to_app"), Description("Attach to one unambiguous process, or replace an exited session while preserving durable policy. Ambiguous names return structured candidates.")]
+    [McpServerTool(Name = "attach_to_app", UseStructuredContent = true, OutputSchemaType = typeof(AttachToAppResponse)), Description("Attach to one unambiguous process, or replace an exited session while preserving durable policy. Ambiguous names return structured candidates.")]
     public static Task<CallToolResult> AttachToApp(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -61,7 +61,7 @@ public static class AppTools
                 cancellationToken));
     }
 
-    [McpServerTool(Name = "detach_session"), Description("Remove an inspection session and release its resources without closing or terminating the target application.")]
+    [McpServerTool(Name = "detach_session", UseStructuredContent = true), Description("Remove an inspection session and release its resources without closing or terminating the target application.")]
     public static Task<DetachSessionResponse> DetachSession(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -73,7 +73,7 @@ public static class AppTools
                 () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
                 cancellationToken));
 
-    [McpServerTool(Name = "close_app"), Description("Request a graceful application close, remove the inspection session, and report the close request and observed process outcome separately.")]
+    [McpServerTool(Name = "close_app", UseStructuredContent = true), Description("Request a graceful application close, remove the inspection session, and report the close request and observed process outcome separately.")]
     public static Task<CloseAppResponse> CloseApp(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -87,7 +87,7 @@ public static class AppTools
                 () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
                 cancellationToken));
 
-    [McpServerTool(Name = "terminate_app"), Description("Forcefully terminate the target application, remove the inspection session, and report the observed process outcome.")]
+    [McpServerTool(Name = "terminate_app", UseStructuredContent = true), Description("Forcefully terminate the target application, remove the inspection session, and report the observed process outcome.")]
     public static Task<CloseAppResponse> TerminateApp(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -101,7 +101,7 @@ public static class AppTools
                 () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
                 cancellationToken));
 
-    [McpServerTool(Name = "close_session"), Description("Compatibility path that removes the session and closes the application, optionally force-terminating it. Prefer detach_session, close_app, or terminate_app for explicit intent.")]
+    [McpServerTool(Name = "close_session", UseStructuredContent = true), Description("Compatibility path that removes the session and closes the application, optionally force-terminating it. Prefer detach_session, close_app, or terminate_app for explicit intent.")]
     public static Task<CloseAppResponse> CloseSession(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -116,18 +116,18 @@ public static class AppTools
                 () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
                 cancellationToken));
 
-    [McpServerTool(Name = "list_sessions"), Description("List active sessions; BackendCapabilities lists confirmed-ready backends, and BackendCapabilityStates reports ready/unavailable/not_initialized.")]
+    [McpServerTool(Name = "list_sessions", UseStructuredContent = true), Description("List active sessions; BackendCapabilities lists confirmed-ready backends, and BackendCapabilityStates reports ready/unavailable/not_initialized.")]
     public static Task<ListSessionsResponse> ListSessions(
         SessionManager sessions,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() => sessions.ListSessionsAsync(cancellationToken));
 
-    [McpServerTool(Name = "list_displays"), Description("List connected displays and the virtual screen bounds (multi-monitor diagnostics).")]
+    [McpServerTool(Name = "list_displays", UseStructuredContent = true), Description("List connected displays and the virtual screen bounds (multi-monitor diagnostics).")]
     public static Task<ListDisplaysResponse> ListDisplays(
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() => Task.FromResult(DisplayDiagnostics.ListDisplays()));
 
-    [McpServerTool(Name = "list_windows"), Description("Enumerate visible top-level windows of the attached process, including native dialogs and owner, modal, and framework context.")]
+    [McpServerTool(Name = "list_windows", UseStructuredContent = true), Description("Enumerate visible top-level windows of the attached process, including native dialogs and owner, modal, and framework context.")]
     public static Task<ListWindowsResponse> ListWindows(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -186,7 +186,7 @@ public static class AppTools
             correlation: correlation,
             cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "take_screenshot"), Description("Capture a screenshot of the main window or a specified window handle.")]
+    [McpServerTool(Name = "take_screenshot", UseStructuredContent = true), Description("Capture a screenshot of the main window or a specified window handle.")]
     public static Task<TakeScreenshotResponse> TakeScreenshotWithViewport(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

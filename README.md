@@ -55,6 +55,14 @@ agent workflows:
 | `core` (default) | 31 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
 | `diagnostics` | 54 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
+Every advertised tool includes an MCP `outputSchema`. Successful calls return
+their typed result as an object in `structuredContent` and also retain the same
+compact JSON in one text content block for clients that do not yet consume
+structured results. Callers should prefer `structuredContent`; the compatibility
+text contains raw JSON and is not JSON-string-encoded again. Existing bounded
+structured ambiguity and actionable-failure results for launch, attach, and
+resolve remain tool errors with `isError=true`.
+
 Enable the full profile with a command argument:
 
 ```json

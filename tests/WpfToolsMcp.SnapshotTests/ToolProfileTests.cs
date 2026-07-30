@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 using NUnit.Framework;
 using WpfToolsMcp.Contracts;
 
@@ -112,6 +113,75 @@ public sealed class ToolProfileTests
         }
     }
 
+    [TestCase(null)]
+    [TestCase("diagnostics")]
+    public async Task Profiles_advertise_output_schemas_for_every_tool(string? toolProfile)
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: toolProfile);
+
+        var tools = await mcp.ListToolsAsync();
+        var missingOutputSchemas = tools
+            .Where(tool => tool.ProtocolTool.OutputSchema is null)
+            .Select(tool => tool.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.That(missingOutputSchemas, Is.Empty);
+    }
+
+    [Test]
+    public async Task Ordinary_successes_return_structured_content_over_stdio()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var core = await McpTestContext.StartAsync(serverExe, toolProfile: null);
+        await using var diagnostics = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+
+        var sessions = await core.CallToolResultAsync("list_sessions");
+        var displays = await diagnostics.CallToolResultAsync("list_displays");
+
+        AssertStructuredJsonResult(sessions, "sessions");
+        AssertStructuredJsonResult(displays, "displays", "virtualScreen");
+    }
+
+    [Test]
+    public async Task Special_success_returns_declared_schema_and_structured_content_over_stdio()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        var appExe = TestAppPaths.FindTestAppExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: null);
+        string? sessionId = null;
+
+        try
+        {
+            var launchTool = (await mcp.ListToolsAsync()).Single(tool => tool.Name == "launch_app");
+            Assert.That(
+                GetOutputPropertyNames(launchTool),
+                Is.EqualTo(new[] { "interactionPolicy", "pid", "processName", "sessionId" }));
+
+            var result = await mcp.CallToolResultAsync("launch_app", new Dictionary<string, object?>
+            {
+                ["exePath"] = appExe,
+                ["workingDirectory"] = Path.GetDirectoryName(appExe)!
+            });
+            sessionId = ExtractResultJson(result).GetProperty("sessionId").GetString();
+
+            var structuredContent = AssertStructuredJsonResult(
+                result,
+                "pid",
+                "processName",
+                "sessionId");
+            Assert.That(structuredContent.GetProperty("sessionId").GetString(), Is.EqualTo(sessionId));
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(sessionId))
+            {
+                await CloseSessionBestEffortAsync(mcp, sessionId);
+            }
+        }
+    }
+
     [Test]
     public async Task Environment_can_select_diagnostics_profile()
     {
@@ -178,9 +248,8 @@ public sealed class ToolProfileTests
         Assert.That(GetInputPropertyNames(tools["drag"]), Is.EqualTo(
             new[] { "elementId", "interactionPolicy", "locator", "sessionId", "targetElementId", "targetLocator", "toX", "toY" }));
         Assert.That(
-            tools["resolve_element"].ProtocolTool.OutputSchema,
-            Is.Null,
-            "resolve_element should not advertise the protocol CallToolResult as its output schema.");
+            GetOutputPropertyNames(tools["resolve_element"]),
+            Is.EqualTo(new[] { "backendUsed", "element", "fallback", "windowHandleUsed" }));
 
         foreach (var toolName in new[]
                  {
@@ -593,13 +662,20 @@ public sealed class ToolProfileTests
                 GetInputPropertyNames(attach),
                 Is.EqualTo(new[] { "interactionPolicy", "pid", "processInstanceId", "processName", "sessionId" }));
             Assert.That(
-                attach.ProtocolTool.OutputSchema,
-                Is.Null,
-                "attach_to_app returns protocol CallToolResult so ambiguity can carry structured candidates.");
+                GetOutputPropertyNames(attach),
+                Is.EqualTo(new[]
+                {
+                    "activeWindow",
+                    "interactionPolicy",
+                    "pid",
+                    "processInstanceId",
+                    "processName",
+                    "recovery",
+                    "sessionId"
+                }));
             Assert.That(
-                launch.ProtocolTool.OutputSchema,
-                Is.Null,
-                "launch_app returns protocol CallToolResult so existing-instance ambiguity can carry structured candidates.");
+                GetOutputPropertyNames(launch),
+                Is.EqualTo(new[] { "interactionPolicy", "pid", "processName", "sessionId" }));
         });
     }
 
@@ -1255,6 +1331,63 @@ public sealed class ToolProfileTests
             .Select(property => property.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static string[] GetOutputPropertyNames(McpClientTool tool)
+    {
+        if (tool.ProtocolTool.OutputSchema is not { } schema ||
+            schema.ValueKind != JsonValueKind.Object ||
+            !schema.TryGetProperty("properties", out var properties) ||
+            properties.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return properties
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static JsonElement AssertStructuredJsonResult(
+        CallToolResult result,
+        params string[] expectedProperties)
+    {
+        Assert.That(result.IsError, Is.Not.True);
+        Assert.That(result.StructuredContent, Is.Not.Null);
+
+        var structuredContent = result.StructuredContent!.Value;
+        Assert.That(structuredContent.ValueKind, Is.EqualTo(JsonValueKind.Object));
+
+        var text = result.Content.OfType<TextContentBlock>().Single().Text;
+        using var compatibilityDocument = JsonDocument.Parse(text);
+        Assert.Multiple(() =>
+        {
+            Assert.That(compatibilityDocument.RootElement.ValueKind, Is.EqualTo(JsonValueKind.Object));
+            Assert.That(JsonElement.DeepEquals(compatibilityDocument.RootElement, structuredContent), Is.True);
+            foreach (var propertyName in expectedProperties)
+            {
+                Assert.That(
+                    structuredContent.TryGetProperty(propertyName, out _),
+                    Is.True,
+                    $"Structured result omitted '{propertyName}'.");
+            }
+        });
+
+        return structuredContent;
+    }
+
+    private static JsonElement ExtractResultJson(CallToolResult result)
+    {
+        if (result.StructuredContent is { } structuredContent)
+        {
+            return structuredContent;
+        }
+
+        var text = result.Content.OfType<TextContentBlock>().Single().Text;
+        using var document = JsonDocument.Parse(text);
+        return document.RootElement.Clone();
     }
 
     private static string[] GetInputObjectPropertyNames(McpClientTool tool, string inputPropertyName)

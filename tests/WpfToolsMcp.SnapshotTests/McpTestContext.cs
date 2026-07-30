@@ -130,17 +130,17 @@ internal sealed class McpTestContext : IAsyncDisposable
 
     private static string ExtractJson(CallToolResult result)
     {
+        if (result.StructuredContent is { } structuredContent)
+        {
+            return structuredContent.GetRawText();
+        }
+
         foreach (var content in result.Content)
         {
             if (content is TextContentBlock text)
             {
                 return text.Text;
             }
-        }
-
-        if (result.StructuredContent is not null)
-        {
-            return result.StructuredContent.ToJsonString();
         }
 
         throw new InvalidOperationException("Tool returned no text or structured content.");

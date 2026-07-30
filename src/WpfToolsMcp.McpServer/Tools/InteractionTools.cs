@@ -8,7 +8,7 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class InteractionTools
 {
-    [McpServerTool(Name = "set_active_window"), Description("Bring a window to the foreground and set it as the active window for this session.")]
+    [McpServerTool(Name = "set_active_window", UseStructuredContent = true), Description("Bring a window to the foreground and set it as the active window for this session.")]
     public static Task<FocusWindowResponse> SetActiveWindow(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -32,14 +32,14 @@ public static class InteractionTools
                 cancellationToken));
     }
 
-    [McpServerTool(Name = "get_active_window"), Description("Get the active window for this session.")]
+    [McpServerTool(Name = "get_active_window", UseStructuredContent = true), Description("Get the active window for this session.")]
     public static Task<GetActiveWindowResponse> GetActiveWindow(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() => sessions.GetActiveWindowAsync(sessionId, cancellationToken));
 
-    [McpServerTool(Name = "set_window_bounds"), Description("Move/resize a window by setting its bounds (outer window rectangle).")]
+    [McpServerTool(Name = "set_window_bounds", UseStructuredContent = true), Description("Move/resize a window by setting its bounds (outer window rectangle).")]
     public static Task<SetWindowBoundsResponse> SetWindowBounds(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -70,7 +70,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "set_window_viewport"), Description("Set an exact client-area size in physical pixels or WPF DIPs and report the resulting viewport conditions.")]
+    [McpServerTool(Name = "set_window_viewport", UseStructuredContent = true), Description("Set an exact client-area size in physical pixels or WPF DIPs and report the resulting viewport conditions.")]
     public static Task<SetWindowViewportResponse> SetWindowViewport(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -99,7 +99,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "set_window_state"), Description("Set a window state (normal/minimized/maximized).")]
+    [McpServerTool(Name = "set_window_state", UseStructuredContent = true), Description("Set a window state (normal/minimized/maximized).")]
     public static Task<SetWindowStateResponse> SetWindowState(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -122,7 +122,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "click_element"), Description("Click an element by locator or elementId.")]
+    [McpServerTool(Name = "click_element", UseStructuredContent = true), Description("Click an element by locator or elementId.")]
     public static Task<ClickElementResponse> ClickElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -158,7 +158,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "mouse_click"), Description("Click at a coordinate (Playwright-style).")]
+    [McpServerTool(Name = "mouse_click", UseStructuredContent = true), Description("Click at a coordinate (Playwright-style).")]
     public static Task<MouseClickResponse> MouseClick(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -189,7 +189,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "invoke"), Description("Invoke an element via InvokePattern (locator or elementId).")]
+    [McpServerTool(Name = "invoke", UseStructuredContent = true), Description("Invoke an element via InvokePattern (locator or elementId).")]
     public static Task<InvokeResponse> Invoke(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -221,7 +221,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "type_text"), Description("Type text into the focused element, or into a specified locator/elementId.")]
+    [McpServerTool(Name = "type_text", UseStructuredContent = true), Description("Type text into the focused element, or into a specified locator/elementId.")]
     public static Task<TypeTextResponse> TypeText(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -257,7 +257,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "send_keys"), Description("Send an ordered sequence of physical keyboard keys or modifier chords to the focused element, or to a specified locator/elementId.")]
+    [McpServerTool(Name = "send_keys", UseStructuredContent = true), Description("Send an ordered sequence of physical keyboard keys or modifier chords to the focused element, or to a specified locator/elementId.")]
     public static Task<SendKeysResponse> SendKeys(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -291,7 +291,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "set_value"), Description("Set a numeric or text value by locator or elementId.")]
+    [McpServerTool(Name = "set_value", UseStructuredContent = true), Description("Set a numeric or text value by locator or elementId.")]
     public static Task<SetValueResponse> SetValue(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -327,7 +327,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "select_item"), Description("Select an item in a combo box, list box, or tab control (locator or elementId).")]
+    [McpServerTool(Name = "select_item", UseStructuredContent = true), Description("Select an item in a combo box, list box, or tab control (locator or elementId).")]
     public static Task<SelectItemResponse> SelectItem(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -367,7 +367,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "scroll_to_element"), Description("Scroll a container to bring an element into view (locator or elementId).")]
+    [McpServerTool(Name = "scroll_to_element", UseStructuredContent = true), Description("Scroll a container to bring an element into view (locator or elementId).")]
     public static Task<ScrollToElementResponse> ScrollToElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -403,7 +403,7 @@ public static class InteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "drag"), Description("Drag from an element to another element or to screen coordinates (locator or elementId).")]
+    [McpServerTool(Name = "drag", UseStructuredContent = true), Description("Drag from an element to another element or to screen coordinates (locator or elementId).")]
     public static Task<DragResponse> Drag(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

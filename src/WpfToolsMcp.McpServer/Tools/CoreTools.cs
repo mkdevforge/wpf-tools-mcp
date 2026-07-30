@@ -49,7 +49,7 @@ public sealed record CoreFindQuery(
 
 public static class CoreAppTools
 {
-    [McpServerTool(Name = "launch_app"), Description("Start a WPF application. Existing-instance fallback returns structured candidates when ambiguous.")]
+    [McpServerTool(Name = "launch_app", UseStructuredContent = true, OutputSchemaType = typeof(LaunchAppResponse)), Description("Start a WPF application. Existing-instance fallback returns structured candidates when ambiguous.")]
     public static Task<CallToolResult> LaunchApp(
         SessionManager sessions,
         [Description("Executable path")] string exePath,
@@ -66,7 +66,7 @@ public static class CoreAppTools
                     InteractionPolicy: interactionPolicy),
                 cancellationToken));
 
-    [McpServerTool(Name = "attach_to_app"), Description("Attach to one unambiguous process, or replace an exited session while preserving durable policy. Ambiguous names return structured candidates.")]
+    [McpServerTool(Name = "attach_to_app", UseStructuredContent = true, OutputSchemaType = typeof(AttachToAppResponse)), Description("Attach to one unambiguous process, or replace an exited session while preserving durable policy. Ambiguous names return structured candidates.")]
     public static Task<CallToolResult> AttachToApp(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -96,7 +96,7 @@ public static class CoreAppTools
                 cancellationToken));
     }
 
-    [McpServerTool(Name = "detach_session"), Description("Remove an inspection session and release its resources without closing or terminating the target application.")]
+    [McpServerTool(Name = "detach_session", UseStructuredContent = true), Description("Remove an inspection session and release its resources without closing or terminating the target application.")]
     public static Task<DetachSessionResponse> DetachSession(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -108,7 +108,7 @@ public static class CoreAppTools
                 () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
                 cancellationToken));
 
-    [McpServerTool(Name = "close_app"), Description("Request a graceful application close, remove the inspection session, and report the close request and observed process outcome separately.")]
+    [McpServerTool(Name = "close_app", UseStructuredContent = true), Description("Request a graceful application close, remove the inspection session, and report the close request and observed process outcome separately.")]
     public static Task<CloseAppResponse> CloseApp(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -122,7 +122,7 @@ public static class CoreAppTools
                 () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
                 cancellationToken));
 
-    [McpServerTool(Name = "terminate_app"), Description("Forcefully terminate the target application, remove the inspection session, and report the observed process outcome.")]
+    [McpServerTool(Name = "terminate_app", UseStructuredContent = true), Description("Forcefully terminate the target application, remove the inspection session, and report the observed process outcome.")]
     public static Task<CloseAppResponse> TerminateApp(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -136,7 +136,7 @@ public static class CoreAppTools
                 () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
                 cancellationToken));
 
-    [McpServerTool(Name = "close_session"), Description("Compatibility path that removes the session and closes the application, optionally force-terminating it. Prefer detach_session, close_app, or terminate_app for explicit intent.")]
+    [McpServerTool(Name = "close_session", UseStructuredContent = true), Description("Compatibility path that removes the session and closes the application, optionally force-terminating it. Prefer detach_session, close_app, or terminate_app for explicit intent.")]
     public static Task<CloseAppResponse> CloseSession(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -150,13 +150,13 @@ public static class CoreAppTools
                 () => subscriptions.UnsubscribeAllForSessionAsync(sessionId),
                 cancellationToken));
 
-    [McpServerTool(Name = "list_sessions"), Description("List active sessions; BackendCapabilities lists confirmed-ready backends, and BackendCapabilityStates reports ready/unavailable/not_initialized.")]
+    [McpServerTool(Name = "list_sessions", UseStructuredContent = true), Description("List active sessions; BackendCapabilities lists confirmed-ready backends, and BackendCapabilityStates reports ready/unavailable/not_initialized.")]
     public static Task<ListSessionsResponse> ListSessions(
         SessionManager sessions,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() => sessions.ListSessionsAsync(cancellationToken));
 
-    [McpServerTool(Name = "list_windows"), Description("Enumerate visible top-level windows of the attached process, including native dialogs and owner, modal, and framework context.")]
+    [McpServerTool(Name = "list_windows", UseStructuredContent = true), Description("Enumerate visible top-level windows of the attached process, including native dialogs and owner, modal, and framework context.")]
     public static Task<ListWindowsResponse> ListWindows(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -167,7 +167,7 @@ public static class CoreAppTools
             return automation.RunExclusiveAsync(() => automation.ListWindowsAsync(cancellationToken), cancellationToken);
         });
 
-    [McpServerTool(Name = "set_active_window"), Description("Bring a window to the foreground and set it as active for the session.")]
+    [McpServerTool(Name = "set_active_window", UseStructuredContent = true), Description("Bring a window to the foreground and set it as active for the session.")]
     public static Task<FocusWindowResponse> SetActiveWindow(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -212,7 +212,7 @@ public static class CoreInspectionTools
             includeViewport: false,
             cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "take_screenshot"), Description("Capture a screenshot of the active window or a target element.")]
+    [McpServerTool(Name = "take_screenshot", UseStructuredContent = true), Description("Capture a screenshot of the active window or a target element.")]
     public static Task<TakeScreenshotResponse> TakeScreenshotWithViewport(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -242,7 +242,7 @@ public static class CoreInspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_visual_tree"), Description("Return a compact UI tree. Uses WPF inspection when available, otherwise UIA.")]
+    [McpServerTool(Name = "get_visual_tree", UseStructuredContent = true), Description("Return a compact UI tree. Uses WPF inspection when available, otherwise UIA.")]
     public static Task<GetVisualTreeResponse> GetVisualTree(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -273,7 +273,7 @@ public static class CoreInspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "find_elements"), Description("Find deterministic, bounded matches without dumping the full tree.")]
+    [McpServerTool(Name = "find_elements", UseStructuredContent = true), Description("Find deterministic, bounded matches without dumping the full tree.")]
     public static Task<FindElementsResponse> FindElements(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -305,7 +305,7 @@ public static class CoreInspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "resolve_element"), Description("Resolve an element for reuse; ambiguity returns structured candidates.")]
+    [McpServerTool(Name = "resolve_element", UseStructuredContent = true, OutputSchemaType = typeof(ResolveElementResponse)), Description("Resolve an element for reuse; ambiguity returns structured candidates.")]
     public static Task<CallToolResult> ResolveElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -325,7 +325,7 @@ public static class CoreInspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_element_properties"), Description("Return bounded UI Automation properties and supported patterns. Values cap strings at 2,000 characters, collections at 50 items, depth at 2, and share a 20,000-character budget; oversized XPaths are omitted.")]
+    [McpServerTool(Name = "get_element_properties", UseStructuredContent = true), Description("Return bounded UI Automation properties and supported patterns. Values cap strings at 2,000 characters, collections at 50 items, depth at 2, and share a 20,000-character budget; oversized XPaths are omitted.")]
     public static Task<GetElementPropertiesResponse> GetElementProperties(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -348,7 +348,7 @@ public static class CoreInspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_uia_locators"), Description("Return UIA locator suggestions and FlaUI snippets for a WPF or UIA element.")]
+    [McpServerTool(Name = "get_uia_locators", UseStructuredContent = true), Description("Return UIA locator suggestions and FlaUI snippets for a WPF or UIA element.")]
     public static Task<GetUiaLocatorsResponse> GetUiaLocators(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -369,7 +369,7 @@ public static class CoreInspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_uia_tree"), Description("Return a bounded UIA automation tree for a window or subtree.")]
+    [McpServerTool(Name = "get_uia_tree", UseStructuredContent = true), Description("Return a bounded UIA automation tree for a window or subtree.")]
     public static Task<GetUiaTreeResponse> GetUiaTree(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -396,7 +396,7 @@ public static class CoreInspectionTools
 
 public static class CoreWpfDiagnosticsTools
 {
-    [McpServerTool(Name = "get_binding_errors"), Description("List WPF binding errors in the visual tree.")]
+    [McpServerTool(Name = "get_binding_errors", UseStructuredContent = true), Description("List WPF binding errors in the visual tree.")]
     public static Task<GetBindingErrorsResponse> GetBindingErrors(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -412,7 +412,7 @@ public static class CoreWpfDiagnosticsTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_binding_info"), Description("Inspect bindings for a WPF element.")]
+    [McpServerTool(Name = "get_binding_info", UseStructuredContent = true), Description("Inspect bindings for a WPF element.")]
     public static Task<GetBindingInfoResponse> GetBindingInfo(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -436,7 +436,7 @@ public static class CoreWpfDiagnosticsTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_data_context"), Description("Serialize the DataContext of a WPF element.")]
+    [McpServerTool(Name = "get_data_context", UseStructuredContent = true), Description("Serialize the DataContext of a WPF element.")]
     public static Task<GetDataContextResponse> GetDataContext(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -466,7 +466,7 @@ public static class CoreWpfDiagnosticsTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_computed_properties"), Description("Inspect selected computed dependency property values for a WPF element.")]
+    [McpServerTool(Name = "get_computed_properties", UseStructuredContent = true), Description("Inspect selected computed dependency property values for a WPF element.")]
     public static Task<GetComputedPropertiesResponse> GetComputedProperties(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -499,7 +499,7 @@ public static class CoreWpfDiagnosticsTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_layout_context"), Description("Inspect bounded WPF layout metrics and nearby visual context for an element.")]
+    [McpServerTool(Name = "get_layout_context", UseStructuredContent = true), Description("Inspect bounded WPF layout metrics and nearby visual context for an element.")]
     public static Task<GetLayoutContextResponse> GetLayoutContext(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -526,7 +526,7 @@ public static class CoreWpfDiagnosticsTools
 
 public static class CoreInteractionTools
 {
-    [McpServerTool(Name = "wait_for"), Description("Wait for an element or window to satisfy a legacy state or structured condition.")]
+    [McpServerTool(Name = "wait_for", UseStructuredContent = true), Description("Wait for an element or window to satisfy a legacy state or structured condition.")]
     public static Task<WaitForResponse> WaitFor(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -568,7 +568,7 @@ public static class CoreInteractionTools
             return automation.RunExclusiveAsync(() => automation.WaitForAsync(request, cancellationToken), cancellationToken);
         });
 
-    [McpServerTool(Name = "click_element"), Description("Click an element by locator or elementId.")]
+    [McpServerTool(Name = "click_element", UseStructuredContent = true), Description("Click an element by locator or elementId.")]
     public static Task<ClickElementResponse> ClickElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -593,7 +593,7 @@ public static class CoreInteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "type_text"), Description("Type text into the focused element, or into a specified locator/elementId.")]
+    [McpServerTool(Name = "type_text", UseStructuredContent = true), Description("Type text into the focused element, or into a specified locator/elementId.")]
     public static Task<TypeTextResponse> TypeText(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -620,7 +620,7 @@ public static class CoreInteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "send_keys"), Description("Send an ordered sequence of physical keyboard keys or modifier chords to the focused element, or to a specified locator/elementId.")]
+    [McpServerTool(Name = "send_keys", UseStructuredContent = true), Description("Send an ordered sequence of physical keyboard keys or modifier chords to the focused element, or to a specified locator/elementId.")]
     public static Task<SendKeysResponse> SendKeys(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -645,7 +645,7 @@ public static class CoreInteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "set_value"), Description("Set a numeric or text value by locator or elementId.")]
+    [McpServerTool(Name = "set_value", UseStructuredContent = true), Description("Set a numeric or text value by locator or elementId.")]
     public static Task<SetValueResponse> SetValue(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -672,7 +672,7 @@ public static class CoreInteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "select_item"), Description("Select an item in a combo box, list box, tab control, or tree.")]
+    [McpServerTool(Name = "select_item", UseStructuredContent = true), Description("Select an item in a combo box, list box, tab control, or tree.")]
     public static Task<SelectItemResponse> SelectItem(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -699,7 +699,7 @@ public static class CoreInteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "invoke"), Description("Invoke an element via UI Automation.")]
+    [McpServerTool(Name = "invoke", UseStructuredContent = true), Description("Invoke an element via UI Automation.")]
     public static Task<InvokeResponse> Invoke(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -722,7 +722,7 @@ public static class CoreInteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "scroll_to_element"), Description("Scroll a target element into view.")]
+    [McpServerTool(Name = "scroll_to_element", UseStructuredContent = true), Description("Scroll a target element into view.")]
     public static Task<ScrollToElementResponse> ScrollToElement(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -745,7 +745,7 @@ public static class CoreInteractionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "drag"), Description("Drag from an element to another element or to screen coordinates.")]
+    [McpServerTool(Name = "drag", UseStructuredContent = true), Description("Drag from an element to another element or to screen coordinates.")]
     public static Task<DragResponse> Drag(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

@@ -8,7 +8,7 @@ namespace WpfToolsMcp.McpServer.Tools;
 [McpServerToolType]
 public static class PerformanceTools
 {
-    [McpServerTool(Name = "performance_start"), Description("Start lightweight UI-thread latency sampling via the injected agent.")]
+    [McpServerTool(Name = "performance_start", UseStructuredContent = true), Description("Start lightweight UI-thread latency sampling via the injected agent.")]
     public static Task<PerformanceStartResponse> PerformanceStart(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -24,7 +24,7 @@ public static class PerformanceTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "performance_stop"), Description("Stop a performance run and return a summary.")]
+    [McpServerTool(Name = "performance_stop", UseStructuredContent = true), Description("Stop a performance run and return a summary.")]
     public static Task<PerformanceStopResponse> PerformanceStop(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -38,4 +38,3 @@ public static class PerformanceTools
                 cancellationToken);
         });
 }
-
