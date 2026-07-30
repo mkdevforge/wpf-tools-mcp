@@ -46,6 +46,9 @@ public sealed record ToolErrorContext
     public bool? Truncated { get; init; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TruncatedReason { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ToolErrorCandidate>? Candidates { get; init; }
 }
 

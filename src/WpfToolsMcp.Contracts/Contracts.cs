@@ -237,6 +237,8 @@ public sealed record GetVisualTreeResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null)
 {
+    public long WindowHandleUsed { get; init; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public BackendFallbackInfo? Fallback { get; init; }
 }
@@ -255,7 +257,10 @@ public sealed record GetUiaTreeResponse(
     int ReturnedNodes,
     int ScannedNodes,
     bool Truncated,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null)
+{
+    public long WindowHandleUsed { get; init; }
+}
 
 public sealed record ElementSummary(
     string ElementType,
@@ -352,7 +357,10 @@ public sealed record GetElementPropertiesResponse(
     int ScannedProperties = 0,
     bool Truncated = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? TruncatedReasons = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? TruncatedReasons = null)
+{
+    public long WindowHandleUsed { get; init; }
+}
 
 public sealed record WpfLocatorIdentity(
     string? Type,
@@ -401,7 +409,10 @@ public sealed record GetUiaLocatorsResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaLocatorIdentity? Uia = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaLocatorSuggestions? LocatorSuggestions = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] FlaUiLocatorSnippets? FlaUi = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null)
+{
+    public long WindowHandleUsed { get; init; }
+}
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ScreenshotCaptureMode
@@ -473,6 +484,12 @@ public sealed record TakeScreenshotResponse(
     ScreenshotCaptureMode CaptureModeUsed,
     string? Base64 = null)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public InspectionBackend? BackendUsed { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BackendFallbackInfo? Fallback { get; init; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ViewportConditions? Viewport { get; init; }
 
@@ -1201,6 +1218,8 @@ public sealed record FindElementsResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null)
 {
+    public long WindowHandleUsed { get; init; }
+
     public int DiscoveredMatches { get; init; } = ReturnedMatches;
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -1209,7 +1228,10 @@ public sealed record FindElementsResponse(
 
 public sealed record GetPathToElementResponse(
     InspectionBackend BackendUsed,
-    string XPath);
+    string XPath)
+{
+    public long WindowHandleUsed { get; init; }
+}
 
 // Phase 2 (Snoop agent)
 
@@ -1346,7 +1368,21 @@ public sealed record GetBindingInfoResponse(
     ElementRef Element,
     IReadOnlyList<BindingInfo> Bindings,
     bool Truncated,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null)
+{
+    public long WindowHandleUsed { get; init; }
+
+    public int ReturnedBindings { get; init; } = Bindings.Count;
+
+    public int DiscoveredBindings { get; init; } = Bindings.Count;
+
+    public int ScannedProperties { get; init; }
+
+    public bool ScanComplete { get; init; } = true;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? TruncatedReasons { get; init; }
+}
 
 public sealed record GetBindingErrorsRequest(
     long? WindowHandle = null,
@@ -1369,7 +1405,19 @@ public sealed record GetBindingErrorsResponse(
     IReadOnlyList<BindingErrorInfo> Errors,
     int ScannedNodes,
     bool Truncated,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null)
+{
+    public long WindowHandleUsed { get; init; }
+
+    public int ReturnedErrors { get; init; } = Errors.Count;
+
+    public int DiscoveredErrors { get; init; } = Errors.Count;
+
+    public bool ScanComplete { get; init; } = true;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? TruncatedReasons { get; init; }
+}
 
 public sealed record GetValidationErrorsRequest(
     long? WindowHandle = null,
@@ -1541,7 +1589,19 @@ public sealed record UiaCoverageSummary(
     int FindingsCount,
     IReadOnlyList<UiaCoverageIssueCount> IssueCounts,
     bool Truncated,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null)
+{
+    public int ReturnedFindings { get; init; } = FindingsCount;
+
+    public int DiscoveredFindings { get; init; } = FindingsCount;
+
+    public bool ScanComplete { get; init; } = true;
+
+    public IReadOnlyList<UiaCoverageIssueCount> DiscoveredIssueCounts { get; init; } = IssueCounts;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? TruncatedReasons { get; init; }
+}
 
 public sealed record UiaCoverageFinding(
     string IssueCode,
@@ -1553,7 +1613,10 @@ public sealed record UiaCoverageFinding(
 public sealed record GetUiaCoverageReportResponse(
     UiaCoverageSummary Summary,
     IReadOnlyList<UiaCoverageFinding> Findings,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null)
+{
+    public long WindowHandleUsed { get; init; }
+}
 
 public sealed record GetDataContextRequest(
     long? WindowHandle = null,
@@ -1572,7 +1635,15 @@ public sealed record GetDataContextResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonNode? Data,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Summary = null,
     bool Truncated = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null)
+{
+    public ElementRef Element { get; init; } = null!;
+
+    public long WindowHandleUsed { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? TruncatedReasons { get; init; }
+}
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum DataContextMode
@@ -1811,7 +1882,21 @@ public sealed record GetComputedPropertiesResponse(
     bool Truncated,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? MissingPropertyNames = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null)
+{
+    public long WindowHandleUsed { get; init; }
+
+    public int ReturnedProperties { get; init; } = Properties.Count;
+
+    public int DiscoveredProperties { get; init; } = Properties.Count;
+
+    public int ScannedProperties { get; init; }
+
+    public bool ScanComplete { get; init; } = true;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? TruncatedReasons { get; init; }
+}
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum StyleChainKind
@@ -1841,6 +1926,16 @@ public sealed record StyleChainEntry
 
     public IReadOnlyList<string> BasedOnChainTargetTypes { get; init; } = Array.Empty<string>();
 
+    public int ReturnedBasedOnStyles { get; init; }
+
+    public int DiscoveredBasedOnStyles { get; init; }
+
+    public bool BasedOnScanComplete { get; init; } = true;
+
+    public bool BasedOnTruncated { get; init; }
+
+    public int MaxBasedOnDepth { get; init; }
+
     public int SettersCount { get; init; }
 
     public int TriggersCount { get; init; }
@@ -1852,7 +1947,10 @@ public sealed record StyleChainEntry
 public sealed record GetStyleChainResponse(
     ElementRef Element,
     IReadOnlyList<StyleChainEntry> Styles,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null)
+{
+    public long WindowHandleUsed { get; init; }
+}
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum TemplateKind
@@ -1892,12 +1990,31 @@ public sealed record TemplateInfo(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResourceKey = null,
     int TriggersCount = 0,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TemplatePartInfo>? TemplateParts = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<NamedTemplateElementInfo>? NamedElements = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<NamedTemplateElementInfo>? NamedElements = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ReturnedNamedElements { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? DiscoveredNamedElements { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? NamedElementsScanComplete { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? NamedElementsTruncated { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxNamedElements { get; init; }
+}
 
 public sealed record GetTemplateInfoResponse(
     ElementRef Element,
     TemplateInfo Template,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Warnings = null)
+{
+    public long WindowHandleUsed { get; init; }
+}
 
 public sealed record PerformanceStartRequest(
     int ProbeIntervalMs = 50,

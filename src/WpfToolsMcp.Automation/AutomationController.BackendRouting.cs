@@ -32,6 +32,17 @@ public sealed partial class AutomationController
             ? InspectionBackend.Wpf
             : InspectionBackend.Uia;
 
+    internal static TakeScreenshotResponse WithScreenshotRoutingMetadata(
+        TakeScreenshotResponse response,
+        bool hasElementTarget,
+        InspectionBackend backendUsed,
+        BackendFallbackInfo? fallback) =>
+        response with
+        {
+            BackendUsed = hasElementTarget ? backendUsed : null,
+            Fallback = hasElementTarget ? fallback : null
+        };
+
     internal static bool IsPerWindowAutoWpfMiss(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);

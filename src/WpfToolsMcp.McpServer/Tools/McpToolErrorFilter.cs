@@ -17,6 +17,7 @@ internal static partial class McpToolErrorFilter
     private const int MaxDetailLength = 512;
     private const int MaxIdentityLength = 128;
     private const int MaxRecoveryActions = 8;
+    private const int MaxTruncatedReasonLength = 64;
 
     public static McpRequestFilter<CallToolRequestParams, CallToolResult> CreateCallToolFilter() =>
         next => async (context, cancellationToken) =>
@@ -140,11 +141,14 @@ internal static partial class McpToolErrorFilter
                 WindowHandle = candidate.MainWindowHandle > 0 ? candidate.MainWindowHandle : null
             })
             .ToArray();
+        var filterCapped = ambiguity.Candidates.Count > candidates.Length;
         var context = MergeContext(requestContext, new ToolErrorContext
         {
-            ReturnedCandidates = Math.Clamp(ambiguity.ReturnedCandidates, 0, MaxCandidates),
+            ReturnedCandidates = candidates.Length,
             DiscoveredCandidates = Math.Max(0, ambiguity.DiscoveredCandidates),
-            Truncated = ambiguity.Truncated || ambiguity.ReturnedCandidates > MaxCandidates,
+            Truncated = ambiguity.Truncated || filterCapped,
+            TruncatedReason = NormalizeTruncatedReason(ambiguity.TruncatedReason)
+                ?? (filterCapped ? "maxCandidates" : null),
             Candidates = candidates
         });
 
@@ -167,13 +171,16 @@ internal static partial class McpToolErrorFilter
                 ElementId = NormalizeElementId(candidate.Element.ElementId)
             })
             .ToArray();
+        var filterCapped = ambiguity.Candidates.Count > candidates.Length;
         var context = MergeContext(requestContext, new ToolErrorContext
         {
             WindowHandle = ambiguity.WindowHandleUsed > 0 ? ambiguity.WindowHandleUsed : null,
             Backend = ambiguity.BackendUsed,
-            ReturnedCandidates = Math.Clamp(ambiguity.ReturnedCandidates, 0, MaxCandidates),
+            ReturnedCandidates = candidates.Length,
             DiscoveredCandidates = Math.Max(0, ambiguity.DiscoveredCandidates),
-            Truncated = ambiguity.Truncated || ambiguity.ReturnedCandidates > MaxCandidates,
+            Truncated = ambiguity.Truncated || filterCapped,
+            TruncatedReason = NormalizeTruncatedReason(ambiguity.TruncatedReason)
+                ?? (filterCapped ? "maxCandidates" : null),
             Candidates = candidates
         });
 
@@ -346,6 +353,7 @@ internal static partial class McpToolErrorFilter
             ReturnedCandidates = observed.ReturnedCandidates,
             DiscoveredCandidates = observed.DiscoveredCandidates,
             Truncated = observed.Truncated,
+            TruncatedReason = observed.TruncatedReason,
             Candidates = observed.Candidates
         };
         return HasContext(merged) ? merged : null;
@@ -354,7 +362,8 @@ internal static partial class McpToolErrorFilter
     private static bool HasContext(ToolErrorContext context) =>
         context.SessionId is not null || context.ElementId is not null || context.WindowHandle is not null ||
         context.Backend is not null || context.ReturnedCandidates is not null ||
-        context.DiscoveredCandidates is not null || context.Truncated is not null || context.Candidates is not null;
+        context.DiscoveredCandidates is not null || context.Truncated is not null ||
+        context.TruncatedReason is not null || context.Candidates is not null;
 
     private static string? ReadString(
         IDictionary<string, JsonElement> arguments,
@@ -393,6 +402,19 @@ internal static partial class McpToolErrorFilter
 
         var trimmed = value.Trim();
         return trimmed.Length <= MaxCodeLength && TokenRegex().IsMatch(trimmed)
+            ? trimmed
+            : null;
+    }
+
+    private static string? NormalizeTruncatedReason(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        return trimmed.Length <= MaxTruncatedReasonLength && TruncatedReasonRegex().IsMatch(trimmed)
             ? trimmed
             : null;
     }
@@ -527,6 +549,9 @@ internal static partial class McpToolErrorFilter
 
     [GeneratedRegex("^[a-z][a-z0-9_]{0,63}$", RegexOptions.CultureInvariant)]
     private static partial Regex TokenRegex();
+
+    [GeneratedRegex("^[a-z][A-Za-z0-9]{0,63}$", RegexOptions.CultureInvariant)]
+    private static partial Regex TruncatedReasonRegex();
 
     [GeneratedRegex("^(?:uia|wpf)_[A-Za-z0-9_-]{16}$", RegexOptions.CultureInvariant)]
     private static partial Regex ElementIdRegex();

@@ -190,14 +190,29 @@ and a cached retry gate report false even when the prior failure is included.
 `Available` reports whether the destination UIA backend could serve the request,
 and `Used` reports whether the returned payload came from that backend.
 
+Successful one-shot inspections whose target is resolved relative to a window
+report `windowHandleUsed`, including when the caller omitted `windowHandle` and
+the session selected its active window. Composite snapshots keep the same value
+under `target.windowHandle`. New `backendUsed` metadata is added only when a
+tool can meaningfully select between inspection backends; compatibility fields
+already exposed by fixed-backend tools, such as `get_validation_errors`, remain
+unchanged. `fallback` remains optional and is emitted only by
+routes that already model an alternate backend and have a fallback decision to
+report. It is omitted for fixed-backend tools and ordinary no-fallback success.
+For `take_screenshot`, backend and fallback metadata applies only to
+element-targeted captures; an untargeted window capture omits both.
+WPF diagnostics that depend on the audited response shape require the current
+agent capability; a previously injected agent is rejected with restart and
+reattach guidance rather than returning invented counts or missing identity.
+
 Public actionable errors and trace entries use the failure code and sanitized
 detail. `FailureInfo` remains embedded in backend capability and fallback
 metadata. A failed tool call instead uses the common `error` envelope, whose
 optional retry fields mirror the same semantics and whose context can include
 only validated session, window, element, backend, and bounded candidate
-identities. Neither form exposes raw filesystem paths, process command lines,
-window titles, element names or paths, injector output, arbitrary target
-exception messages, or target-side stack traces.
+identities, counts, and truncation reason. Neither form exposes raw filesystem
+paths, process command lines, window titles, element names or paths, injector
+output, arbitrary target exception messages, or target-side stack traces.
 
 ### Coherent Diagnostic Snapshots
 
@@ -783,17 +798,32 @@ complete controls live in the `diagnostics` profile when exposing them in
 | `get_uia_tree` | Depth 4, at most 200 nodes | Increase `depth` or `maxNodes` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `find_elements` | At most 25 matches while scanning at most 5,000 nodes; minimal fields | Set `maxResults` or `returnFields`; `diagnostics` also exposes backend, root, scan limit, and ID controls | `ReturnedMatches`, `DiscoveredMatches`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_element_properties` | Summary preset, at most 25 selected UIA properties; values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, with one shared 20,000-character serialized-value budget. XPaths over 2,000 characters are omitted rather than returned incomplete. | Select the `full` preset and an explicit `maxProperties` in `diagnostics` | `ReturnedProperties`, `SelectedProperties`, `ScannedProperties`, `Truncated`, `TruncatedReason`, `TruncatedReasons` |
-| `get_binding_errors` | Depth 6, at most 200 errors while scanning at most 2,000 nodes | Set the error, depth, and scan limits in `diagnostics` | `ScannedNodes`, `Truncated`, `TruncatedReason` |
+| `get_binding_info` | Return at most 2,000 bindings after inspecting the target's dependency properties | In `diagnostics`, set `includeUnbound`, `maxProperties`, or `valueFormat` | `returnedBindings`, `discoveredBindings`, `scannedProperties`, `scanComplete`, `truncated`, compatibility `truncatedReason`, and ordered `truncatedReasons` |
+| `get_binding_errors` | Depth 6, at most 200 errors while scanning at most 2,000 nodes | Set the error, depth, and scan limits in `diagnostics` | `returnedErrors`, `discoveredErrors`, `scannedNodes`, `scanComplete`, `truncated`, compatibility `truncatedReason`, and ordered `truncatedReasons` |
 | `get_validation_errors` | Current state at depth 6; at most 100 errors while scanning 2,000 nodes; safe scalar content is capped at 500 characters; hidden visual-tree elements are included | In `diagnostics`, set `visibleOnly`, `depth`, `maxErrors`, `maxNodes`, and `maxValueLength`. Hard caps are depth 100, 1,000 returned errors, 200,000 scanned nodes, and 2,000 characters per value | `ReturnedErrors`, `DiscoveredErrors`, `ScannedNodes`, `ScanComplete`, `TruncatedReasons`; response root XPath is capped at 2,000 characters, binding metadata is bounded with a per-error `Truncated` flag, and warnings report returned/discovered counts with a fixed 20-entry cap |
-| `get_data_context` | Summary mode, depth 2, at most 50 properties per object and 2,000 characters per string | Use the additional mode and size controls in `diagnostics` | `Truncated` and bounded warnings |
-| `get_computed_properties` | Legacy compact fields; structured provenance is off | In `diagnostics`, set `includeProvenance=true`; at most 100 properties and 20 provenance scan units/candidates by default, with a hard nested limit of 50 | Outer `TruncatedReason`; nested returned/discovered counts, scan counts, `ScanComplete`, `Truncated`, and stable evidence reasons |
+| `uia_coverage_report` | At most 200 findings while scanning at most 5,000 WPF nodes | Set the finding, node, visibility, interaction, or root controls in `diagnostics` | `summary.returnedFindings`, `summary.discoveredFindings`, `summary.scannedNodes`, `summary.scanComplete`, `summary.discoveredIssueCounts`, and `summary.truncatedReasons`; `summary.findingsCount` and `summary.issueCounts` remain returned-subset compatibility fields |
+| `get_data_context` | Summary mode, depth 2, at most 50 properties per object and 2,000 characters per string | Use the additional mode and size controls in `diagnostics` | Resolved `element`, `windowHandleUsed`, `truncated`, ordered `truncatedReasons`, and bounded warnings |
+| `get_computed_properties` | Legacy compact values; structured provenance is off | In `diagnostics`, set `includeProvenance=true`; at most 100 properties and 20 provenance scan units/candidates by default, with a hard nested limit of 50 | `returnedProperties`, `discoveredProperties`, `scannedProperties`, `scanComplete`, ordered `truncatedReasons`; nested provenance retains its own bounded evidence metadata |
 | `get_layout_context` | 6 nearest ancestors, 8 relevant siblings, 32 Grid definitions, and up to 128 unavailable-evidence records | Set `maxAncestors`, `maxSiblings`, or `maxGridDefinitions` in `diagnostics`; unavailable evidence keeps its fixed 128-record cap | Discovered/returned counts for ancestors, siblings, Grid contexts, definitions, and unavailable evidence; ordered `TruncatedReasons` including `maxUnavailableEvidence` |
+| `get_style_chain` | At most 10 returned `BasedOn` styles per style entry | Set `maxBasedOnDepth` in `diagnostics` | Per entry: `returnedBasedOnStyles`, `discoveredBasedOnStyles`, `basedOnScanComplete`, `basedOnTruncated`, and the effective `maxBasedOnDepth` |
+| `get_template_info` | Named elements are omitted unless requested; at most 50 are returned when enabled | Set `includeNamedElements` and `maxNamedElements` in `diagnostics` | `returnedNamedElements`, `discoveredNamedElements`, `namedElementsScanComplete`, `namedElementsTruncated`, and the effective `maxNamedElements` |
 | `poll_subscription` | Whole events and each poll share the effective `maxPayloadChars` budget; queues retain at most the effective `maxQueue` | Set subscription bounds explicitly and keep polling while `HasMore=true` | Per-poll and cumulative dropped/coalesced/truncated counts; typed terminal event and retained completion state |
 | `trace_stop` | Writes a bounded artifact retaining the newest 1,000 trace events and returns no inline events by default | Set `includeEvents=true`; at most 100 events are returned by default and `maxEvents` is capped at 1,000 | Observed, retained, and dropped event counts; retention limit/truncation; separate inline `Truncated` and `TruncatedReason` |
 
-When `Truncated` is true, `TruncatedReason` names the budget that was reached.
-Counts describe the work performed and the evidence returned, so callers can
-decide whether to narrow the request or deliberately raise a limit.
+For the bounded inspections above, `returned*` is the exact serialized
+collection count, `discovered*` is the amount observed before discovery stopped,
+and `scanned*` is the work actually inspected. `scanComplete=false` makes
+discovered totals and discovered issue counts lower bounds. Truncation is true
+when evidence or requested scope was omitted; `truncatedReason` or ordered
+`truncatedReasons`, as exposed by that response, names the applicable budget.
+Where both fields exist, the singular value remains the first ordered reason
+for compatibility. Exactly filling a limit is not itself proof of truncation.
+If a target-side property API prevents complete discovery, the affected
+binding or computed-property response adds `propertyInspectionUnavailable` and
+reports `scanComplete=false` instead of certifying a partial scan.
+The existing `find_elements` contract is unchanged: it retains `ReturnedMatches`,
+`DiscoveredMatches`, `ScannedNodes`, `Truncated`, and singular
+`TruncatedReason` with the semantics described above.
 
 ### Tool Evolution Policy
 

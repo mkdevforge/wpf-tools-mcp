@@ -296,6 +296,12 @@ public sealed class PropertyProvenanceContractTests
             [new string('x', 600)]);
         var longTransportName = AutomationController.PrepareProvenancePropertyNamesForAgent(
             [new string('x', 600)]);
+        var independentlyBoundedNames = Enumerable.Repeat("Width", 101).ToArray();
+        independentlyBoundedNames[0] = new string('x', 600);
+        var independentlyBounded = WpfVisualTreeInspector.PrepareProvenancePropertyNames(
+            independentlyBoundedNames);
+        var independentlyTransportBounded = AutomationController.PrepareProvenancePropertyNamesForAgent(
+            independentlyBoundedNames);
 
         Assert.Multiple(() =>
         {
@@ -308,6 +314,16 @@ public sealed class PropertyProvenanceContractTests
             Assert.That(longName.TruncatedReason, Is.EqualTo("maxProvenancePropertyNameLength"));
             Assert.That(longTransportName.Names!.Single().Length, Is.LessThanOrEqualTo(512));
             Assert.That(longTransportName.TruncatedReason, Is.EqualTo("maxProvenancePropertyNameLength"));
+            Assert.That(independentlyBounded.TruncatedReasons, Is.EqualTo(new[]
+            {
+                "maxProvenancePropertyNames",
+                "maxProvenancePropertyNameLength"
+            }));
+            Assert.That(independentlyTransportBounded.TruncatedReasons, Is.EqualTo(new[]
+            {
+                "maxProvenancePropertyNames",
+                "maxProvenancePropertyNameLength"
+            }));
         });
     }
 

@@ -228,7 +228,10 @@ public sealed record GetLayoutContextResponse(
     IReadOnlyList<LayoutUnavailableEvidence> UnavailableEvidence,
     bool Truncated,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? TruncatedReasons = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? TruncatedReasons = null)
+{
+    public long WindowHandleUsed { get; init; }
+}
 
 internal static class LayoutContextText
 {

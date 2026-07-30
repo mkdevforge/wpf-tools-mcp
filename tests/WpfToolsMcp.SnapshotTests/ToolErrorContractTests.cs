@@ -143,8 +143,8 @@ public sealed class ToolErrorContractTests
             RequestedProcessName: PrivateSentinel,
             DiscoveredCandidates: 1,
             ReturnedCandidates: 1,
-            Truncated: false,
-            TruncatedReason: null,
+            Truncated: true,
+            TruncatedReason: "maxResults",
             Candidates:
             [
                 new ProcessCandidateInfo(
@@ -163,7 +163,7 @@ public sealed class ToolErrorContractTests
             WindowHandleUsed: 789,
             ReturnedCandidates: 1,
             DiscoveredCandidates: 1,
-            Truncated: false,
+            Truncated: true,
             Candidates:
             [
                 new ResolveElementCandidate(
@@ -174,16 +174,24 @@ public sealed class ToolErrorContractTests
                         Name: PrivateSentinel,
                         XPath: PrivateSentinel,
                         ElementId: "uia_abcdefghijklmnop"))
-            ]));
+            ],
+            TruncatedReason: "legacyAgent"));
 
         var process = MapException(processFailure);
         var element = MapException(elementFailure);
+        var invalidReason = MapException(new ProcessSelectionAmbiguityException(
+            processFailure.Ambiguity with { TruncatedReason = PrivateSentinel }));
+        var oversizedReason = MapException(new ProcessSelectionAmbiguityException(
+            processFailure.Ambiguity with { TruncatedReason = new string('a', 65) }));
         var processJson = JsonSerializer.Serialize(process, JsonOptions);
         var elementJson = JsonSerializer.Serialize(element, JsonOptions);
+        var invalidReasonJson = JsonSerializer.Serialize(invalidReason, JsonOptions);
 
         Assert.Multiple(() =>
         {
             Assert.That(process.Code, Is.EqualTo("ambiguous_process"));
+            Assert.That(process.Context!.ReturnedCandidates, Is.EqualTo(process.Context.Candidates!.Count));
+            Assert.That(process.Context.TruncatedReason, Is.EqualTo("maxResults"));
             Assert.That(process.Context!.Candidates!.Single(), Is.EqualTo(
                 new ToolErrorCandidate(ToolErrorCandidateKind.Process, 0)
                 {
@@ -192,13 +200,87 @@ public sealed class ToolErrorContractTests
                     WindowHandle = 789
                 }));
             Assert.That(element.Code, Is.EqualTo("ambiguous_element"));
+            Assert.That(element.Context!.ReturnedCandidates, Is.EqualTo(element.Context.Candidates!.Count));
+            Assert.That(element.Context.TruncatedReason, Is.EqualTo("legacyAgent"));
             Assert.That(element.Context!.Candidates!.Single(), Is.EqualTo(
                 new ToolErrorCandidate(ToolErrorCandidateKind.Element, 0)
                 {
                     ElementId = "uia_abcdefghijklmnop"
                 }));
+            Assert.That(invalidReason.Context!.TruncatedReason, Is.Null);
+            Assert.That(oversizedReason.Context!.TruncatedReason, Is.Null);
             Assert.That(processJson, Does.Not.Contain(PrivateSentinel));
             Assert.That(elementJson, Does.Not.Contain(PrivateSentinel));
+            Assert.That(invalidReasonJson, Does.Not.Contain(PrivateSentinel));
+        });
+    }
+
+    [Test]
+    public void Typed_ambiguity_filter_reports_its_projected_candidate_cap()
+    {
+        var processCandidates = Enumerable.Range(0, 30)
+            .Select(index => new ProcessCandidateInfo(
+                Index: index,
+                ProcessInstanceId: $"{index + 1}:{index + 101}",
+                Pid: index + 1,
+                ProcessName: "test",
+                StartTimeUtc: "2026-01-01T00:00:00Z",
+                MainWindowHandle: index + 1,
+                MainWindowTitle: "test"))
+            .ToArray();
+        var elementCandidates = Enumerable.Range(0, 30)
+            .Select(index => new ResolveElementCandidate(
+                index,
+                new ElementRef(
+                    Type: "Button",
+                    AutomationId: null,
+                    Name: null,
+                    XPath: $"/Window/Button[{index + 1}]",
+                    ElementId: $"uia_{index + 1:D16}")))
+            .ToArray();
+
+        var process = MapException(new ProcessSelectionAmbiguityException(new ProcessSelectionAmbiguity(
+            Code: "ambiguous_process",
+            RequestedProcessName: "test",
+            DiscoveredCandidates: 40,
+            ReturnedCandidates: 30,
+            Truncated: false,
+            TruncatedReason: null,
+            Candidates: processCandidates,
+            Recovery: "select")));
+        var element = MapException(new ElementResolutionAmbiguityException(new ResolveElementAmbiguity(
+            Code: "ambiguous_element",
+            BackendUsed: InspectionBackend.Wpf,
+            WindowHandleUsed: 789,
+            ReturnedCandidates: 30,
+            DiscoveredCandidates: 40,
+            Truncated: false,
+            Candidates: elementCandidates)));
+        var upstreamTruncation = MapException(new ProcessSelectionAmbiguityException(new ProcessSelectionAmbiguity(
+            Code: "ambiguous_process",
+            RequestedProcessName: "test",
+            DiscoveredCandidates: 40,
+            ReturnedCandidates: 30,
+            Truncated: true,
+            TruncatedReason: "maxResults",
+            Candidates: processCandidates,
+            Recovery: "select")));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(process.Context!.Candidates, Has.Count.EqualTo(25));
+            Assert.That(process.Context.ReturnedCandidates, Is.EqualTo(process.Context.Candidates!.Count));
+            Assert.That(process.Context.DiscoveredCandidates, Is.EqualTo(40));
+            Assert.That(process.Context.Truncated, Is.True);
+            Assert.That(process.Context.TruncatedReason, Is.EqualTo("maxCandidates"));
+            Assert.That(element.Context!.Candidates, Has.Count.EqualTo(25));
+            Assert.That(element.Context.ReturnedCandidates, Is.EqualTo(element.Context.Candidates!.Count));
+            Assert.That(element.Context.DiscoveredCandidates, Is.EqualTo(40));
+            Assert.That(element.Context.Truncated, Is.True);
+            Assert.That(element.Context.TruncatedReason, Is.EqualTo("maxCandidates"));
+            Assert.That(upstreamTruncation.Context!.Candidates, Has.Count.EqualTo(25));
+            Assert.That(upstreamTruncation.Context.ReturnedCandidates, Is.EqualTo(25));
+            Assert.That(upstreamTruncation.Context.TruncatedReason, Is.EqualTo("maxResults"));
         });
     }
 

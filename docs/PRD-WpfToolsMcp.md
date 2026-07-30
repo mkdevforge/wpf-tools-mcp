@@ -364,12 +364,53 @@ Every tool advertises a success-or-error `outputSchema`. Tool execution failures
 set `isError=true` and return `{ "error": { "code", "detail", ... } }` as
 structured content plus fixed `code: detail` compatibility text. The envelope
 can add optional `stage`, `retryable`, `retryAfterMs`, `recoveryActions`, and
-validated session/window/element/backend or bounded candidate context. Embedded
-backend `FailureInfo` values retain the same retry semantics. Malformed JSON-RPC,
-unknown tools, request cancellation, and server lifecycle failures remain
-protocol errors. Public failure payloads and compatibility text omit raw
-filesystem paths, command lines, names/titles, injector output, arbitrary target
-exception messages, and target-side stack traces.
+validated session/window/element/backend or bounded candidate/count/truncation
+context. Embedded backend `FailureInfo` values retain the same retry semantics.
+Malformed JSON-RPC, unknown tools, request cancellation, and server lifecycle
+failures remain protocol errors. Public failure payloads and compatibility text
+omit raw filesystem paths, command lines, names/titles, injector output,
+arbitrary target exception messages, and target-side stack traces.
+
+Successful response metadata is intentionally targeted rather than a universal
+envelope. A one-shot inspection resolved relative to a window reports the
+actual `windowHandleUsed`; a composite diagnostic snapshot keeps it under
+`target.windowHandle`. New `backendUsed` metadata appears only when backend
+selection is a meaningful part of the operation. Compatibility fields already
+exposed by fixed-backend tools, including `get_validation_errors`, remain.
+Optional `fallback` follows the existing auto-routing convention: it is
+present only when that route has a fallback decision to report and is omitted
+from fixed-backend and ordinary no-fallback responses. Element-targeted
+`take_screenshot` results report the actual routed backend and any used
+fallback; untargeted window captures omit both fields.
+Deep WPF observations advertise `wpf/inspection-response-metadata:v1`; an
+already-injected agent without that capability is rejected with restart and
+reattach guidance instead of being normalized into invented completeness.
+
+Bounded inspection metadata distinguishes payload size from discovery work:
+`returned*` is the exact serialized collection count, `discovered*` is what was
+observed before discovery stopped, and `scanned*` is the work actually
+inspected. `scanComplete=false` means discovered totals are lower bounds.
+Truncation is true when evidence or requested scope was omitted; exactly
+filling a limit is not sufficient. Ordered `truncatedReasons` report every
+applicable budget where the response supports multiple reasons. Where a legacy singular
+`truncatedReason` remains, it is the first ordered reason.
+Discovery-affecting target-side property failures add
+`propertyInspectionUnavailable` and force `scanComplete=false`; their
+discovered totals are lower bounds rather than invented exhaustive counts.
+
+| Response | Required bounded metadata semantics |
+|---|---|
+| `get_binding_info` | `returnedBindings` equals `bindings.Count`; `discoveredBindings` counts bindings observed; `scannedProperties` counts dependency properties inspected; `scanComplete` distinguishes a complete property scan. `truncatedReasons` reports all omitted evidence while singular `truncatedReason` remains the first-reason compatibility field. |
+| `get_binding_errors` | `returnedErrors` equals `errors.Count`; `discoveredErrors` includes errors omitted from the payload; `scannedNodes` is traversal work; `scanComplete` and ordered `truncatedReasons` distinguish node-scan and returned-error limits. |
+| `uia_coverage_report` | `summary.returnedFindings` equals `findings.Count`; `summary.discoveredFindings` includes omitted findings; `summary.discoveredIssueCounts` counts all discovered findings rather than only the returned subset; `summary.scannedNodes`, `summary.scanComplete`, and ordered `summary.truncatedReasons` describe traversal completeness. Existing `summary.findingsCount` and `summary.issueCounts` describe the returned subset. |
+| `get_computed_properties` | `returnedProperties` equals `properties.Count`; `discoveredProperties` counts values matching the request before the response cap; `scannedProperties` is actual property work; `scanComplete` and ordered `truncatedReasons` remain separate from nested provenance limits. |
+| `get_data_context` | The response identifies the resolved `element` and `windowHandleUsed`. Ordered `truncatedReasons` identify graph-depth, per-object property, and string omissions instead of relying on warnings alone. |
+| `get_style_chain` | Each style entry reports `returnedBasedOnStyles`, `discoveredBasedOnStyles`, `basedOnScanComplete`, `basedOnTruncated`, and the effective `maxBasedOnDepth`; the returned count matches `basedOnChainTargetTypes.Count`. |
+| `get_template_info` | When named elements are requested, `returnedNamedElements` equals the serialized list count; `discoveredNamedElements`, `namedElementsScanComplete`, `namedElementsTruncated`, and effective `maxNamedElements` describe the bounded enumeration. |
+
+`find_elements` deliberately keeps its established contract unchanged:
+`ReturnedMatches`, `DiscoveredMatches`, `ScannedNodes`, `Truncated`, and singular
+`TruncatedReason` retain their current exact-versus-lower-bound semantics.
 
 **Upgraded tools:**
 
@@ -385,19 +426,19 @@ exception messages, and target-side stack traces.
 | `inject_agent` | Inject the in-process (Snoop-based) agent | Injection status |
 | `agent_ping` | Ping the injected agent | Ping result |
 | `release_element` | Explicitly release a reusable element handle | Release result |
-| `get_binding_info` | Inspect bindings on an element | For each binding: path, source, mode, converter, current value, status (Active/Error/Detached), and error message if broken |
-| `get_binding_errors` | List broken or non-active bindings in the current visual tree | Binding path, target element/property, binding status, and available validation error details |
+| `get_binding_info` | Inspect bindings on an element | Per-binding path, source, mode, converter, value, status, and error detail plus truthful returned/discovered/property-scan metadata |
+| `get_binding_errors` | List broken or non-active bindings in the current visual tree | Binding path, target element/property, status, validation detail, and returned/discovered/scan-completeness metadata with ordered truncation reasons |
 | `get_validation_errors` | Read the current `Validation.Errors` attached state in a bounded visual-tree scope without invoking validators | Deterministic element/error order; exact, best-effort, or unavailable source evidence; bounded binding, content, exception, and adorner evidence; returned/discovered/scan counts and ordered truncation reasons |
 | `subscribe_binding_errors` | Subscribe to binding errors (poll-based) | Subscription ID and effective poll, queue, and whole-event bounds |
 | `subscribe_property_changes` | Observe an allowlist of dependency properties and dotted DataContext paths on one WPF element using target-side change notifications | Subscription ID, effective bounds, selected watches, and start/expiry metadata |
 | `poll_subscription` | Poll bounded, versioned subscription events and delivery-loss metadata | Per-stream ordered event batch; canonical and compatibility loss counters; typed terminal event and retained completion state |
 | `unsubscribe` | Unsubscribe a subscription | Unsubscribe result |
-| `get_data_context` | Serialize the DataContext of an element | JSON representation of the DataContext object, its type, and property values. Configurable depth to avoid serializing the entire object graph. |
-| `get_computed_properties` | Inspect computed dependency property values | Effective values + optional value-source details |
+| `get_data_context` | Serialize the DataContext of an element | Resolved element/window identity, DataContext type and JSON values, plus ordered bounded-serialization reasons. Configurable depth avoids serializing the entire object graph. |
+| `get_computed_properties` | Inspect computed dependency property values | Effective values, optional value-source details, and returned/discovered/scanned/completeness metadata distinct from nested provenance limits |
 | `get_layout_context` | Explain a WPF element's current layout using bounded relational evidence | Target metrics, nearest-first ancestors, relevant siblings, Grid allocation/definitions, transforms, clipping, DPI/physical bounds, unavailable evidence, and deterministic counts/truncation |
-| `get_style_chain` | Inspect the applied style chain | Style/ThemeStyle and BasedOn chain summary |
-| `get_template_info` | Inspect the applied template | Template summary + optional named parts |
-| `uia_coverage_report` | Report UIA automation coverage gaps | Findings + suggestions (e.g., missing AutomationPeers/patterns) |
+| `get_style_chain` | Inspect the applied style chain | Style/ThemeStyle summary plus per-entry bounded `BasedOn` counts, completeness, truncation, and effective depth |
+| `get_template_info` | Inspect the applied template | Template summary plus optional named parts with returned/discovered counts, completeness, truncation, and effective limit |
+| `uia_coverage_report` | Report UIA automation coverage gaps | Findings and suggestions plus returned/discovered counts, discovered issue counts, scan completeness, and ordered truncation reasons |
 | `performance_start` | Start lightweight UI-thread latency sampling | Run ID |
 | `performance_stop` | Stop a performance run | Summary |
 | `trace_start` | Start MCP tool tracing | Trace ID |

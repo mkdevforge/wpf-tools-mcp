@@ -80,6 +80,58 @@ public sealed class ToolErrorSchemaTests
 
     [TestCase("core")]
     [TestCase("diagnostics")]
+    public async Task Error_context_schema_accepts_bounded_camel_case_truncation_reasons(string profile)
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, profile);
+        var tool = (await mcp.ListToolsAsync()).Single(item => item.Name == "list_sessions");
+        var schemaElement = GetOutputSchema(tool);
+        var schema = JsonSchema.FromText(schemaElement.GetRawText());
+        var response = new ToolErrorResponse(new ToolErrorInfo("ambiguous_element", "Ambiguous.")
+        {
+            Context = new ToolErrorContext
+            {
+                ReturnedCandidates = 0,
+                DiscoveredCandidates = 1,
+                Truncated = true,
+                TruncatedReason = "maxCandidates",
+                Candidates = []
+            }
+        });
+        var validContent = JsonSerializer.SerializeToElement(
+            response,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var validEvaluation = schema.Evaluate(
+            validContent,
+            new EvaluationOptions { OutputFormat = OutputFormat.List });
+        var oversizedContent = JsonNode.Parse(validContent.GetRawText())!.AsObject();
+        oversizedContent["error"]!["context"]!["truncatedReason"] = new string('a', 65);
+        var oversizedEvaluation = schema.Evaluate(
+            JsonSerializer.SerializeToElement(oversizedContent),
+            new EvaluationOptions { OutputFormat = OutputFormat.List });
+        var errorBranch = schemaElement.GetProperty("oneOf").EnumerateArray().Single(IsErrorBranch);
+        var reasonSchema = errorBranch
+            .GetProperty("properties")
+            .GetProperty("error")
+            .GetProperty("properties")
+            .GetProperty("context")
+            .GetProperty("properties")
+            .GetProperty("truncatedReason");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                validEvaluation.IsValid,
+                Is.True,
+                $"{profile} error context rejected camelCase truncation reason: {JsonSerializer.Serialize(validEvaluation)}");
+            Assert.That(oversizedEvaluation.IsValid, Is.False);
+            Assert.That(reasonSchema.GetProperty("maxLength").GetInt32(), Is.EqualTo(64));
+            Assert.That(reasonSchema.GetProperty("pattern").GetString(), Is.EqualTo("^[a-z][A-Za-z0-9]*$"));
+        });
+    }
+
+    [TestCase("core")]
+    [TestCase("diagnostics")]
     public async Task Uia_locator_unmapped_result_validates_when_optional_sections_are_omitted(string profile)
     {
         var serverExe = McpServerPaths.FindMcpServerExecutable();

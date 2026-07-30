@@ -301,7 +301,10 @@ internal static partial class WpfVisualTreeInspector
             UnavailableEvidence: evidence.Items,
             Truncated: truncatedReasons.Count > 0,
             TruncatedReason: truncatedReasons.FirstOrDefault(),
-            TruncatedReasons: truncatedReasons.Count > 0 ? truncatedReasons : null);
+            TruncatedReasons: truncatedReasons.Count > 0 ? truncatedReasons : null)
+        {
+            WindowHandleUsed = GetWindowHandle(window)
+        };
     }
 
     private static LayoutEdgeDiscovery BuildLayoutEdges(

@@ -131,6 +131,87 @@ public sealed class ToolProfileTests
         Assert.That(missingOutputSchemas, Is.Empty);
     }
 
+    [TestCase(null)]
+    [TestCase("diagnostics")]
+    public async Task Inspection_output_schemas_expose_targeted_identity_and_completeness_metadata(string? toolProfile)
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: toolProfile);
+        var tools = (await mcp.ListToolsAsync()).ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+
+        AssertOutputContains(tools["take_screenshot"], "backendUsed", "fallback", "windowHandleUsed");
+        AssertOutputContains(tools["get_visual_tree"], "backendUsed", "fallback", "windowHandleUsed");
+        AssertOutputContains(tools["find_elements"], "backendUsed", "fallback", "windowHandleUsed");
+        AssertOutputContains(tools["get_uia_tree"], "windowHandleUsed");
+        AssertOutputContains(tools["get_element_properties"], "windowHandleUsed");
+        AssertOutputContains(tools["get_uia_locators"], "windowHandleUsed");
+        AssertOutputContains(
+            tools["get_binding_info"],
+            "windowHandleUsed",
+            "returnedBindings",
+            "discoveredBindings",
+            "scannedProperties",
+            "scanComplete",
+            "truncatedReasons");
+        AssertOutputContains(
+            tools["get_binding_errors"],
+            "windowHandleUsed",
+            "returnedErrors",
+            "discoveredErrors",
+            "scanComplete",
+            "truncatedReasons");
+        AssertOutputContains(tools["get_data_context"], "element", "windowHandleUsed", "truncatedReasons");
+        AssertOutputContains(
+            tools["get_computed_properties"],
+            "windowHandleUsed",
+            "returnedProperties",
+            "discoveredProperties",
+            "scannedProperties",
+            "scanComplete",
+            "truncatedReasons");
+        AssertOutputContains(tools["get_layout_context"], "windowHandleUsed");
+
+        if (!string.Equals(toolProfile, "diagnostics", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        AssertOutputContains(tools["get_path_to_element"], "backendUsed", "windowHandleUsed");
+        AssertOutputContains(tools["uia_coverage_report"], "windowHandleUsed");
+        Assert.That(
+            GetNestedOutputPropertyNames(tools["uia_coverage_report"], "summary"),
+            Is.SupersetOf(new[]
+            {
+                "returnedFindings",
+                "discoveredFindings",
+                "scanComplete",
+                "discoveredIssueCounts",
+                "truncatedReasons"
+            }));
+        AssertOutputContains(tools["get_style_chain"], "windowHandleUsed");
+        Assert.That(
+            GetArrayItemOutputPropertyNames(tools["get_style_chain"], "styles"),
+            Is.SupersetOf(new[]
+            {
+                "returnedBasedOnStyles",
+                "discoveredBasedOnStyles",
+                "basedOnScanComplete",
+                "basedOnTruncated",
+                "maxBasedOnDepth"
+            }));
+        AssertOutputContains(tools["get_template_info"], "windowHandleUsed");
+        Assert.That(
+            GetNestedOutputPropertyNames(tools["get_template_info"], "template"),
+            Is.SupersetOf(new[]
+            {
+                "returnedNamedElements",
+                "discoveredNamedElements",
+                "namedElementsScanComplete",
+                "namedElementsTruncated",
+                "maxNamedElements"
+            }));
+    }
+
     [Test]
     public async Task Ordinary_successes_return_structured_content_over_stdio()
     {
@@ -257,8 +338,10 @@ public sealed class ToolProfileTests
             Is.EqualTo(new[] { "backendUsed", "element", "fallback", "windowHandleUsed" }));
         Assert.That(
             GetOutputPropertyNames(tools["get_uia_locators"]),
-            Is.EqualTo(new[] { "flaUi", "locatorSuggestions", "uia", "uiaMapping", "wpf" }));
-        Assert.That(GetOutputRequiredPropertyNames(tools["get_uia_locators"]), Is.Empty);
+            Is.EqualTo(new[] { "flaUi", "locatorSuggestions", "uia", "uiaMapping", "windowHandleUsed", "wpf" }));
+        Assert.That(
+            GetOutputRequiredPropertyNames(tools["get_uia_locators"]),
+            Is.Empty);
 
         foreach (var toolName in new[]
                  {
@@ -1429,6 +1512,56 @@ public sealed class ToolProfileTests
             .Select(property => property.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static void AssertOutputContains(McpClientTool tool, params string[] propertyNames) =>
+        Assert.That(GetOutputPropertyNames(tool), Is.SupersetOf(propertyNames), tool.Name);
+
+    private static string[] GetNestedOutputPropertyNames(McpClientTool tool, string propertyName)
+    {
+        var schema = GetSuccessOutputSchema(tool);
+        var propertySchema = schema.GetProperty("properties").GetProperty(propertyName);
+        return GetSchemaPropertyNames(propertySchema);
+    }
+
+    private static string[] GetArrayItemOutputPropertyNames(McpClientTool tool, string propertyName)
+    {
+        var schema = GetSuccessOutputSchema(tool);
+        var propertySchema = schema.GetProperty("properties").GetProperty(propertyName);
+        if (propertySchema.TryGetProperty("anyOf", out var alternatives))
+        {
+            propertySchema = alternatives.EnumerateArray().First(item => item.TryGetProperty("items", out _));
+        }
+
+        return GetSchemaPropertyNames(propertySchema.GetProperty("items"));
+    }
+
+    private static string[] GetSchemaPropertyNames(JsonElement schema)
+    {
+        if (schema.TryGetProperty("anyOf", out var alternatives))
+        {
+            schema = alternatives.EnumerateArray().First(item => item.TryGetProperty("properties", out _));
+        }
+
+        return schema.GetProperty("properties")
+            .EnumerateObject()
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static JsonElement GetSuccessOutputSchema(McpClientTool tool)
+    {
+        var schema = tool.ProtocolTool.OutputSchema
+            ?? throw new AssertionException($"{tool.Name} did not advertise an output schema.");
+        if (schema.TryGetProperty("oneOf", out var branches))
+        {
+            schema = branches.EnumerateArray().First(branch =>
+                !branch.TryGetProperty("required", out var required) ||
+                !required.EnumerateArray().Any(item => item.GetString() == "error"));
+        }
+
+        return schema;
     }
 
     private static string[] GetOutputRequiredPropertyNames(McpClientTool tool)

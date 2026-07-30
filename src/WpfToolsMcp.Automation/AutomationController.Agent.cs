@@ -758,6 +758,7 @@ public sealed partial class AutomationController
         var target = PrepareWpfAgentTarget("get_binding_info", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
+        EnsureInspectionResponseMetadataCapability(GetAgentCapabilities(client));
         var request = new GetBindingInfoRequest(
             WindowHandle: target.WindowHandle,
             Locator: target.Locator,
@@ -781,9 +782,12 @@ public sealed partial class AutomationController
             Element = await StripAgentElementIdAsync(
                 client,
                 response.Element,
-                target.PublicElementId).ConfigureAwait(false)
+                target.PublicElementId).ConfigureAwait(false),
+            WindowHandleUsed = target.WindowHandle ?? response.WindowHandleUsed
         };
-        trace?.SetSummary($"bindings={response.Bindings.Count} truncated={response.Truncated}");
+        trace?.SetSummary(
+            $"bindings={response.ReturnedBindings}/{response.DiscoveredBindings} " +
+            $"properties={response.ScannedProperties} complete={response.ScanComplete} truncated={response.Truncated}");
         return response;
         }
         catch (Exception ex)
@@ -809,6 +813,7 @@ public sealed partial class AutomationController
         try
         {
             var client = await EnsureAgentConnectedAsync(cancellationToken);
+            EnsureInspectionResponseMetadataCapability(GetAgentCapabilities(client));
             var request = new GetBindingErrorsRequest(
                 WindowHandle: windowHandle,
                 RootXPath: rootXPath,
@@ -817,7 +822,13 @@ public sealed partial class AutomationController
                 MaxNodes: maxNodes);
 
             var response = await client.CallAsync<GetBindingErrorsResponse>("wpf/get_binding_errors", request, cancellationToken);
-            trace?.SetSummary($"errors={response.Errors.Count} truncated={response.Truncated}");
+            response = response with
+            {
+                WindowHandleUsed = windowHandle ?? response.WindowHandleUsed
+            };
+            trace?.SetSummary(
+                $"errors={response.ReturnedErrors}/{response.DiscoveredErrors} " +
+                $"nodes={response.ScannedNodes} complete={response.ScanComplete} truncated={response.Truncated}");
             return response;
         }
         catch (Exception ex)
@@ -891,6 +902,7 @@ public sealed partial class AutomationController
         try
         {
             var client = await EnsureAgentConnectedAsync(cancellationToken);
+            EnsureInspectionResponseMetadataCapability(GetAgentCapabilities(client));
             var request = new GetUiaCoverageReportRequest(
                 WindowHandle: windowHandle,
                 RootXPath: rootXPath,
@@ -906,9 +918,13 @@ public sealed partial class AutomationController
             {
                 Findings = response.Findings
                     .Select(f => f with { Element = StripAgentElementId(f.Element) })
-                    .ToArray()
+                    .ToArray(),
+                WindowHandleUsed = windowHandle ?? response.WindowHandleUsed
             };
-            trace?.SetSummary($"findings={response.Summary.FindingsCount} truncated={response.Summary.Truncated}");
+            trace?.SetSummary(
+                $"findings={response.Summary.ReturnedFindings}/{response.Summary.DiscoveredFindings} " +
+                $"nodes={response.Summary.ScannedNodes} complete={response.Summary.ScanComplete} " +
+                $"truncated={response.Summary.Truncated}");
             return response;
         }
         catch (Exception ex)
@@ -941,6 +957,7 @@ public sealed partial class AutomationController
         var target = PrepareWpfAgentTarget("get_data_context", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
+        EnsureInspectionResponseMetadataCapability(GetAgentCapabilities(client));
         var request = new GetDataContextRequest(
             WindowHandle: target.WindowHandle,
             Locator: target.Locator,
@@ -963,6 +980,14 @@ public sealed partial class AutomationController
             fallbackRequest,
             target,
             cancellationToken);
+        response = response with
+        {
+            Element = await StripAgentElementIdAsync(
+                client,
+                response.Element,
+                target.PublicElementId).ConfigureAwait(false),
+            WindowHandleUsed = target.WindowHandle ?? response.WindowHandleUsed
+        };
         trace?.SetSummary($"type={response.DataContextType ?? "null"}");
         return response;
         }
@@ -997,10 +1022,11 @@ public sealed partial class AutomationController
         var target = PrepareWpfAgentTarget("get_computed_properties", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
-        var capabilities = includeProvenance ? GetAgentCapabilities(client) : null;
+        var capabilities = GetAgentCapabilities(client);
+        EnsureInspectionResponseMetadataCapability(capabilities);
         var preparedPropertyNames = includeProvenance
             ? PrepareProvenancePropertyNamesForAgent(propertyNames)
-            : (Names: propertyNames, TruncatedReason: (string?)null);
+            : new PreparedAgentPropertyNames(propertyNames, null);
         var request = new GetComputedPropertiesRequest(
             WindowHandle: target.WindowHandle,
             Locator: target.Locator,
@@ -1027,12 +1053,26 @@ public sealed partial class AutomationController
                 fallbackRequest,
                 target,
                 cancellationToken));
-        if (preparedPropertyNames.TruncatedReason is not null)
+        if (preparedPropertyNames.TruncatedReasons is not null)
         {
+            var truncatedReasons = new List<string>(preparedPropertyNames.TruncatedReasons);
+            if (response.TruncatedReasons is not null)
+            {
+                truncatedReasons.AddRange(response.TruncatedReasons.Where(
+                    reason => !truncatedReasons.Contains(reason, StringComparer.Ordinal)));
+            }
+            else if (response.TruncatedReason is not null &&
+                     !truncatedReasons.Contains(response.TruncatedReason, StringComparer.Ordinal))
+            {
+                truncatedReasons.Add(response.TruncatedReason);
+            }
+
             response = response with
             {
                 Truncated = true,
-                TruncatedReason = preparedPropertyNames.TruncatedReason
+                TruncatedReason = truncatedReasons[0],
+                TruncatedReasons = truncatedReasons,
+                ScanComplete = false
             };
         }
 
@@ -1041,9 +1081,12 @@ public sealed partial class AutomationController
             Element = await StripAgentElementIdAsync(
                 client,
                 response.Element,
-                target.PublicElementId).ConfigureAwait(false)
+                target.PublicElementId).ConfigureAwait(false),
+            WindowHandleUsed = target.WindowHandle ?? response.WindowHandleUsed
         };
-        trace?.SetSummary($"props={response.Properties.Count} truncated={response.Truncated}");
+        trace?.SetSummary(
+            $"props={response.ReturnedProperties}/{response.DiscoveredProperties} " +
+            $"scanned={response.ScannedProperties} complete={response.ScanComplete} truncated={response.Truncated}");
         return response;
         }
         catch (Exception ex)
@@ -1057,12 +1100,19 @@ public sealed partial class AutomationController
         }
     }
 
-    internal static (IReadOnlyList<string>? Names, string? TruncatedReason)
+    internal readonly record struct PreparedAgentPropertyNames(
+        IReadOnlyList<string>? Names,
+        IReadOnlyList<string>? TruncatedReasons)
+    {
+        public string? TruncatedReason => TruncatedReasons?.FirstOrDefault();
+    }
+
+    internal static PreparedAgentPropertyNames
         PrepareProvenancePropertyNamesForAgent(IReadOnlyList<string>? propertyNames)
     {
         if (propertyNames is null)
         {
-            return (null, null);
+            return new PreparedAgentPropertyNames(null, null);
         }
 
         const int maxPropertyNames = 100;
@@ -1081,12 +1131,20 @@ public sealed partial class AutomationController
             }
         }
 
-        var truncatedReason = propertyNames.Count > maxPropertyNames
-            ? "maxProvenancePropertyNames"
-            : propertyNameLengthTruncated
-                ? "maxProvenancePropertyNameLength"
-                : null;
-        return (names, truncatedReason);
+        var truncatedReasons = new List<string>(2);
+        if (propertyNames.Count > maxPropertyNames)
+        {
+            truncatedReasons.Add("maxProvenancePropertyNames");
+        }
+
+        if (propertyNameLengthTruncated)
+        {
+            truncatedReasons.Add("maxProvenancePropertyNameLength");
+        }
+
+        return new PreparedAgentPropertyNames(
+            names,
+            truncatedReasons.Count > 0 ? truncatedReasons : null);
     }
 
     private static string TruncateAgentRequestText(string value, int maxLength)
@@ -1150,7 +1208,11 @@ public sealed partial class AutomationController
             normalizedElement = normalizedElement with { ElementId = target.PublicElementId };
         }
 
-        response = response with { Element = normalizedElement };
+        response = response with
+        {
+            Element = normalizedElement,
+            WindowHandleUsed = target.WindowHandle ?? response.WindowHandleUsed
+        };
         trace?.SetSummary(
             $"ancestors={response.Counts.ReturnedAncestors}/{response.Counts.DiscoveredAncestors} " +
             $"siblings={response.Counts.ReturnedSiblings}/{response.Counts.DiscoveredSiblings} " +
@@ -1184,6 +1246,7 @@ public sealed partial class AutomationController
         var target = PrepareWpfAgentTarget("get_style_chain", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
+        EnsureInspectionResponseMetadataCapability(GetAgentCapabilities(client));
         var request = new GetStyleChainRequest(
             WindowHandle: target.WindowHandle,
             Locator: target.Locator,
@@ -1207,7 +1270,8 @@ public sealed partial class AutomationController
             Element = await StripAgentElementIdAsync(
                 client,
                 response.Element,
-                target.PublicElementId).ConfigureAwait(false)
+                target.PublicElementId).ConfigureAwait(false),
+            WindowHandleUsed = target.WindowHandle ?? response.WindowHandleUsed
         };
         trace?.SetSummary($"entries={response.Styles.Count}");
         return response;
@@ -1239,6 +1303,7 @@ public sealed partial class AutomationController
         var target = PrepareWpfAgentTarget("get_template_info", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
+        EnsureInspectionResponseMetadataCapability(GetAgentCapabilities(client));
         var request = new GetTemplateInfoRequest(
             WindowHandle: target.WindowHandle,
             Locator: target.Locator,
@@ -1263,7 +1328,8 @@ public sealed partial class AutomationController
             Element = await StripAgentElementIdAsync(
                 client,
                 response.Element,
-                target.PublicElementId).ConfigureAwait(false)
+                target.PublicElementId).ConfigureAwait(false),
+            WindowHandleUsed = target.WindowHandle ?? response.WindowHandleUsed
         };
         var named = response.Template.NamedElements is null ? 0 : response.Template.NamedElements.Count;
         trace?.SetSummary($"named={named}");
@@ -1533,6 +1599,22 @@ public sealed partial class AutomationController
         new(
             "agent_capability_unavailable: get_layout_context requires the current WPF agent. " +
             "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
+
+    internal static InvalidOperationException CreateInspectionResponseMetadataCapabilityException() =>
+        new(
+            "agent_capability_unavailable: truthful inspection response metadata requires the current WPF agent. " +
+            "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
+
+    internal static void EnsureInspectionResponseMetadataCapability(AgentCapabilitiesResponse? capabilities)
+    {
+        if (capabilities is null ||
+            !capabilities.Capabilities.Contains(
+                AgentProtocolCapabilities.InspectionResponseMetadata,
+                StringComparer.Ordinal))
+        {
+            throw CreateInspectionResponseMetadataCapabilityException();
+        }
+    }
 
     internal static Task<T> CallGetLayoutContextWhenSupportedAsync<T>(
         AgentCapabilitiesResponse? capabilities,

@@ -795,6 +795,9 @@ internal static partial class WpfVisualTreeInspector
         throw new InvalidOperationException("No WPF windows found to inspect.");
     }
 
+    private static long GetWindowHandle(Window window) =>
+        new WindowInteropHelper(window).Handle.ToInt64();
+
     private static Window? GetContainingWindow(DependencyObject element)
     {
         if (element is Window window)
@@ -1449,7 +1452,10 @@ internal static partial class WpfVisualTreeInspector
             ScannedNodes: context.ScannedNodes,
             Truncated: context.Truncated,
             TruncatedReason: context.TruncatedReason,
-            Warnings: null);
+            Warnings: null)
+        {
+            WindowHandleUsed = GetWindowHandle(window)
+        };
     }
 
     public static FindElementsResponse FindElements(
@@ -1579,6 +1585,7 @@ internal static partial class WpfVisualTreeInspector
             TruncatedReason: truncatedReason,
             Warnings: null)
         {
+            WindowHandleUsed = GetWindowHandle(window),
             DiscoveredMatches = discoveredMatches
         };
     }
@@ -1591,7 +1598,8 @@ internal static partial class WpfVisualTreeInspector
         bool includeOffViewport,
         ContractRect? viewportBounds,
         int maxNodes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action? onNodeScanned = null)
     {
         var stack = new Stack<(DependencyObject Element, string XPath)>();
         stack.Push((root, rootXPath));
@@ -1609,6 +1617,7 @@ internal static partial class WpfVisualTreeInspector
 
             var (current, currentXPath) = stack.Pop();
             scannedNodes++;
+            onNodeScanned?.Invoke();
 
             if (!ReferenceEquals(current, root) && !ShouldIncludeWpfElement(current, visibleOnly, includeOffViewport, viewportBounds))
             {
@@ -2191,8 +2200,10 @@ internal static partial class WpfVisualTreeInspector
             interactiveMode: InteractiveMode.Heuristic,
             maxNodes,
             cancellationToken);
-
-        return new GetPathToElementResponse(InspectionBackend.Wpf, resolved.XPath);
+        return new GetPathToElementResponse(InspectionBackend.Wpf, resolved.XPath)
+        {
+            WindowHandleUsed = GetWindowHandle(window)
+        };
     }
 
     public static ElementRef ResolveElement(
@@ -3176,12 +3187,35 @@ internal static partial class WpfVisualTreeInspector
 
     private static string TruncateString(string value, int maxLength)
     {
-        if (maxLength <= 0 || value.Length <= maxLength)
+        return TruncateString(value, maxLength, out _);
+    }
+
+    private static string TruncateString(string value, int maxLength, out bool truncated)
+    {
+        maxLength = Math.Max(0, maxLength);
+        truncated = value.Length > maxLength;
+        if (!truncated)
         {
             return value;
         }
 
-        return value[..maxLength] + "...";
+        if (maxLength == 0)
+        {
+            return string.Empty;
+        }
+
+        if (maxLength <= 3)
+        {
+            return new string('.', maxLength);
+        }
+
+        var contentLength = maxLength - 3;
+        if (contentLength > 0 && char.IsHighSurrogate(value[contentLength - 1]))
+        {
+            contentLength--;
+        }
+
+        return value[..contentLength] + "...";
     }
 
     private static string FormatValueForBinding(object? value, string valueFormat, int maxStringLength)
@@ -3321,6 +3355,7 @@ internal static partial class WpfVisualTreeInspector
         var elementRef = BuildElementRefWpf(ownerId, element, xpath, FindReturnFields.Standard);
 
         var properties = new HashSet<DependencyProperty>(GetDependencyPropertiesCached(element.GetType()));
+        var propertyInspectionComplete = true;
         try
         {
             var enumerator = element.GetLocalValueEnumerator();
@@ -3331,39 +3366,48 @@ internal static partial class WpfVisualTreeInspector
         }
         catch
         {
+            propertyInspectionComplete = false;
         }
 
         var orderedProperties = properties.OrderBy(dp => dp.Name, StringComparer.Ordinal).ToArray();
 
         var bindings = new List<BindingInfo>();
-        var truncated = false;
-        string? truncatedReason = null;
+        var discoveredBindings = 0;
+        var scannedProperties = 0;
 
         const int maxValueLength = 2000;
 
         foreach (var property in orderedProperties)
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            if (bindings.Count >= maxProperties)
-            {
-                truncated = true;
-                truncatedReason = "maxProperties";
-                break;
-            }
+            scannedProperties++;
 
             BindingExpressionBase? expression = null;
+            var expressionInspected = true;
             try
             {
                 expression = BindingOperations.GetBindingExpressionBase(element, property);
             }
             catch
             {
+                expressionInspected = false;
+                propertyInspectionComplete = false;
+            }
+
+            if (!expressionInspected)
+            {
+                continue;
             }
 
             if (expression is null)
             {
                 if (!request.IncludeUnbound)
+                {
+                    continue;
+                }
+
+                discoveredBindings++;
+                if (bindings.Count >= maxProperties)
                 {
                     continue;
                 }
@@ -3384,6 +3428,12 @@ internal static partial class WpfVisualTreeInspector
                     CurrentValue: currentValue,
                     ValueSource: GetValueSourceWpf(element, property)));
 
+                continue;
+            }
+
+            discoveredBindings++;
+            if (bindings.Count >= maxProperties)
+            {
                 continue;
             }
 
@@ -3470,14 +3520,37 @@ internal static partial class WpfVisualTreeInspector
                 Converter: converter));
         }
 
+        var truncatedReasons = new List<string>(2);
+        if (discoveredBindings > bindings.Count)
+        {
+            truncatedReasons.Add("maxProperties");
+        }
+
+        if (!propertyInspectionComplete)
+        {
+            truncatedReasons.Add("propertyInspectionUnavailable");
+        }
+
         return new GetBindingInfoResponse(
             Element: elementRef,
             Bindings: bindings,
-            Truncated: truncated,
-            TruncatedReason: truncatedReason);
+            Truncated: truncatedReasons.Count > 0,
+            TruncatedReason: truncatedReasons.FirstOrDefault())
+        {
+            WindowHandleUsed = GetWindowHandle(window),
+            ReturnedBindings = bindings.Count,
+            DiscoveredBindings = discoveredBindings,
+            ScannedProperties = scannedProperties,
+            ScanComplete = propertyInspectionComplete,
+            TruncatedReasons = truncatedReasons.Count > 0 ? truncatedReasons : null
+        };
     }
 
-    private static void CollectBindingErrorsForElement(
+    private readonly record struct BindingErrorDiscovery(
+        int DiscoveredErrors,
+        bool InspectionComplete);
+
+    private static BindingErrorDiscovery CollectBindingErrorsForElement(
         DependencyObject element,
         string elementXPath,
         List<BindingErrorInfo> errors,
@@ -3491,26 +3564,32 @@ internal static partial class WpfVisualTreeInspector
         }
         catch
         {
-            return;
+            return new BindingErrorDiscovery(0, InspectionComplete: false);
         }
+
+        var discoveredErrors = 0;
+        var inspectionComplete = true;
 
         while (localValues.MoveNext())
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (errors.Count >= maxErrors)
-            {
-                return;
-            }
-
             var property = localValues.Current.Property;
             BindingExpressionBase? expression = null;
+            var expressionInspected = true;
             try
             {
                 expression = BindingOperations.GetBindingExpressionBase(element, property);
             }
             catch
             {
+                expressionInspected = false;
+                inspectionComplete = false;
+            }
+
+            if (!expressionInspected)
+            {
+                continue;
             }
 
             if (expression is null)
@@ -3525,9 +3604,17 @@ internal static partial class WpfVisualTreeInspector
             }
             catch
             {
+                inspectionComplete = false;
+                continue;
             }
 
             if (!shouldReport)
+            {
+                continue;
+            }
+
+            discoveredErrors++;
+            if (errors.Count >= maxErrors)
             {
                 continue;
             }
@@ -3572,6 +3659,8 @@ internal static partial class WpfVisualTreeInspector
                 ErrorMessage: errorMessage,
                 Status: status));
         }
+
+        return new BindingErrorDiscovery(discoveredErrors, inspectionComplete);
     }
 
     public static GetBindingErrorsResponse GetBindingErrors(
@@ -3598,8 +3687,9 @@ internal static partial class WpfVisualTreeInspector
 
         var errors = new List<BindingErrorInfo>();
         var scannedNodes = 0;
-        var truncated = false;
-        string? truncatedReason = null;
+        var discoveredErrors = 0;
+        var nodeScanComplete = true;
+        var propertyInspectionComplete = true;
 
         var stack = new Stack<(DependencyObject Element, string XPath, int RemainingDepth)>();
         stack.Push((rootObject, rootXPath, depth));
@@ -3610,8 +3700,7 @@ internal static partial class WpfVisualTreeInspector
 
             if (scannedNodes >= maxNodes)
             {
-                truncated = true;
-                truncatedReason = "maxNodes";
+                nodeScanComplete = false;
                 break;
             }
 
@@ -3623,13 +3712,14 @@ internal static partial class WpfVisualTreeInspector
                 continue;
             }
 
-            CollectBindingErrorsForElement(current, currentXPath, errors, maxErrors, cancellationToken);
-            if (errors.Count >= maxErrors)
-            {
-                truncated = true;
-                truncatedReason = "maxErrors";
-                break;
-            }
+            var discovery = CollectBindingErrorsForElement(
+                current,
+                currentXPath,
+                errors,
+                maxErrors,
+                cancellationToken);
+            discoveredErrors += discovery.DiscoveredErrors;
+            propertyInspectionComplete &= discovery.InspectionComplete;
 
             if (remainingDepth <= 1)
             {
@@ -3673,11 +3763,34 @@ internal static partial class WpfVisualTreeInspector
             }
         }
 
+        var truncatedReasons = new List<string>(3);
+        if (discoveredErrors > errors.Count)
+        {
+            truncatedReasons.Add("maxErrors");
+        }
+
+        if (!nodeScanComplete)
+        {
+            truncatedReasons.Add("maxNodes");
+        }
+
+        if (!propertyInspectionComplete)
+        {
+            truncatedReasons.Add("propertyInspectionUnavailable");
+        }
+
         return new GetBindingErrorsResponse(
             Errors: errors,
             ScannedNodes: scannedNodes,
-            Truncated: truncated,
-            TruncatedReason: truncatedReason);
+            Truncated: truncatedReasons.Count > 0,
+            TruncatedReason: truncatedReasons.FirstOrDefault())
+        {
+            WindowHandleUsed = GetWindowHandle(window),
+            ReturnedErrors = errors.Count,
+            DiscoveredErrors = discoveredErrors,
+            ScanComplete = nodeScanComplete && propertyInspectionComplete,
+            TruncatedReasons = truncatedReasons.Count > 0 ? truncatedReasons : null
+        };
     }
 
     public static GetUiaCoverageReportResponse GetUiaCoverageReport(
@@ -3708,11 +3821,12 @@ internal static partial class WpfVisualTreeInspector
 
         var findings = new List<UiaCoverageFinding>();
         var warnings = new List<string>();
+        var discoveredIssueCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         var scannedNodes = 0;
         var consideredNodes = 0;
-        var truncated = false;
-        string? truncatedReason = null;
+        var discoveredFindings = 0;
+        var scanComplete = true;
 
         try
         {
@@ -3724,11 +3838,10 @@ internal static partial class WpfVisualTreeInspector
                          includeOffViewport: includeOffViewport,
                          viewportBounds: viewportBounds,
                          maxNodes: maxNodes,
-                         cancellationToken: cancellationToken))
+                         cancellationToken: cancellationToken,
+                         onNodeScanned: () => scannedNodes++))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                scannedNodes++;
 
                 var isInteractive = IsInteractiveWpf(element, interactiveMode);
                 if (interactiveOnly && !isInteractive)
@@ -3743,25 +3856,19 @@ internal static partial class WpfVisualTreeInspector
                 var elementFindings = AnalyzeCoverageForElement(element, elementRef, isInteractive);
                 foreach (var finding in elementFindings)
                 {
-                    findings.Add(finding);
-                    if (findings.Count >= maxFindings)
+                    discoveredFindings++;
+                    discoveredIssueCounts.TryGetValue(finding.IssueCode, out var issueCount);
+                    discoveredIssueCounts[finding.IssueCode] = issueCount + 1;
+                    if (findings.Count < maxFindings)
                     {
-                        truncated = true;
-                        truncatedReason = "maxFindings";
-                        break;
+                        findings.Add(finding);
                     }
-                }
-
-                if (truncated)
-                {
-                    break;
                 }
             }
         }
         catch (InvalidOperationException ex) when (ex.Message.StartsWith("Search exceeded maxNodes=", StringComparison.OrdinalIgnoreCase))
         {
-            truncated = true;
-            truncatedReason = "maxNodes";
+            scanComplete = false;
             warnings.Add(ex.Message);
         }
 
@@ -3779,18 +3886,45 @@ internal static partial class WpfVisualTreeInspector
             .ThenBy(i => i.IssueCode, StringComparer.Ordinal)
             .ToArray();
 
+        var orderedDiscoveredIssueCounts = discoveredIssueCounts
+            .Select(pair => new UiaCoverageIssueCount(pair.Key, pair.Value))
+            .OrderByDescending(item => item.Count)
+            .ThenBy(item => item.IssueCode, StringComparer.Ordinal)
+            .ToArray();
+
+        var truncatedReasons = new List<string>(2);
+        if (discoveredFindings > ordered.Length)
+        {
+            truncatedReasons.Add("maxFindings");
+        }
+
+        if (!scanComplete)
+        {
+            truncatedReasons.Add("maxNodes");
+        }
+
         var summary = new UiaCoverageSummary(
             ScannedNodes: scannedNodes,
             ConsideredNodes: consideredNodes,
             FindingsCount: ordered.Length,
             IssueCounts: issueCounts,
-            Truncated: truncated,
-            TruncatedReason: truncatedReason);
+            Truncated: truncatedReasons.Count > 0,
+            TruncatedReason: truncatedReasons.FirstOrDefault())
+        {
+            ReturnedFindings = ordered.Length,
+            DiscoveredFindings = discoveredFindings,
+            ScanComplete = scanComplete,
+            DiscoveredIssueCounts = orderedDiscoveredIssueCounts,
+            TruncatedReasons = truncatedReasons.Count > 0 ? truncatedReasons : null
+        };
 
         return new GetUiaCoverageReportResponse(
             Summary: summary,
             Findings: ordered,
-            Warnings: warnings.Count > 0 ? warnings : null);
+            Warnings: warnings.Count > 0 ? warnings : null)
+        {
+            WindowHandleUsed = GetWindowHandle(window)
+        };
     }
 
     private static IReadOnlyList<UiaCoverageFinding> AnalyzeCoverageForElement(DependencyObject element, ElementRef elementRef, bool isInteractive)
@@ -4043,6 +4177,42 @@ internal static partial class WpfVisualTreeInspector
         bool IncludeFrameworkProperties,
         HashSet<string>? PropertyAllowList);
 
+    private sealed class DataContextTruncationTracker
+    {
+        private bool _maxDepth;
+        private bool _maxPropertiesPerObject;
+        private bool _maxStringLength;
+
+        public bool Truncated => _maxDepth || _maxPropertiesPerObject || _maxStringLength;
+
+        public void MarkMaxDepth() => _maxDepth = true;
+
+        public void MarkMaxPropertiesPerObject() => _maxPropertiesPerObject = true;
+
+        public void MarkMaxStringLength() => _maxStringLength = true;
+
+        public IReadOnlyList<string>? GetReasons()
+        {
+            var reasons = new List<string>(3);
+            if (_maxDepth)
+            {
+                reasons.Add("maxDepth");
+            }
+
+            if (_maxPropertiesPerObject)
+            {
+                reasons.Add("maxPropertiesPerObject");
+            }
+
+            if (_maxStringLength)
+            {
+                reasons.Add("maxStringLength");
+            }
+
+            return reasons.Count == 0 ? null : reasons;
+        }
+    }
+
     private static JsonValue SerializeDoubleJson(double value)
     {
         if (double.IsNaN(value))
@@ -4088,7 +4258,7 @@ internal static partial class WpfVisualTreeInspector
         DataContextSerializationOptions options,
         int remainingDepth,
         HashSet<object> visited,
-        ref bool truncated,
+        DataContextTruncationTracker truncation,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -4105,7 +4275,13 @@ internal static partial class WpfVisualTreeInspector
 
         if (value is string s)
         {
-            return JsonValue.Create(TruncateString(s, options.MaxStringLength));
+            var bounded = TruncateString(s, options.MaxStringLength, out var wasTruncated);
+            if (wasTruncated)
+            {
+                truncation.MarkMaxStringLength();
+            }
+
+            return JsonValue.Create(bounded);
         }
 
         if (value is bool or byte or sbyte or short or ushort or int or uint or long or ulong or decimal)
@@ -4155,6 +4331,7 @@ internal static partial class WpfVisualTreeInspector
 
         if (remainingDepth <= 0)
         {
+            truncation.MarkMaxDepth();
             var type = value.GetType();
             return JsonValue.Create(type.FullName ?? type.Name);
         }
@@ -4173,18 +4350,25 @@ internal static partial class WpfVisualTreeInspector
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                if (entry.Value is null && !options.IncludeNulls)
+                {
+                    continue;
+                }
+
                 if (dictCount >= options.MaxPropertiesPerObject)
                 {
-                    truncated = true;
+                    truncation.MarkMaxPropertiesPerObject();
                     break;
                 }
 
                 var key = entry.Key?.ToString() ?? "null";
-                var node = SerializeDataContextValueFull(entry.Value, options, remainingDepth - 1, visited, ref truncated, cancellationToken);
-                if (node is null && !options.IncludeNulls)
-                {
-                    continue;
-                }
+                var node = SerializeDataContextValueFull(
+                    entry.Value,
+                    options,
+                    remainingDepth - 1,
+                    visited,
+                    truncation,
+                    cancellationToken);
 
                 obj[key] = node;
                 dictCount++;
@@ -4204,12 +4388,17 @@ internal static partial class WpfVisualTreeInspector
 
                 if (itemCount >= options.MaxPropertiesPerObject)
                 {
-                    array.Add(JsonValue.Create("<truncated>"));
-                    truncated = true;
+                    truncation.MarkMaxPropertiesPerObject();
                     break;
                 }
 
-                var node = SerializeDataContextValueFull(item, options, remainingDepth - 1, visited, ref truncated, cancellationToken);
+                var node = SerializeDataContextValueFull(
+                    item,
+                    options,
+                    remainingDepth - 1,
+                    visited,
+                    truncation,
+                    cancellationToken);
                 if (node is null && !options.IncludeNulls)
                 {
                     array.Add(null);
@@ -4226,18 +4415,11 @@ internal static partial class WpfVisualTreeInspector
         }
 
         var valueType = value.GetType();
-        var allProperties = valueType
+        var properties = valueType
             .GetProperties(BindingFlags.Instance | BindingFlags.Public)
             .Where(p => p.CanRead && p.GetIndexParameters().Length == 0)
             .OrderBy(p => p.Name, StringComparer.Ordinal)
             .ToArray();
-
-        if (allProperties.Length > options.MaxPropertiesPerObject)
-        {
-            truncated = true;
-        }
-
-        var properties = allProperties.Take(options.MaxPropertiesPerObject).ToArray();
 
         var json = new JsonObject();
 
@@ -4252,15 +4434,34 @@ internal static partial class WpfVisualTreeInspector
             }
             catch
             {
+                if (json.Count >= options.MaxPropertiesPerObject)
+                {
+                    truncation.MarkMaxPropertiesPerObject();
+                    break;
+                }
+
                 json[property.Name] = JsonValue.Create("<error>");
                 continue;
             }
 
-            var node = SerializeDataContextValueFull(propertyValue, options, remainingDepth - 1, visited, ref truncated, cancellationToken);
-            if (node is null && !options.IncludeNulls)
+            if (propertyValue is null && !options.IncludeNulls)
             {
                 continue;
             }
+
+            if (json.Count >= options.MaxPropertiesPerObject)
+            {
+                truncation.MarkMaxPropertiesPerObject();
+                break;
+            }
+
+            var node = SerializeDataContextValueFull(
+                propertyValue,
+                options,
+                remainingDepth - 1,
+                visited,
+                truncation,
+                cancellationToken);
 
             json[property.Name] = node;
         }
@@ -4273,7 +4474,7 @@ internal static partial class WpfVisualTreeInspector
         DataContextSerializationOptions options,
         int remainingDepth,
         HashSet<object> visited,
-        ref bool truncated,
+        DataContextTruncationTracker truncation,
         List<string> warnings,
         bool applyAllowList,
         CancellationToken cancellationToken)
@@ -4292,7 +4493,13 @@ internal static partial class WpfVisualTreeInspector
 
         if (value is string s)
         {
-            return JsonValue.Create(TruncateString(s, options.MaxStringLength));
+            var bounded = TruncateString(s, options.MaxStringLength, out var wasTruncated);
+            if (wasTruncated)
+            {
+                truncation.MarkMaxStringLength();
+            }
+
+            return JsonValue.Create(bounded);
         }
 
         if (value is bool or byte or sbyte or short or ushort or int or uint or long or ulong or decimal)
@@ -4348,6 +4555,7 @@ internal static partial class WpfVisualTreeInspector
 
         if (remainingDepth <= 0)
         {
+            truncation.MarkMaxDepth();
             return JsonValue.Create(valueType.FullName ?? valueType.Name);
         }
 
@@ -4365,18 +4573,27 @@ internal static partial class WpfVisualTreeInspector
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                if (entry.Value is null && !options.IncludeNulls)
+                {
+                    continue;
+                }
+
                 if (count >= options.MaxPropertiesPerObject)
                 {
-                    truncated = true;
+                    truncation.MarkMaxPropertiesPerObject();
                     break;
                 }
 
                 var key = entry.Key?.ToString() ?? "null";
-                var node = SerializeDataContextValueSummary(entry.Value, options, remainingDepth - 1, visited, ref truncated, warnings, applyAllowList: false, cancellationToken);
-                if (node is null && !options.IncludeNulls)
-                {
-                    continue;
-                }
+                var node = SerializeDataContextValueSummary(
+                    entry.Value,
+                    options,
+                    remainingDepth - 1,
+                    visited,
+                    truncation,
+                    warnings,
+                    applyAllowList: false,
+                    cancellationToken);
 
                 obj[key] = node;
                 count++;
@@ -4396,12 +4613,19 @@ internal static partial class WpfVisualTreeInspector
 
                 if (count >= options.MaxPropertiesPerObject)
                 {
-                    array.Add(JsonValue.Create("<truncated>"));
-                    truncated = true;
+                    truncation.MarkMaxPropertiesPerObject();
                     break;
                 }
 
-                var node = SerializeDataContextValueSummary(item, options, remainingDepth - 1, visited, ref truncated, warnings, applyAllowList: false, cancellationToken);
+                var node = SerializeDataContextValueSummary(
+                    item,
+                    options,
+                    remainingDepth - 1,
+                    visited,
+                    truncation,
+                    warnings,
+                    applyAllowList: false,
+                    cancellationToken);
                 if (node is null && !options.IncludeNulls)
                 {
                     array.Add(null);
@@ -4438,12 +4662,6 @@ internal static partial class WpfVisualTreeInspector
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (propCount >= options.MaxPropertiesPerObject)
-            {
-                truncated = true;
-                break;
-            }
-
             object? propertyValue;
             try
             {
@@ -4451,6 +4669,12 @@ internal static partial class WpfVisualTreeInspector
             }
             catch (Exception ex)
             {
+                if (propCount >= options.MaxPropertiesPerObject)
+                {
+                    truncation.MarkMaxPropertiesPerObject();
+                    break;
+                }
+
                 warnings.Add($"{valueType.Name}.{property.Name}: {ex.GetType().Name}");
                 json[property.Name] = JsonValue.Create("<error>");
                 propCount++;
@@ -4461,6 +4685,12 @@ internal static partial class WpfVisualTreeInspector
             {
                 if (options.IncludeNulls)
                 {
+                    if (propCount >= options.MaxPropertiesPerObject)
+                    {
+                        truncation.MarkMaxPropertiesPerObject();
+                        break;
+                    }
+
                     json[property.Name] = null;
                     propCount++;
                 }
@@ -4468,9 +4698,23 @@ internal static partial class WpfVisualTreeInspector
                 continue;
             }
 
+            if (propCount >= options.MaxPropertiesPerObject)
+            {
+                truncation.MarkMaxPropertiesPerObject();
+                break;
+            }
+
             if (IsScalarType(propertyValue.GetType()))
             {
-                json[property.Name] = SerializeDataContextValueSummary(propertyValue, options, remainingDepth - 1, visited, ref truncated, warnings, applyAllowList: false, cancellationToken);
+                json[property.Name] = SerializeDataContextValueSummary(
+                    propertyValue,
+                    options,
+                    remainingDepth - 1,
+                    visited,
+                    truncation,
+                    warnings,
+                    applyAllowList: false,
+                    cancellationToken);
                 propCount++;
                 continue;
             }
@@ -4559,6 +4803,13 @@ internal static partial class WpfVisualTreeInspector
             maxNodes,
             cancellationToken);
 
+        var elementRef = BuildElementRefWpf(
+            ownerId,
+            resolved.Element,
+            resolved.XPath,
+            FindReturnFields.Standard);
+        var windowHandleUsed = GetWindowHandle(window);
+
         object? dataContext = null;
         try
         {
@@ -4575,11 +4826,20 @@ internal static partial class WpfVisualTreeInspector
 
         if (dataContext is null)
         {
-            return new GetDataContextResponse(DataContextType: null, Data: null);
+            return new GetDataContextResponse(DataContextType: null, Data: null)
+            {
+                Element = elementRef,
+                WindowHandleUsed = windowHandleUsed
+            };
         }
 
         var dataContextType = dataContext.GetType().FullName ?? dataContext.GetType().Name;
-        var summary = TruncateString(dataContext.ToString() ?? "", maxStringLength);
+        var truncation = new DataContextTruncationTracker();
+        var summary = TruncateString(dataContext.ToString() ?? "", maxStringLength, out var summaryTruncated);
+        if (summaryTruncated)
+        {
+            truncation.MarkMaxStringLength();
+        }
 
         if (request.Mode == DataContextMode.Full)
         {
@@ -4592,14 +4852,25 @@ internal static partial class WpfVisualTreeInspector
                 PropertyAllowList: null);
 
             var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
-            var truncated = false;
-            var data = SerializeDataContextValueFull(dataContext, options, maxDepth, visited, ref truncated, cancellationToken);
+            var data = SerializeDataContextValueFull(
+                dataContext,
+                options,
+                maxDepth,
+                visited,
+                truncation,
+                cancellationToken);
+            var truncatedReasons = truncation.GetReasons();
 
             return new GetDataContextResponse(
                 DataContextType: dataContextType,
                 Data: data,
                 Summary: summary,
-                Truncated: truncated);
+                Truncated: truncation.Truncated)
+            {
+                Element = elementRef,
+                WindowHandleUsed = windowHandleUsed,
+                TruncatedReasons = truncatedReasons
+            };
         }
 
         var allowList = request.PropertyAllowList is { Count: > 0 }
@@ -4618,14 +4889,13 @@ internal static partial class WpfVisualTreeInspector
             PropertyAllowList: allowList);
 
         var summaryVisited = new HashSet<object>(ReferenceEqualityComparer.Instance);
-        var summaryTruncated = false;
         var warnings = new List<string>();
         var summaryData = SerializeDataContextValueSummary(
             dataContext,
             summaryOptions,
             maxDepth,
             summaryVisited,
-            ref summaryTruncated,
+            truncation,
             warnings,
             applyAllowList: allowList is not null,
             cancellationToken);
@@ -4640,12 +4910,19 @@ internal static partial class WpfVisualTreeInspector
             summaryData = null;
         }
 
+        var summaryTruncatedReasons = truncation.GetReasons();
+
         return new GetDataContextResponse(
             DataContextType: dataContextType,
             Data: summaryData,
             Summary: summary,
-            Truncated: summaryTruncated,
-            Warnings: warnings.Count > 0 ? warnings : null);
+            Truncated: truncation.Truncated,
+            Warnings: warnings.Count > 0 ? warnings : null)
+        {
+            Element = elementRef,
+            WindowHandleUsed = windowHandleUsed,
+            TruncatedReasons = summaryTruncatedReasons
+        };
     }
 
     public static GetComputedPropertiesResponse GetComputedProperties(
@@ -4700,12 +4977,12 @@ internal static partial class WpfVisualTreeInspector
         var elementRef = BuildElementRefWpf(ownerId, element, xpath, FindReturnFields.Standard);
 
         string[]? propertyNames;
-        string? propertyNameTruncatedReason = null;
+        IReadOnlyList<string>? propertyNameTruncatedReasons = null;
         if (includeProvenance && request.PropertyNames is { } requestedPropertyNames)
         {
             var preparedPropertyNames = PrepareProvenancePropertyNames(requestedPropertyNames);
             propertyNames = preparedPropertyNames.Names;
-            propertyNameTruncatedReason = preparedPropertyNames.TruncatedReason;
+            propertyNameTruncatedReasons = preparedPropertyNames.TruncatedReasons;
         }
         else
         {
@@ -4716,6 +4993,7 @@ internal static partial class WpfVisualTreeInspector
         }
 
         var properties = new HashSet<DependencyProperty>(GetDependencyPropertiesCached(element.GetType()));
+        var propertyInspectionComplete = true;
         try
         {
             var enumerator = element.GetLocalValueEnumerator();
@@ -4726,13 +5004,19 @@ internal static partial class WpfVisualTreeInspector
         }
         catch
         {
+            propertyInspectionComplete = false;
         }
 
         var computed = new List<ComputedPropertyInfo>();
         var warnings = new List<string>();
-        var truncated = propertyNameTruncatedReason is not null;
-        string? truncatedReason = propertyNameTruncatedReason;
+        var truncatedReasons = new List<string>(4);
+        if (propertyNameTruncatedReasons is not null)
+        {
+            truncatedReasons.AddRange(propertyNameTruncatedReasons);
+        }
 
+        var discoveredProperties = 0;
+        var scannedProperties = 0;
         const int maxValueLength = 2000;
 
         if (propertyNames is { Length: > 0 })
@@ -4741,19 +5025,17 @@ internal static partial class WpfVisualTreeInspector
             foreach (var requestedName in propertyNames)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                if (computed.Count >= maxProperties)
-                {
-                    truncated = true;
-                    truncatedReason ??= provenancePropertyCapApplied
-                        ? "maxProvenanceProperties"
-                        : "maxProperties";
-                    break;
-                }
+                scannedProperties++;
 
                 if (!TryResolvePropertyByName(element.GetType(), properties, requestedName, out var dp))
                 {
                     missing.Add(requestedName);
+                    continue;
+                }
+
+                discoveredProperties++;
+                if (computed.Count >= maxProperties)
+                {
                     continue;
                 }
 
@@ -4767,13 +5049,33 @@ internal static partial class WpfVisualTreeInspector
                     maxValueLength));
             }
 
+            if (discoveredProperties > computed.Count)
+            {
+                truncatedReasons.Add(provenancePropertyCapApplied
+                    ? "maxProvenanceProperties"
+                    : "maxProperties");
+            }
+
+            if (!propertyInspectionComplete)
+            {
+                truncatedReasons.Add("propertyInspectionUnavailable");
+            }
+
             return new GetComputedPropertiesResponse(
                 Element: elementRef,
                 Properties: computed,
-                Truncated: truncated,
-                TruncatedReason: truncatedReason,
+                Truncated: truncatedReasons.Count > 0,
+                TruncatedReason: truncatedReasons.FirstOrDefault(),
                 MissingPropertyNames: missing.Count > 0 ? missing : null,
-                Warnings: warnings.Count > 0 ? warnings : null);
+                Warnings: warnings.Count > 0 ? warnings : null)
+            {
+                WindowHandleUsed = GetWindowHandle(window),
+                ReturnedProperties = computed.Count,
+                DiscoveredProperties = discoveredProperties,
+                ScannedProperties = scannedProperties,
+                ScanComplete = propertyNameTruncatedReasons is null && propertyInspectionComplete,
+                TruncatedReasons = truncatedReasons.Count > 0 ? truncatedReasons : null
+            };
         }
 
         var orderedProperties = properties.OrderBy(dp => dp.Name, StringComparer.Ordinal).ToArray();
@@ -4781,15 +5083,7 @@ internal static partial class WpfVisualTreeInspector
         foreach (var property in orderedProperties)
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            if (computed.Count >= maxProperties)
-            {
-                truncated = true;
-                truncatedReason ??= provenancePropertyCapApplied
-                    ? "maxProvenanceProperties"
-                    : "maxProperties";
-                break;
-            }
+            scannedProperties++;
 
             ValueSource? valueSource = null;
             try
@@ -4798,6 +5092,8 @@ internal static partial class WpfVisualTreeInspector
             }
             catch
             {
+                propertyInspectionComplete = false;
+                continue;
             }
 
             var isExpression = valueSource?.IsExpression == true;
@@ -4810,6 +5106,8 @@ internal static partial class WpfVisualTreeInspector
             }
             catch
             {
+                propertyInspectionComplete = false;
+                continue;
             }
 
             var include = includeDefault || baseValueSource != BaseValueSource.Default || isExpression || bindingExpression is not null;
@@ -4830,7 +5128,15 @@ internal static partial class WpfVisualTreeInspector
                 }
                 catch
                 {
+                    propertyInspectionComplete = false;
+                    continue;
                 }
+            }
+
+            discoveredProperties++;
+            if (computed.Count >= maxProperties)
+            {
+                continue;
             }
 
             computed.Add(BuildComputedPropertyInfo(
@@ -4843,18 +5149,41 @@ internal static partial class WpfVisualTreeInspector
                 maxValueLength));
         }
 
+        if (discoveredProperties > computed.Count)
+        {
+            truncatedReasons.Add(provenancePropertyCapApplied
+                ? "maxProvenanceProperties"
+                : "maxProperties");
+        }
+
+        if (!propertyInspectionComplete)
+        {
+            truncatedReasons.Add("propertyInspectionUnavailable");
+        }
+
         return new GetComputedPropertiesResponse(
             Element: elementRef,
             Properties: computed,
-            Truncated: truncated,
-            TruncatedReason: truncatedReason,
+            Truncated: truncatedReasons.Count > 0,
+            TruncatedReason: truncatedReasons.FirstOrDefault(),
             MissingPropertyNames: null,
-            Warnings: warnings.Count > 0 ? warnings : null);
+            Warnings: warnings.Count > 0 ? warnings : null)
+        {
+            WindowHandleUsed = GetWindowHandle(window),
+            ReturnedProperties = computed.Count,
+            DiscoveredProperties = discoveredProperties,
+            ScannedProperties = scannedProperties,
+            ScanComplete = propertyNameTruncatedReasons is null && propertyInspectionComplete,
+            TruncatedReasons = truncatedReasons.Count > 0 ? truncatedReasons : null
+        };
     }
 
     internal readonly record struct PreparedProvenancePropertyNames(
         string[] Names,
-        string? TruncatedReason);
+        IReadOnlyList<string>? TruncatedReasons)
+    {
+        public string? TruncatedReason => TruncatedReasons?.FirstOrDefault();
+    }
 
     internal static PreparedProvenancePropertyNames PrepareProvenancePropertyNames(
         IReadOnlyList<string> propertyNames)
@@ -4876,12 +5205,20 @@ internal static partial class WpfVisualTreeInspector
             }
         }
 
-        var truncatedReason = propertyNames.Count > maxPropertyNames
-            ? "maxProvenancePropertyNames"
-            : propertyNameLengthTruncated
-                ? "maxProvenancePropertyNameLength"
-                : null;
-        return new PreparedProvenancePropertyNames(names.ToArray(), truncatedReason);
+        var truncatedReasons = new List<string>(2);
+        if (propertyNames.Count > maxPropertyNames)
+        {
+            truncatedReasons.Add("maxProvenancePropertyNames");
+        }
+
+        if (propertyNameLengthTruncated)
+        {
+            truncatedReasons.Add("maxProvenancePropertyNameLength");
+        }
+
+        return new PreparedProvenancePropertyNames(
+            names.ToArray(),
+            truncatedReasons.Count > 0 ? truncatedReasons : null);
     }
 
     public static GetStyleChainResponse GetStyleChain(
@@ -4997,7 +5334,10 @@ internal static partial class WpfVisualTreeInspector
         return new GetStyleChainResponse(
             Element: elementRef,
             Styles: styles,
-            Warnings: warnings.Count > 0 ? warnings : null);
+            Warnings: warnings.Count > 0 ? warnings : null)
+        {
+            WindowHandleUsed = GetWindowHandle(window)
+        };
     }
 
     public static GetTemplateInfoResponse GetTemplateInfo(
@@ -5036,13 +5376,38 @@ internal static partial class WpfVisualTreeInspector
 
         var warnings = new List<string>();
 
+        TemplateInfo AddNamedElementMetadata(
+            TemplateInfo info,
+            bool scanComplete,
+            NamedTemplateElementDiscovery? discovery = null)
+        {
+            if (!includeNamedElements)
+            {
+                return info;
+            }
+
+            var returned = discovery?.Elements.Count ?? 0;
+            var discovered = discovery?.DiscoveredElements ?? 0;
+            return info with
+            {
+                ReturnedNamedElements = returned,
+                DiscoveredNamedElements = discovered,
+                NamedElementsScanComplete = discovery?.ScanComplete ?? scanComplete,
+                NamedElementsTruncated = discovered > returned,
+                MaxNamedElements = maxNamedElements
+            };
+        }
+
         if (element is not FrameworkElement fe)
         {
             warnings.Add("not_framework_element: Template inspection is supported only for FrameworkElement.");
             return new GetTemplateInfoResponse(
                 Element: elementRef,
-                Template: new TemplateInfo(TemplateKind.None),
-                Warnings: warnings);
+                Template: AddNamedElementMetadata(new TemplateInfo(TemplateKind.None), scanComplete: false),
+                Warnings: warnings)
+            {
+                WindowHandleUsed = GetWindowHandle(window)
+            };
         }
 
         FrameworkTemplate? template = null;
@@ -5059,8 +5424,11 @@ internal static partial class WpfVisualTreeInspector
         {
             return new GetTemplateInfoResponse(
                 Element: elementRef,
-                Template: new TemplateInfo(TemplateKind.None),
-                Warnings: warnings.Count > 0 ? warnings : null);
+                Template: AddNamedElementMetadata(new TemplateInfo(TemplateKind.None), scanComplete: true),
+                Warnings: warnings.Count > 0 ? warnings : null)
+            {
+                WindowHandleUsed = GetWindowHandle(window)
+            };
         }
 
         var kind = template switch
@@ -5111,15 +5479,20 @@ internal static partial class WpfVisualTreeInspector
 
         IReadOnlyList<TemplatePartInfo>? templateParts = null;
         IReadOnlyList<NamedTemplateElementInfo>? namedElements = null;
+        NamedTemplateElementDiscovery? namedElementDiscovery = null;
+        var namedElementsScanSupported = false;
 
         if (fe is System.Windows.Controls.Control control && template is System.Windows.Controls.ControlTemplate appliedControlTemplate)
         {
+            namedElementsScanSupported = true;
+            var namedElementsInspectionFailed = false;
             try
             {
                 _ = control.ApplyTemplate();
             }
             catch
             {
+                namedElementsInspectionFailed = true;
             }
 
             templateParts = ResolveTemplateParts(
@@ -5131,12 +5504,27 @@ internal static partial class WpfVisualTreeInspector
                 warnings,
                 cancellationToken);
 
-            if (includeNamedElements && maxNamedElements > 0)
+            if (includeNamedElements)
             {
-                namedElements = FindNamedTemplateElements(control, maxNamedElements, cancellationToken);
+                namedElementDiscovery = FindNamedTemplateElements(control, maxNamedElements, cancellationToken);
+                if (namedElementsInspectionFailed)
+                {
+                    namedElementDiscovery = namedElementDiscovery.Value with
+                    {
+                        ScanComplete = false,
+                        InspectionFailed = true
+                    };
+                }
+
+                namedElements = namedElementDiscovery.Value.Elements;
+                if (namedElementDiscovery.Value.InspectionFailed)
+                {
+                    warnings.Add(
+                        "named_elements_scan_incomplete: The template visual tree could not be inspected completely.");
+                }
             }
         }
-        else if (includeNamedElements && maxNamedElements > 0)
+        else if (includeNamedElements)
         {
             warnings.Add("named_elements_unsupported: Named template elements are currently only supported for Control templates.");
         }
@@ -5145,17 +5533,26 @@ internal static partial class WpfVisualTreeInspector
             warnings.Add("template_part_refs_unsupported: Template part element references are currently only supported for Control templates.");
         }
 
+        var templateInfo = new TemplateInfo(
+            Kind: kind,
+            TemplateType: templateType,
+            TargetType: targetType,
+            ResourceKey: resourceKey,
+            TriggersCount: triggersCount,
+            TemplateParts: templateParts,
+            NamedElements: namedElements);
+        templateInfo = AddNamedElementMetadata(
+            templateInfo,
+            scanComplete: namedElementsScanSupported,
+            discovery: namedElementDiscovery);
+
         return new GetTemplateInfoResponse(
             Element: elementRef,
-            Template: new TemplateInfo(
-                Kind: kind,
-                TemplateType: templateType,
-                TargetType: targetType,
-                ResourceKey: resourceKey,
-                TriggersCount: triggersCount,
-                TemplateParts: templateParts,
-                NamedElements: namedElements),
-            Warnings: warnings.Count > 0 ? warnings : null);
+            Template: templateInfo,
+            Warnings: warnings.Count > 0 ? warnings : null)
+        {
+            WindowHandleUsed = GetWindowHandle(window)
+        };
     }
 
     private static ComputedPropertyInfo BuildComputedPropertyInfo(
@@ -5523,6 +5920,9 @@ internal static partial class WpfVisualTreeInspector
         string? targetType = null;
         string? resourceKey = null;
         var basedOn = new List<string>();
+        var returnedBasedOnStyles = 0;
+        var discoveredBasedOnStyles = 0;
+        var basedOnScanComplete = true;
         var settersCount = 0;
         var triggersCount = 0;
 
@@ -5551,9 +5951,10 @@ internal static partial class WpfVisualTreeInspector
         try
         {
             var current = style.BasedOn;
-            var safety = 0;
-            while (current is not null && safety++ < maxBasedOnDepth)
+            while (current is not null && returnedBasedOnStyles < maxBasedOnDepth)
             {
+                discoveredBasedOnStyles++;
+                returnedBasedOnStyles++;
                 var currentTargetType = current.TargetType?.FullName ?? current.TargetType?.Name;
                 if (!string.IsNullOrWhiteSpace(currentTargetType))
                 {
@@ -5562,9 +5963,16 @@ internal static partial class WpfVisualTreeInspector
 
                 current = current.BasedOn;
             }
+
+            if (current is not null)
+            {
+                discoveredBasedOnStyles++;
+                basedOnScanComplete = false;
+            }
         }
         catch
         {
+            basedOnScanComplete = false;
         }
 
         string? valueSourceText = null;
@@ -5579,6 +5987,11 @@ internal static partial class WpfVisualTreeInspector
             TargetType = targetType,
             ResourceKey = resourceKey,
             BasedOnChainTargetTypes = basedOn,
+            ReturnedBasedOnStyles = returnedBasedOnStyles,
+            DiscoveredBasedOnStyles = discoveredBasedOnStyles,
+            BasedOnScanComplete = basedOnScanComplete,
+            BasedOnTruncated = discoveredBasedOnStyles > returnedBasedOnStyles,
+            MaxBasedOnDepth = maxBasedOnDepth,
             SettersCount = settersCount,
             TriggersCount = triggersCount,
             StylePropertyValueSource = valueSourceText
@@ -5797,13 +6210,21 @@ internal static partial class WpfVisualTreeInspector
         public ContractRect? Bounds { get; } = bounds;
     }
 
-    private static IReadOnlyList<NamedTemplateElementInfo> FindNamedTemplateElements(
+    private readonly record struct NamedTemplateElementDiscovery(
+        IReadOnlyList<NamedTemplateElementInfo> Elements,
+        int DiscoveredElements,
+        bool ScanComplete,
+        bool InspectionFailed);
+
+    private static NamedTemplateElementDiscovery FindNamedTemplateElements(
         System.Windows.Controls.Control control,
         int maxNamedElements,
         CancellationToken cancellationToken)
     {
         var results = new List<NamedTemplateElementInfo>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var discoveredElements = 0;
+        var inspectionFailed = false;
 
         var stack = new Stack<DependencyObject>();
         stack.Push(control);
@@ -5821,6 +6242,7 @@ internal static partial class WpfVisualTreeInspector
             }
             catch
             {
+                inspectionFailed = true;
             }
 
             for (var i = 0; i < count; i++)
@@ -5832,6 +6254,7 @@ internal static partial class WpfVisualTreeInspector
                 }
                 catch
                 {
+                    inspectionFailed = true;
                 }
 
                 if (child is null)
@@ -5846,20 +6269,26 @@ internal static partial class WpfVisualTreeInspector
                     !string.IsNullOrWhiteSpace(fe.Name) &&
                     seen.Add(fe.Name))
                 {
-                    var typeName = fe.GetType().FullName ?? fe.GetType().Name;
-                    results.Add(new NamedTemplateElementInfo(fe.Name, typeName));
+                    discoveredElements++;
                     if (results.Count >= maxNamedElements)
                     {
-                        return results
-                            .OrderBy(n => n.Name, StringComparer.Ordinal)
-                            .ToArray();
+                        return new NamedTemplateElementDiscovery(
+                            results.OrderBy(item => item.Name, StringComparer.Ordinal).ToArray(),
+                            discoveredElements,
+                            ScanComplete: false,
+                            InspectionFailed: inspectionFailed);
                     }
+
+                    var typeName = fe.GetType().FullName ?? fe.GetType().Name;
+                    results.Add(new NamedTemplateElementInfo(fe.Name, typeName));
                 }
             }
         }
 
-        return results
-            .OrderBy(n => n.Name, StringComparer.Ordinal)
-            .ToArray();
+        return new NamedTemplateElementDiscovery(
+            results.OrderBy(item => item.Name, StringComparer.Ordinal).ToArray(),
+            discoveredElements,
+            ScanComplete: !inspectionFailed,
+            InspectionFailed: inspectionFailed);
     }
 }

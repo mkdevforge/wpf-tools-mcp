@@ -38,7 +38,7 @@ public static class AgentTools
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Native window handle")] long? windowHandle = null,
         [Description("Include unbound properties")] bool includeUnbound = false,
-        [Description("Maximum number of properties inspected")] int maxProperties = 2000,
+        [Description("Maximum number of bindings returned")] int maxProperties = 2000,
         [Description("Value format (string|type)")] string valueFormat = "string",
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>

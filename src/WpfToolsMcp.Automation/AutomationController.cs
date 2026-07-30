@@ -970,7 +970,7 @@ public sealed partial class AutomationController : IDisposable
             Rect? wpfElementBounds = null;
             var hasElementTarget = request.Locator is not null || hasElementId;
             var backendUsed = elementBackend;
-            var fallbackUsed = false;
+            BackendFallbackInfo? fallback = null;
 
             (Bitmap Bitmap, Rect CapturedBounds, Rect? RequestedBounds, bool WasClipped, ScreenshotCaptureMode CaptureModeUsed)? capture = null;
             ViewportConditions? capturedViewport = null;
@@ -1323,6 +1323,14 @@ public sealed partial class AutomationController : IDisposable
                         cancellationToken,
                         autoInject: false).ConfigureAwait(false);
 
+                    fallbackResponse = WithScreenshotRoutingMetadata(
+                        fallbackResponse,
+                        hasElementTarget: true,
+                        backendUsed: InspectionBackend.Uia,
+                        fallback: CreateWpfToUiaFallback(
+                            attempted: true,
+                            failure: ClassifyAutoWpfFallbackFailure(ex)));
+
                     trace?.SetSummary($"{fallbackResponse.Format} {fallbackResponse.Width}x{fallbackResponse.Height} {Path.GetFileName(fallbackResponse.Path)} backend={InspectionBackend.Uia} fallback=true");
                     return fallbackResponse;
                 }
@@ -1348,7 +1356,12 @@ public sealed partial class AutomationController : IDisposable
 
                         wpfElementBounds = resolved.Bounds;
                         backendUsed = InspectionBackend.Wpf;
-                        fallbackUsed = true;
+                        fallback = new BackendFallbackInfo(
+                            FromBackend: "uia",
+                            ToBackend: "wpf",
+                            Attempted: true,
+                            Available: true,
+                            Used: true);
 
                         if (autoScroll && wpfElementBounds is { } fallbackBounds)
                         {
@@ -1474,7 +1487,7 @@ public sealed partial class AutomationController : IDisposable
                 base64 = Convert.ToBase64String(bytes);
             }
 
-            var response = new TakeScreenshotResponse(
+            var response = WithScreenshotRoutingMetadata(new TakeScreenshotResponse(
                 Path: outputPath,
                 Width: bitmapToSave.Width,
                 Height: bitmapToSave.Height,
@@ -1488,9 +1501,11 @@ public sealed partial class AutomationController : IDisposable
             {
                 Viewport = capturedViewport,
                 Correlation = correlation
-            };
+            }, hasElementTarget, backendUsed, fallback);
 
-            trace?.SetSummary($"{response.Format} {response.Width}x{response.Height} {Path.GetFileName(response.Path)} backend={backendUsed} fallback={fallbackUsed}");
+            trace?.SetSummary(
+                $"{response.Format} {response.Width}x{response.Height} {Path.GetFileName(response.Path)} " +
+                $"backend={(response.BackendUsed?.ToString() ?? "n/a")} fallback={response.Fallback?.Used == true}");
             return response;
         }
         catch (Exception ex)
@@ -8617,6 +8632,7 @@ public sealed partial class AutomationController : IDisposable
                     Fields: fields);
 
                 var response = await GetVisualTreeWpfAsync(request, injectIfMissing: true, cancellationToken).ConfigureAwait(false);
+                response = response with { WindowHandleUsed = resolvedWindowHandle };
                 trace?.SetSummary($"{response.BackendUsed} returned={response.ReturnedNodes} truncated={response.Truncated}");
                 return response;
             }
@@ -8709,6 +8725,7 @@ public sealed partial class AutomationController : IDisposable
 
                     if (wpfAttempt.Response is { } wpf)
                     {
+                        wpf = wpf with { WindowHandleUsed = resolvedWindowHandle };
                         trace?.SetSummary($"{wpf.BackendUsed} returned={wpf.ReturnedNodes} truncated={wpf.Truncated}");
                         return wpf;
                     }
@@ -8788,6 +8805,7 @@ public sealed partial class AutomationController : IDisposable
                 TruncatedReason: context.TruncatedReason,
                 Warnings: warnings)
             {
+                WindowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64(),
                 Fallback = fallback
             };
 
@@ -8858,6 +8876,7 @@ public sealed partial class AutomationController : IDisposable
                 var responseWpf = includeElementIds
                     ? AttachWpfElementIds(wpf, resolvedWindowHandle)
                     : StripElementIds(wpf);
+                responseWpf = responseWpf with { WindowHandleUsed = resolvedWindowHandle };
 
                 if (responseWpf.Truncated && responseWpf.ReturnedMatches == 0)
                 {
@@ -8963,6 +8982,7 @@ public sealed partial class AutomationController : IDisposable
                         var responseWpf = includeElementIds
                             ? AttachWpfElementIds(wpf, resolvedWindowHandle)
                             : StripElementIds(wpf);
+                        responseWpf = responseWpf with { WindowHandleUsed = resolvedWindowHandle };
 
                         if (responseWpf.Truncated && responseWpf.ReturnedMatches == 0)
                         {
@@ -9019,6 +9039,7 @@ public sealed partial class AutomationController : IDisposable
 
             var finalResponse = response with
             {
+                WindowHandleUsed = windowHwnd,
                 Warnings = warnings ?? response.Warnings,
                 Fallback = fallback
             };
@@ -9123,6 +9144,7 @@ public sealed partial class AutomationController : IDisposable
                     fallbackRequest,
                     target,
                     cancellationToken).ConfigureAwait(false);
+                wpfResponse = wpfResponse with { WindowHandleUsed = handle.WindowHandle };
                 _elementHandles.TryUpdateWpfPath(id, wpfResponse.XPath);
                 trace?.SetSummary($"{wpfResponse.BackendUsed} {wpfResponse.XPath}");
                 return wpfResponse;
@@ -9145,7 +9167,10 @@ public sealed partial class AutomationController : IDisposable
                 id,
                 out _,
                 UiaHandleResolutionMode.ObserveCurrentXPathOccupant);
-            var uiaResponseFromId = new GetPathToElementResponse(InspectionBackend.Uia, handle.XPath);
+            var uiaResponseFromId = new GetPathToElementResponse(InspectionBackend.Uia, handle.XPath)
+            {
+                WindowHandleUsed = handle.WindowHandle
+            };
             trace?.SetSummary($"{uiaResponseFromId.BackendUsed} {uiaResponseFromId.XPath}");
             return uiaResponseFromId;
         }
@@ -9161,6 +9186,7 @@ public sealed partial class AutomationController : IDisposable
                 MaxNodes: 8000);
 
             var wpfResponse = await GetWpfPathAsync(request, injectIfMissing: true, cancellationToken).ConfigureAwait(false);
+            wpfResponse = wpfResponse with { WindowHandleUsed = resolvedWindowHandle };
             trace?.SetSummary($"{wpfResponse.BackendUsed} {wpfResponse.XPath}");
             return wpfResponse;
         }
@@ -9174,7 +9200,10 @@ public sealed partial class AutomationController : IDisposable
         var element = ResolveElement(window, locator!, controlWalker, rawWalker);
         var xpath = ComputeXPath(window, element, rawWalker);
 
-        var responseUia = new GetPathToElementResponse(InspectionBackend.Uia, xpath);
+        var responseUia = new GetPathToElementResponse(InspectionBackend.Uia, xpath)
+        {
+            WindowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64()
+        };
         trace?.SetSummary($"{responseUia.BackendUsed} {responseUia.XPath}");
         return responseUia;
         }
@@ -9385,7 +9414,10 @@ public sealed partial class AutomationController : IDisposable
             ScannedProperties: propertyCounts.Scanned,
             Truncated: truncatedReason is not null,
             TruncatedReason: truncatedReason,
-            TruncatedReasons: truncatedReasons.Count == 0 ? null : truncatedReasons);
+            TruncatedReasons: truncatedReasons.Count == 0 ? null : truncatedReasons)
+        {
+            WindowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64()
+        };
         trace?.SetSummary($"{summary.ElementType} {summary.XPath ?? "<xpath omitted>"}");
         return response;
         }
@@ -9428,7 +9460,10 @@ public sealed partial class AutomationController : IDisposable
             ReturnedNodes: tree.ReturnedNodes,
             ScannedNodes: tree.ScannedNodes,
             Truncated: tree.Truncated,
-            TruncatedReason: tree.TruncatedReason);
+            TruncatedReason: tree.TruncatedReason)
+        {
+            WindowHandleUsed = tree.WindowHandleUsed
+        };
     }
 
     public async Task<GetUiaLocatorsResponse> GetUiaLocatorsAsync(
@@ -9638,7 +9673,10 @@ public sealed partial class AutomationController : IDisposable
 
             if (element is null || uiaXPath is null)
             {
-                var mappingResponse = new GetUiaLocatorsResponse(wpf, null, null, null, uiaMapping);
+                var mappingResponse = new GetUiaLocatorsResponse(wpf, null, null, null, uiaMapping)
+                {
+                    WindowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64()
+                };
                 trace?.SetSummary(
                     $"mapping={uiaMapping?.Status?.ToString() ?? "none"} " +
                     $"candidates={uiaMapping?.ReturnedCandidates ?? 0}/{uiaMapping?.TotalCandidates ?? 0}");
@@ -9653,7 +9691,10 @@ public sealed partial class AutomationController : IDisposable
             };
             var suggestions = CreateUiaLocatorSuggestions(element, uiaXPath, flaUiXPath, allElements);
             var flaui = CreateFlaUiSnippets(suggestions);
-            var response = new GetUiaLocatorsResponse(wpf, uia, suggestions, flaui, uiaMapping);
+            var response = new GetUiaLocatorsResponse(wpf, uia, suggestions, flaui, uiaMapping)
+            {
+                WindowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64()
+            };
             trace?.SetSummary($"{uia.ControlType} {uia.UiaXPath} recommended={suggestions.Recommended}");
             return response;
         }
@@ -12226,6 +12267,7 @@ public sealed partial class AutomationController : IDisposable
             TruncatedReason: truncatedReason,
             Warnings: null)
         {
+            WindowHandleUsed = windowHandle,
             DiscoveredMatches = discoveredMatches
         };
     }

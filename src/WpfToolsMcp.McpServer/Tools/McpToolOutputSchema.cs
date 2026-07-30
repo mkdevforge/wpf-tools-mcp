@@ -151,6 +151,7 @@ internal static class McpToolOutputSchema
                 ["returnedCandidates"] = NonNegativeIntegerSchema(maximum: 25),
                 ["discoveredCandidates"] = NonNegativeIntegerSchema(),
                 ["truncated"] = new JsonObject { ["type"] = "boolean" },
+                ["truncatedReason"] = TruncatedReasonSchema(),
                 ["candidates"] = new JsonObject
                 {
                     ["type"] = "array",
@@ -193,6 +194,15 @@ internal static class McpToolOutputSchema
             ["minLength"] = 1,
             ["maxLength"] = 64,
             ["pattern"] = "^[a-z][a-z0-9_]*$"
+        };
+
+    private static JsonObject TruncatedReasonSchema() =>
+        new()
+        {
+            ["type"] = "string",
+            ["minLength"] = 1,
+            ["maxLength"] = 64,
+            ["pattern"] = "^[a-z][A-Za-z0-9]*$"
         };
 
     private static JsonObject ElementIdSchema() =>
