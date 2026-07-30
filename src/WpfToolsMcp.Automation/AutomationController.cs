@@ -9435,6 +9435,8 @@ public sealed partial class AutomationController : IDisposable
         ElementLocator? locator = null,
         string? elementId = null,
         long? windowHandle = null,
+        InspectionBackend? backend = null,
+        int maxNodes = DefaultUiaMappingMaxNodes,
         CancellationToken cancellationToken = default)
     {
         var trace = BeginTraceSpan("get_uia_locators");
@@ -9447,6 +9449,20 @@ public sealed partial class AutomationController : IDisposable
                 throw new ArgumentException("get_uia_locators requires exactly one of: locator OR elementId.");
             }
 
+            if (backend == InspectionBackend.Auto)
+            {
+                throw new ArgumentException(
+                    "get_uia_locators does not accept backend=Auto. Omit backend or use backend=Uia for a UIA locator; use backend=Wpf for a WPF locator.",
+                    nameof(backend));
+            }
+
+            if (maxNodes is < 1 or > MaximumUiaMappingNodes)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maxNodes),
+                    $"maxNodes must be between 1 and {MaximumUiaMappingNodes}.");
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
 
             var application = EnsureAttached();
@@ -9455,8 +9471,10 @@ public sealed partial class AutomationController : IDisposable
             var rawWalker = automation.TreeWalkerFactory.GetRawViewWalker();
 
             Window window;
-            AutomationElement element;
-            string uiaXPath;
+            AutomationElement? element = null;
+            string? uiaXPath = null;
+            string? mappedUiaElementId = null;
+            IReadOnlyList<AutomationElement>? scannedElements = null;
             WpfLocatorIdentity? wpf = null;
             UiaMappingDiagnostics? uiaMapping = null;
 
@@ -9470,10 +9488,14 @@ public sealed partial class AutomationController : IDisposable
                     throw new InvalidOperationException($"elementId '{id}' has unsupported backend '{handle.Backend}'.");
                 }
 
-                if (windowHandle is long requestedHandle && requestedHandle != handle.WindowHandle)
+                if (backend is { } requestedBackend && requestedBackend != handle.Backend)
                 {
-                    throw new ArgumentException("windowHandle does not match the elementId window.");
+                    throw new ArgumentException(
+                        $"backend={requestedBackend} does not match the elementId backend {handle.Backend}.",
+                        nameof(backend));
                 }
+
+                ValidateUiaMappingWindowScope(windowHandle, handle.WindowHandle);
 
                 try
                 {
@@ -9486,11 +9508,29 @@ public sealed partial class AutomationController : IDisposable
 
                 if (handle.Backend == InspectionBackend.Wpf)
                 {
-                    var resolution = ResolveUiaElementByWpfHandleForProperties(window, controlWalker, rawWalker, id, handle);
-                    element = resolution.Element;
-                    uiaXPath = resolution.XPath;
-                    uiaMapping = resolution.UiaMapping;
-                    wpf = CreateWpfLocatorIdentity(handle, id);
+                    var current = await ResolveWpfElementRefAsync(
+                        handle,
+                        handle.WindowHandle,
+                        visibleOnly: false,
+                        includeOffViewport: true,
+                        interactiveOnly: false,
+                        interactiveMode: InteractiveMode.Heuristic,
+                        cancellationToken,
+                        allowHandleRecovery: false).ConfigureAwait(false);
+                    var source = RefreshWpfMappingSource(handle, current);
+                    var mapping = MapWpfHandleToUia(
+                        window,
+                        controlWalker,
+                        rawWalker,
+                        source,
+                        maxNodes,
+                        cancellationToken);
+                    element = mapping.SelectedElement;
+                    uiaXPath = mapping.SelectedXPath;
+                    mappedUiaElementId = mapping.SelectedElementId;
+                    scannedElements = mapping.ScannedElements;
+                    uiaMapping = mapping.Diagnostics;
+                    wpf = CreateWpfLocatorIdentity(source, id) with { Bounds = source.Bounds };
                 }
                 else
                 {
@@ -9500,6 +9540,7 @@ public sealed partial class AutomationController : IDisposable
                         id,
                         out uiaXPath,
                         UiaHandleResolutionMode.ObserveCurrentXPathOccupant);
+                    mappedUiaElementId = id;
                 }
             }
             else
@@ -9508,7 +9549,50 @@ public sealed partial class AutomationController : IDisposable
                     ? FindWindowByHandle(application, automation, requestedHandle)
                     : FindMainWindow(application, automation);
 
-                try
+                var locatorBackend = backend ?? InspectionBackend.Uia;
+                if (locatorBackend == InspectionBackend.Wpf)
+                {
+                    if (!HasStrictStableWpfLocator(locator!))
+                    {
+                        throw new ArgumentException(
+                            "A WPF locator for get_uia_locators must be strict and include an exact automationId or xpath.",
+                            nameof(locator));
+                    }
+
+                    var hwnd = window.Properties.NativeWindowHandle.Value.ToInt64();
+                    var resolved = await ResolveWpfElementRefDetailedAsync(
+                        locator!,
+                        hwnd,
+                        visibleOnly: false,
+                        includeOffViewport: true,
+                        interactiveOnly: false,
+                        interactiveMode: InteractiveMode.Heuristic,
+                        cancellationToken).ConfigureAwait(false);
+                    var wpfElementId = _elementHandles.RegisterWpf(
+                        hwnd,
+                        resolved.XPath,
+                        resolved.ElementIdWpf,
+                        resolved.Type,
+                        resolved.AutomationId,
+                        resolved.Name,
+                        resolved.ClassName,
+                        resolved.Bounds);
+                    var source = RequireHandle(wpfElementId);
+                    var mapping = MapWpfHandleToUia(
+                        window,
+                        controlWalker,
+                        rawWalker,
+                        source,
+                        maxNodes,
+                        cancellationToken);
+                    element = mapping.SelectedElement;
+                    uiaXPath = mapping.SelectedXPath;
+                    mappedUiaElementId = mapping.SelectedElementId;
+                    scannedElements = mapping.ScannedElements;
+                    uiaMapping = mapping.Diagnostics;
+                    wpf = CreateWpfLocatorIdentity(source, wpfElementId) with { Bounds = source.Bounds };
+                }
+                else
                 {
                     element = ResolveElement(window, locator!, controlWalker, rawWalker);
                     uiaXPath = ComputeXPath(window, element, rawWalker);
@@ -9543,36 +9627,23 @@ public sealed partial class AutomationController : IDisposable
                         }
                     }
                 }
-                catch
-                {
-                    var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
-                        window,
-                        locator!,
-                        timeoutMs: 0,
-                        pollIntervalMs: 100,
-                        stableMs: 0,
-                        visibleOnly: false,
-                        includeOffViewport: true,
-                        interactiveOnly: false,
-                        interactiveMode: InteractiveMode.Heuristic,
-                        cancellationToken).ConfigureAwait(false);
-
-                    if (wpfTarget is null)
-                    {
-                        throw;
-                    }
-
-                    var resolution = ResolveUiaElementByWpfHandleForProperties(window, controlWalker, rawWalker, wpfTarget.ElementId, wpfTarget.Handle);
-                    element = resolution.Element;
-                    uiaXPath = resolution.XPath;
-                    uiaMapping = resolution.UiaMapping;
-                    wpf = CreateWpfLocatorIdentity(wpfTarget.Handle, wpfTarget.ElementId);
-                }
             }
 
-            var allElements = EnumerateSelfAndDescendantsDepthFirst(window, controlWalker).ToArray();
+            if (element is null || uiaXPath is null)
+            {
+                var mappingResponse = new GetUiaLocatorsResponse(wpf, null, null, null, uiaMapping);
+                trace?.SetSummary(
+                    $"mapping={uiaMapping?.Status?.ToString() ?? "none"} " +
+                    $"candidates={uiaMapping?.ReturnedCandidates ?? 0}/{uiaMapping?.TotalCandidates ?? 0}");
+                return mappingResponse;
+            }
+
+            var allElements = scannedElements ?? EnumerateSelfAndDescendantsDepthFirst(window, controlWalker).ToArray();
             var flaUiXPath = ComputeFlaUiXPath(window, element, controlWalker);
-            var uia = CreateUiaLocatorIdentity(element, uiaXPath, flaUiXPath);
+            var uia = CreateUiaLocatorIdentity(element, uiaXPath, flaUiXPath) with
+            {
+                ElementId = mappedUiaElementId
+            };
             var suggestions = CreateUiaLocatorSuggestions(element, uiaXPath, flaUiXPath, allElements);
             var flaui = CreateFlaUiSnippets(suggestions);
             var response = new GetUiaLocatorsResponse(wpf, uia, suggestions, flaui, uiaMapping);
@@ -9612,6 +9683,9 @@ public sealed partial class AutomationController : IDisposable
     private static bool HasStableWpfLocator(ElementLocator locator) =>
         !string.IsNullOrWhiteSpace(locator.AutomationId) ||
         !string.IsNullOrWhiteSpace(locator.XPath);
+
+    private static bool HasStrictStableWpfLocator(ElementLocator locator) =>
+        locator.Strict && HasStableWpfLocator(locator);
 
     private static UiaLocatorIdentity CreateUiaLocatorIdentity(AutomationElement element, string uiaXPath, string flaUiXPath) =>
         new(
@@ -12473,10 +12547,18 @@ public sealed partial class AutomationController : IDisposable
                 Bounds: candidate.Bounds,
                 XPath: candidateXPath,
                 Score: candidate.Score,
-                XPathOmitted: candidateXPathOmitted ? true : null));
+                XPathOmitted: candidateXPathOmitted ? true : null)
+            {
+                ElementId = BoundedPropertyValueSerializer.SerializeString(candidate.ElementId, valueBudget),
+                Reusable = candidate.Reusable,
+                Evidence = candidate.Evidence
+            });
         }
 
         candidatesLimitReached = mapping.Truncated || totalCandidates > MaximumUiaMappingCandidates;
+        var selectedElementId = BoundedPropertyValueSerializer.SerializeString(
+            mapping.SelectedElementId,
+            valueBudget);
         var mappingValueTruncated = valueBudget.Truncation != initialTruncation;
 
         return new UiaMappingDiagnostics(
@@ -12485,11 +12567,23 @@ public sealed partial class AutomationController : IDisposable
             Candidates: candidates,
             ReturnedCandidates: candidates.Count,
             TotalCandidates: totalCandidates,
-            Truncated: candidates.Count < totalCandidates ||
+            Truncated: mapping.Truncated ||
+                       candidates.Count < totalCandidates ||
                        selectedXPathOmitted ||
                        anyCandidateXPathOmitted ||
                        mappingValueTruncated,
-            SelectedXPathOmitted: selectedXPathOmitted ? true : null);
+            SelectedXPathOmitted: selectedXPathOmitted ? true : null)
+        {
+            Status = mapping.Status,
+            Method = mapping.Method,
+            SelectedElementId = selectedElementId,
+            Score = mapping.Score,
+            ScoreLead = mapping.ScoreLead,
+            Evidence = mapping.Evidence,
+            ScannedNodes = mapping.ScannedNodes,
+            ScanComplete = mapping.ScanComplete,
+            TruncatedReason = mapping.TruncatedReason
+        };
     }
 
     private static void PopulatePatterns(

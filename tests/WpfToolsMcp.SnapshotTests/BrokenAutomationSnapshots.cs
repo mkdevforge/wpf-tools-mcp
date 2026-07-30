@@ -125,4 +125,71 @@ public sealed class BrokenAutomationSnapshots
             await CloseAppAsync();
         }
     }
+
+    [Test]
+    public async Task GetUiaLocators_wpf_control_without_peer_is_unmapped()
+    {
+        await LaunchBrokenAppAsync();
+        try
+        {
+            var result = await _mcp.CallToolAsync<GetUiaLocatorsResponse>("get_uia_locators", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["backend"] = "wpf",
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Broken_UnmappedControl"
+                }
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Wpf?.ElementId, Does.StartWith("wpf_"));
+                Assert.That(result.Uia, Is.Null);
+                Assert.That(result.LocatorSuggestions, Is.Null);
+                Assert.That(result.FlaUi, Is.Null);
+                Assert.That(result.UiaMapping?.Status, Is.EqualTo(ElementMappingStatus.Unmapped));
+                Assert.That(result.UiaMapping?.Score, Is.Zero);
+                Assert.That(result.UiaMapping?.ScanComplete, Is.True);
+                Assert.That(result.UiaMapping?.SelectedElementId, Is.Null);
+                Assert.That(result.UiaMapping?.Evidence, Does.Contain("no_relevant_candidates"));
+            });
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task GetUiaLocators_does_not_implicitly_fallback_from_uia_to_wpf()
+    {
+        await LaunchBrokenAppAsync();
+        try
+        {
+            InvalidOperationException? error = null;
+            try
+            {
+                _ = await _mcp.CallToolAsync<GetUiaLocatorsResponse>("get_uia_locators", new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _sessionId,
+                    ["locator"] = new Dictionary<string, object?>
+                    {
+                        ["automationId"] = "Broken_UnmappedControl"
+                    }
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                error = ex;
+            }
+
+            Assert.That(error, Is.Not.Null, "A UIA-only lookup must not fall back to the WPF tree.");
+            Assert.That(error!.Message, Does.Contain("element_not_found"));
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
 }

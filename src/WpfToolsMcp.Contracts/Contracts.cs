@@ -275,6 +275,15 @@ public enum ElementPropertiesPreset
     Full
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ElementMappingStatus
+{
+    Exact,
+    Heuristic,
+    Ambiguous,
+    Unmapped
+}
+
 public sealed record UiaMappingCandidate(
     string ElementType,
     string? AutomationId,
@@ -283,7 +292,17 @@ public sealed record UiaMappingCandidate(
     Rect Bounds,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? XPath,
     int Score,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? XPathOmitted = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? XPathOmitted = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ElementId { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Reusable { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Evidence { get; init; }
+}
 
 public sealed record UiaMappingDiagnostics(
     bool Ambiguous,
@@ -292,7 +311,35 @@ public sealed record UiaMappingDiagnostics(
     int ReturnedCandidates = 0,
     int TotalCandidates = 0,
     bool Truncated = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? SelectedXPathOmitted = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? SelectedXPathOmitted = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ElementMappingStatus? Status { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Method { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SelectedElementId { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Score { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ScoreLead { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Evidence { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ScannedNodes { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ScanComplete { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TruncatedReason { get; init; }
+}
 
 public sealed record GetElementPropertiesResponse(
     ElementSummary Element,
@@ -313,7 +360,11 @@ public sealed record WpfLocatorIdentity(
     string? Name,
     string? ClassName,
     string? WpfXPath,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ElementId = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ElementId = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Rect? Bounds { get; init; }
+}
 
 public sealed record UiaLocatorIdentity(
     string ControlType,
@@ -327,7 +378,11 @@ public sealed record UiaLocatorIdentity(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? HelpText = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsControlElement = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IsContentElement = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FlaUiXPath = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FlaUiXPath = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ElementId { get; init; }
+}
 
 public sealed record UiaLocatorSuggestions(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ByAutomationId,
@@ -343,9 +398,9 @@ public sealed record FlaUiLocatorSnippets(string FindFirst, string FindFirstByXP
 
 public sealed record GetUiaLocatorsResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WpfLocatorIdentity? Wpf,
-    UiaLocatorIdentity Uia,
-    UiaLocatorSuggestions LocatorSuggestions,
-    FlaUiLocatorSnippets FlaUi,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaLocatorIdentity? Uia,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaLocatorSuggestions? LocatorSuggestions,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] FlaUiLocatorSnippets? FlaUi,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null);
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

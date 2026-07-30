@@ -219,6 +219,8 @@ public sealed class ToolProfileTests
             new[] { "depth", "maxNodes", "root", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_element_properties"]), Is.EqualTo(
             new[] { "elementId", "locator", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["get_uia_locators"]), Is.EqualTo(
+            new[] { "backend", "elementId", "locator", "maxNodes", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_binding_errors"]), Is.EqualTo(
             new[] { "depth", "rootXPath", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_validation_errors"]), Is.EqualTo(
@@ -253,6 +255,9 @@ public sealed class ToolProfileTests
         Assert.That(
             GetOutputPropertyNames(tools["resolve_element"]),
             Is.EqualTo(new[] { "backendUsed", "element", "fallback", "windowHandleUsed" }));
+        Assert.That(
+            GetOutputPropertyNames(tools["get_uia_locators"]),
+            Is.EqualTo(new[] { "flaUi", "locatorSuggestions", "uia", "uiaMapping", "wpf" }));
 
         foreach (var toolName in new[]
                  {
@@ -828,6 +833,8 @@ public sealed class ToolProfileTests
 
         Assert.That(GetInputPropertyNames(tools["get_element_properties"]), Does.Contain("preset"));
         Assert.That(GetInputPropertyNames(tools["get_element_properties"]), Does.Contain("maxProperties"));
+        Assert.That(GetInputPropertyNames(tools["get_uia_locators"]), Is.EqualTo(
+            new[] { "backend", "elementId", "locator", "maxNodes", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Does.Contain("maxAncestors"));
         Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Does.Contain("maxSiblings"));
         Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Does.Contain("maxGridDefinitions"));

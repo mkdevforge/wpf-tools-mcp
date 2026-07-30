@@ -37,6 +37,9 @@
                                  Height="160"
                                  Margin="0,0,0,12" />
 
+            <local:NoPeerControl AutomationProperties.AutomationId="Broken_UnmappedControl"
+                                 Visibility="Collapsed" />
+
             <Button AutomationProperties.AutomationId="Accessibility_AutomationIdOnly"
                     Width="160"
                     Height="32"

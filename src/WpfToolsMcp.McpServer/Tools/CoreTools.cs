@@ -355,6 +355,8 @@ public static class CoreInspectionTools
         [Description("Element locator")] CoreElementLocator? locator = null,
         [Description("Element ID")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Locator backend; omit for UIA or specify Wpf for a WPF locator")] InspectionBackend? backend = null,
+        [Description("Maximum UIA nodes scanned for WPF mapping (1-50000)")] int maxNodes = AutomationController.DefaultUiaMappingMaxNodes,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -365,6 +367,8 @@ public static class CoreInspectionTools
                     locator?.ToElementLocator(),
                     elementId,
                     hasElementId ? windowHandle : effectiveWindowHandle,
+                    backend,
+                    maxNodes,
                     cancellationToken),
                 cancellationToken);
         });

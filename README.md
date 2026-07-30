@@ -122,6 +122,38 @@ adorner was active, not observed, or unavailable. Source classification marks
 public WPF rule evidence as exact and the internal conversion-rule name match
 as best effort.
 
+### Explained WPF-to-UIA Mapping
+
+`get_uia_locators` keeps its existing UIA-origin behavior when `backend` is
+omitted or set to `Uia`. A locator that begins in the WPF tree must explicitly
+set `backend=Wpf` and must be strict with an exact `automationId` or `xpath`.
+An `elementId` keeps its registered backend; supplying a conflicting backend or
+window handle is rejected.
+
+WPF-origin calls scan only the selected window's UIA control tree. `maxNodes`
+defaults to 5,000 and accepts 1 through 50,000. The `UiaMapping` result reports
+`Exact`, `Heuristic`, `Ambiguous`, or `Unmapped`, the stable method
+`scoredWindowScan`, an integer ranking score, symbolic evidence, scan counts,
+and at most ten ranked candidates. The score ranks evidence; it is not a
+probability or confidence percentage.
+
+`Exact` requires a complete scan with one UIA candidate having the exact
+AutomationId, a compatible control type, and a runtime identity that can be
+verified and registered. `Heuristic` requires a complete scan, a reusable
+unique winner scoring at least 150 and leading the runner-up by at least 40.
+Incomplete scans, ties, weaker scores, smaller leads, and unverifiable runtime
+identity never select a UIA element. In those cases `Uia`,
+`LocatorSuggestions`, `FlaUi`, `SelectedXPath`, and `SelectedElementId` are
+omitted; bounded candidates explain the ambiguity when available.
+
+Successful WPF-origin results include reusable `wpf_...` and `uia_...`
+element IDs, WPF and UIA paths, automation properties, and bounds. The source
+WPF handle is validated against its pinned agent identity before scanning, so
+a missing, evicted, or replaced source fails with `stale_element` rather than
+healing to a locator occupant. Returned UIA handles retain their registered
+runtime identity and fail closed if that identity later changes. WPF XPath is
+never evaluated against the different UIA tree.
+
 ### Backend Status and Failures
 
 `list_sessions` is passive and observational. It reports current process,

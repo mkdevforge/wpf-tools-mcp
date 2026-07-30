@@ -15,6 +15,43 @@ public sealed class UiaElementHandleIdentityTests
         AllowPhysicalInput: false);
 
     [Test]
+    public async Task GetUiaLocators_echoes_a_supplied_reusable_uia_handle()
+    {
+        using var controller = new AutomationController();
+        var executable = TestAppPaths.FindTestAppExecutable();
+        _ = await controller.LaunchAsync(new LaunchAppRequest(
+            ExePath: executable,
+            WorkingDirectory: Path.GetDirectoryName(executable)!));
+
+        try
+        {
+            var resolved = await ResolveUiaElementAsync(controller, "Basic_Button");
+            var elementId = resolved.Element.ElementId;
+
+            var locators = await controller.GetUiaLocatorsAsync(elementId: elementId);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(elementId, Does.StartWith("uia_"));
+                Assert.That(locators.Uia?.ElementId, Is.EqualTo(elementId));
+                Assert.That(locators.UiaMapping, Is.Null);
+                Assert.That(locators.LocatorSuggestions, Is.Not.Null);
+                Assert.That(locators.FlaUi, Is.Not.Null);
+            });
+        }
+        finally
+        {
+            try
+            {
+                _ = await controller.CloseAsync(new CloseAppRequest(Force: true, TimeoutMs: 2000));
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Test]
     public async Task Read_only_resolution_does_not_authorize_replacement_for_interaction()
     {
         using var controller = new AutomationController();

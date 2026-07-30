@@ -225,10 +225,21 @@ public sealed class CustomControlsSnapshots
             Assert.That(locators.UiaMapping, Is.Not.Null);
             Assert.Multiple(() =>
             {
+                Assert.That(locators.Uia, Is.Null);
+                Assert.That(locators.LocatorSuggestions, Is.Null);
+                Assert.That(locators.FlaUi, Is.Null);
+                Assert.That(locators.UiaMapping!.Status, Is.EqualTo(ElementMappingStatus.Ambiguous));
+                Assert.That(locators.UiaMapping.SelectedXPath, Is.Null);
+                Assert.That(locators.UiaMapping.SelectedElementId, Is.Null);
+                Assert.That(locators.UiaMapping.ScoreLead, Is.Zero);
+                Assert.That(locators.UiaMapping.Evidence, Does.Contain("top_score_tied"));
                 Assert.That(locators.UiaMapping!.ReturnedCandidates, Is.EqualTo(locators.UiaMapping.Candidates.Count));
                 Assert.That(locators.UiaMapping.TotalCandidates, Is.GreaterThanOrEqualTo(locators.UiaMapping.ReturnedCandidates));
                 Assert.That(locators.UiaMapping.Truncated,
                     Is.EqualTo(locators.UiaMapping.ReturnedCandidates < locators.UiaMapping.TotalCandidates));
+                Assert.That(locators.UiaMapping.Candidates, Has.Count.GreaterThan(1));
+                Assert.That(locators.UiaMapping.Candidates.All(candidate => candidate.Reusable == true), Is.True);
+                Assert.That(locators.UiaMapping.Candidates.All(candidate => candidate.ElementId?.StartsWith("uia_", StringComparison.Ordinal) == true), Is.True);
             });
 
             await Verifier.Verify(new

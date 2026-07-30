@@ -82,7 +82,7 @@ public sealed class UiaLocatorSnapshots
     }
 
     [Test]
-    public async Task GetUiaLocators_templated_wpf_button_snapshot()
+    public async Task GetUiaLocators_templated_wpf_button_returns_explained_reusable_mapping()
     {
         await LaunchCustomControlsAppAsync();
         try
@@ -95,8 +95,94 @@ public sealed class UiaLocatorSnapshots
                 ["elementId"] = button.ElementId
             });
 
+            Assert.That(result.Wpf, Is.Not.Null);
+            Assert.That(result.Uia, Is.Not.Null);
+            Assert.That(result.UiaMapping, Is.Not.Null);
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Wpf!.ElementId, Does.StartWith("wpf_"));
+                Assert.That(result.Wpf.Bounds, Is.Not.Null);
+                Assert.That(result.Uia!.ElementId, Does.StartWith("uia_"));
+                Assert.That(result.UiaMapping!.Status, Is.EqualTo(ElementMappingStatus.Exact));
+                Assert.That(result.UiaMapping.Method, Is.EqualTo("scoredWindowScan"));
+                Assert.That(result.UiaMapping.ScanComplete, Is.True);
+                Assert.That(result.UiaMapping.SelectedElementId, Is.EqualTo(result.Uia.ElementId));
+                Assert.That(result.UiaMapping.SelectedXPath, Is.EqualTo(result.Uia.UiaXPath));
+                Assert.That(result.UiaMapping.Score, Is.GreaterThan(0));
+                Assert.That(result.UiaMapping.Evidence, Does.Contain("runtime_identity_verified"));
+                Assert.That(result.UiaMapping.Candidates[0].Reusable, Is.True);
+                Assert.That(result.UiaMapping.Candidates[0].ElementId, Does.StartWith("uia_"));
+            });
             AssertFlaUiXPathResolves(result);
-            await Verifier.Verify(Scrub(result));
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task GetUiaLocators_explicit_wpf_locator_maps_builtin_control()
+    {
+        await LaunchPrimaryTestAppAsync();
+        try
+        {
+            var result = await _mcp.CallToolAsync<GetUiaLocatorsResponse>("get_uia_locators", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["backend"] = "wpf",
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_Button"
+                }
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Wpf?.ElementId, Does.StartWith("wpf_"));
+                Assert.That(result.Wpf?.Bounds, Is.Not.Null);
+                Assert.That(result.Uia?.ElementId, Does.StartWith("uia_"));
+                Assert.That(result.UiaMapping?.Status, Is.EqualTo(ElementMappingStatus.Exact));
+                Assert.That(result.UiaMapping?.ScanComplete, Is.True);
+                Assert.That(result.UiaMapping?.Truncated, Is.False);
+            });
+            AssertFlaUiXPathResolves(result);
+        }
+        finally
+        {
+            await CloseAppAsync();
+        }
+    }
+
+    [Test]
+    public async Task GetUiaLocators_incomplete_wpf_scan_never_selects_a_candidate()
+    {
+        await LaunchPrimaryTestAppAsync();
+        try
+        {
+            var result = await _mcp.CallToolAsync<GetUiaLocatorsResponse>("get_uia_locators", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["backend"] = "wpf",
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Basic_Button"
+                },
+                ["maxNodes"] = 1
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Uia, Is.Null);
+                Assert.That(result.LocatorSuggestions, Is.Null);
+                Assert.That(result.FlaUi, Is.Null);
+                Assert.That(result.UiaMapping?.Status, Is.EqualTo(ElementMappingStatus.Ambiguous));
+                Assert.That(result.UiaMapping?.ScanComplete, Is.False);
+                Assert.That(result.UiaMapping?.ScannedNodes, Is.EqualTo(1));
+                Assert.That(result.UiaMapping?.SelectedXPath, Is.Null);
+                Assert.That(result.UiaMapping?.SelectedElementId, Is.Null);
+                Assert.That(result.UiaMapping?.TruncatedReason, Is.EqualTo("maxNodes"));
+            });
         }
         finally
         {
@@ -175,25 +261,29 @@ public sealed class UiaLocatorSnapshots
     private void AssertFlaUiXPathResolves(GetUiaLocatorsResponse result)
     {
         Assert.That(_pid, Is.GreaterThan(0));
-        Assert.That(result.LocatorSuggestions.ByFlaUiXPath, Is.Not.Null.And.Not.Empty);
+        Assert.That(result.Uia, Is.Not.Null);
+        Assert.That(result.LocatorSuggestions, Is.Not.Null);
+        var uia = result.Uia!;
+        var suggestions = result.LocatorSuggestions!;
+        Assert.That(suggestions.ByFlaUiXPath, Is.Not.Null.And.Not.Empty);
 
         using var automation = new UIA3Automation();
         var app = FlaUI.Core.Application.Attach(_pid);
         var window = app.GetMainWindow(automation);
         Assert.That(window, Is.Not.Null);
 
-        var found = window!.FindFirstByXPath(result.LocatorSuggestions.ByFlaUiXPath!);
+        var found = window!.FindFirstByXPath(suggestions.ByFlaUiXPath!);
         Assert.That(found, Is.Not.Null);
         var resolved = found!;
-        Assert.That(resolved.ControlType.ToString(), Is.EqualTo(result.Uia.ControlType));
-        if (!string.IsNullOrWhiteSpace(result.Uia.AutomationId))
+        Assert.That(resolved.ControlType.ToString(), Is.EqualTo(uia.ControlType));
+        if (!string.IsNullOrWhiteSpace(uia.AutomationId))
         {
-            Assert.That(resolved.Properties.AutomationId.ValueOrDefault, Is.EqualTo(result.Uia.AutomationId));
+            Assert.That(resolved.Properties.AutomationId.ValueOrDefault, Is.EqualTo(uia.AutomationId));
         }
 
-        if (!string.IsNullOrWhiteSpace(result.Uia.Name))
+        if (!string.IsNullOrWhiteSpace(uia.Name))
         {
-            Assert.That(resolved.Properties.Name.ValueOrDefault, Is.EqualTo(result.Uia.Name));
+            Assert.That(resolved.Properties.Name.ValueOrDefault, Is.EqualTo(uia.Name));
         }
     }
 
@@ -227,11 +317,14 @@ public sealed class UiaLocatorSnapshots
                     ElementId = response.Wpf.ElementId is null ? null : "<element>",
                     ClassName = string.IsNullOrWhiteSpace(response.Wpf.ClassName) ? null : "<class>"
                 },
-            Uia = response.Uia with
-            {
-                Bounds = new Rect(0, 0, 0, 0),
-                ClassName = string.IsNullOrWhiteSpace(response.Uia.ClassName) ? null : response.Uia.ClassName
-            },
+            Uia = response.Uia is null
+                ? null
+                : response.Uia with
+                {
+                    ElementId = response.Uia.ElementId is null ? null : "<element>",
+                    Bounds = new Rect(0, 0, 0, 0),
+                    ClassName = string.IsNullOrWhiteSpace(response.Uia.ClassName) ? null : response.Uia.ClassName
+                },
             UiaMapping = ScrubUiaMapping(response.UiaMapping)
         };
 
@@ -240,9 +333,11 @@ public sealed class UiaLocatorSnapshots
             ? null
             : mapping with
             {
+                SelectedElementId = mapping.SelectedElementId is null ? null : "<element>",
                 Candidates = mapping.Candidates
                     .Select(candidate => candidate with
                     {
+                        ElementId = candidate.ElementId is null ? null : "<element>",
                         Bounds = new Rect(0, 0, 0, 0)
                     })
                     .ToArray()
