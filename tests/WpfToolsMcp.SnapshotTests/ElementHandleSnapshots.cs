@@ -86,7 +86,7 @@ public sealed class ElementHandleSnapshots
                     ["locator"] = locator
                 });
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("Locator did not match any element", StringComparison.Ordinal))
+            catch (InvalidOperationException ex) when (ex.Message.Contains("element_not_found", StringComparison.Ordinal))
             {
                 await Task.Delay(delayMs);
             }
@@ -113,7 +113,7 @@ public sealed class ElementHandleSnapshots
 
                 await Task.Delay(delayMs);
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("Locator did not match any element", StringComparison.Ordinal))
+            catch (InvalidOperationException ex) when (ex.Message.Contains("element_not_found", StringComparison.Ordinal))
             {
                 return;
             }
@@ -577,7 +577,7 @@ public sealed class ElementHandleSnapshots
 
             Assert.Multiple(() =>
             {
-                Assert.That(error, Does.Contain("stale_element: not_found"));
+                Assert.That(error, Does.Contain("stale_element"));
                 Assert.That(error, Does.Not.Contain("Last agent error"));
                 Assert.That(error, Does.Not.Contain("wpf_resolve:not_found"));
             });

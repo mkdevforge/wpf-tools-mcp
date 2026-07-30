@@ -365,7 +365,7 @@ public sealed class MinimalInteractionSnapshots
             ? null
             : new
             {
-                response.LastObservedValue.State,
+                State = response.LastObservedValue.State.ToString(),
                 Value = ToStableWaitValue(response.LastObservedValue.Value),
                 response.LastObservedValue.ValueType,
                 response.LastObservedValue.Truncated,

@@ -81,7 +81,7 @@ public sealed class DynamicContentSnapshots
                     ["locator"] = locator
                 });
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("Locator did not match any element", StringComparison.Ordinal))
+            catch (InvalidOperationException ex) when (ex.Message.Contains("element_not_found", StringComparison.Ordinal))
             {
                 await Task.Delay(delayMs);
             }

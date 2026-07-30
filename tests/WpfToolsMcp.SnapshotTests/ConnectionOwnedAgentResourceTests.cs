@@ -164,7 +164,7 @@ public sealed class ConnectionOwnedAgentResourceTests
                     ["sessionId"] = firstSessionId,
                     ["elementId"] = firstElement.Element.ElementId
                 }, cancellationToken));
-            Assert.That(detachedSessionFailure.Message, Does.Contain("Unknown sessionId").IgnoreCase);
+            Assert.That(detachedSessionFailure.Message, Does.Contain("stale_session"));
 
             var detachedHandleFailure = await CaptureToolFailureAsync(() =>
                 mcp.CallToolAsync<GetPathToElementResponse>("get_path_to_element", new Dictionary<string, object?>
@@ -172,7 +172,7 @@ public sealed class ConnectionOwnedAgentResourceTests
                     ["sessionId"] = secondSessionId,
                     ["elementId"] = firstElement.Element.ElementId
                 }, cancellationToken));
-            Assert.That(detachedHandleFailure.Message, Does.Contain("Unknown elementId").IgnoreCase);
+            Assert.That(detachedHandleFailure.Message, Does.Contain("stale_element"));
 
             var detachedSubscriptionFailure = await CaptureToolFailureAsync(() =>
                 mcp.CallToolAsync<PollSubscriptionResponse>("poll_subscription", new Dictionary<string, object?>
@@ -182,7 +182,7 @@ public sealed class ConnectionOwnedAgentResourceTests
                     ["timeoutMs"] = 0,
                     ["maxBatch"] = 20
                 }, cancellationToken));
-            Assert.That(detachedSubscriptionFailure.Message, Does.Contain("Unknown subscriptionId").IgnoreCase);
+            Assert.That(detachedSubscriptionFailure.Message, Does.Contain("subscription_not_found"));
 
             var secondPerformance = await StartPerformanceAfterOwnerReleaseAsync(
                 mcp,

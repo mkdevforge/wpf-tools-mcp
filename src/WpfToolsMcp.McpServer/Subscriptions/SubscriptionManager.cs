@@ -1006,7 +1006,7 @@ public sealed class SubscriptionManager : IDisposable
             return state;
         }
 
-        throw new InvalidOperationException($"Unknown subscriptionId '{subscriptionId}'.");
+        throw new InvalidOperationException($"subscription_not_found: Unknown subscriptionId '{subscriptionId}'.");
     }
 
     private void RetainCompletedSubscription(SubscriptionState state)

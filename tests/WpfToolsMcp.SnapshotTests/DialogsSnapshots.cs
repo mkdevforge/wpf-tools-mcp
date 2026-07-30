@@ -586,7 +586,6 @@ public sealed class DialogsSnapshots
                     string.Equals(element.AutomationId, NativeAcceptAutomationId, StringComparison.Ordinal) &&
                     string.Equals(element.Type, "Button", StringComparison.OrdinalIgnoreCase)));
                 Assert.That(blockedKeysError, Does.Contain("interaction_policy_blocked"));
-                Assert.That(blockedKeysError, Does.Contain("allowPhysicalInput=false"));
                 Assert.That(typed.Typed, Is.True);
                 Assert.That(typed.MethodUsed, Is.EqualTo("valuePattern"));
                 Assert.That(typed.ModeUsed, Is.EqualTo(TextEntryMode.Replace));
@@ -606,7 +605,7 @@ public sealed class DialogsSnapshots
                 Assert.That(activeOwner.Handle, Is.EqualTo(ownerWindow.Handle));
                 Assert.That(activeOwner.Title, Is.EqualTo(MainWindowTitle));
                 Assert.That(status, Is.EqualTo("Native dialog: Opened native-dialog-target.txt"));
-                Assert.That(staleWindowError, Does.Contain("window_closed"));
+                Assert.That(staleWindowError, Does.Contain("stale_window"));
             });
         }
         finally

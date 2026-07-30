@@ -160,7 +160,7 @@ public sealed class UiaElementHandleIdentityTests
                     autoInject: false);
             }
             catch (InvalidOperationException ex) when (
-                ex.Message.Contains("Locator did not match any element", StringComparison.Ordinal))
+                ex.Message.Contains("element_not_found", StringComparison.Ordinal))
             {
                 await Task.Delay(delayMs);
             }
@@ -189,7 +189,7 @@ public sealed class UiaElementHandleIdentityTests
                 await Task.Delay(delayMs);
             }
             catch (InvalidOperationException ex) when (
-                ex.Message.Contains("Locator did not match any element", StringComparison.Ordinal))
+                ex.Message.Contains("element_not_found", StringComparison.Ordinal))
             {
                 return;
             }

@@ -208,6 +208,11 @@ public sealed class ToolErrorContractTests
         var unknown = MapException(new InvalidOperationException(PrivateSentinel));
         var stale = MapException(new InvalidOperationException($"wpf_handle_stale: {PrivateSentinel}"));
         var capability = MapException(new InvalidOperationException($"agent_capability_unavailable: {PrivateSentinel}"));
+        var outsideSession = MapException(new InvalidOperationException($"window_outside_session: {PrivateSentinel}"));
+        var occluded = MapException(new InvalidOperationException($"mouse_target_occluded: {PrivateSentinel}"));
+        var performanceOwner = MapException(new InvalidOperationException("performance_run_not_owned"));
+        var subscription = MapException(new InvalidOperationException($"subscription_not_found: {PrivateSentinel}"));
+        var missingWpfElement = MapException(new InvalidOperationException($"wpf_resolve:not_found: {PrivateSentinel}"));
 
         Assert.Multiple(() =>
         {
@@ -217,7 +222,26 @@ public sealed class ToolErrorContractTests
             Assert.That(stale.Detail, Is.EqualTo("The element handle is no longer valid."));
             Assert.That(capability.Code, Is.EqualTo("agent_capability_unavailable"));
             Assert.That(capability.RecoveryActions, Is.EqualTo(new[] { "restart_and_reattach" }));
-            Assert.That(JsonSerializer.Serialize(new[] { unknown, stale, capability }, JsonOptions), Does.Not.Contain(PrivateSentinel));
+            Assert.That(outsideSession.Code, Is.EqualTo("window_outside_session"));
+            Assert.That(occluded.Code, Is.EqualTo("mouse_target_occluded"));
+            Assert.That(performanceOwner.Code, Is.EqualTo("performance_run_not_owned"));
+            Assert.That(subscription.Code, Is.EqualTo("subscription_not_found"));
+            Assert.That(missingWpfElement.Code, Is.EqualTo("element_not_found"));
+            Assert.That(
+                JsonSerializer.Serialize(
+                    new[]
+                    {
+                        unknown,
+                        stale,
+                        capability,
+                        outsideSession,
+                        occluded,
+                        performanceOwner,
+                        subscription,
+                        missingWpfElement
+                    },
+                    JsonOptions),
+                Does.Not.Contain(PrivateSentinel));
         });
     }
 

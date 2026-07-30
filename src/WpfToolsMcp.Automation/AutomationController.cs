@@ -10371,7 +10371,7 @@ public sealed partial class AutomationController : IDisposable
             }
 
             var resolved = TryResolveByXPath(window, locator, rawWalker)
-                ?? throw new InvalidOperationException("Locator did not match any element.");
+                ?? throw new InvalidOperationException("element_not_found: Locator did not match any element.");
 
             var mismatch = DescribeXPathFilterMismatchUia(resolved, locator);
             if (mismatch is not null)
@@ -10381,12 +10381,12 @@ public sealed partial class AutomationController : IDisposable
 
             if (visibleOnly && !IsVisibleUia(window, resolved, includeOffViewport))
             {
-                throw new InvalidOperationException("Locator did not match any element (visibleOnly=true).");
+                throw new InvalidOperationException("element_not_found: Locator did not match any element (visibleOnly=true).");
             }
 
             if (interactiveOnly && !IsInteractiveUia(resolved, interactiveMode))
             {
-                throw new InvalidOperationException("Locator did not match any element (interactiveOnly=true).");
+                throw new InvalidOperationException("element_not_found: Locator did not match any element (interactiveOnly=true).");
             }
 
             return resolved;
@@ -10406,11 +10406,11 @@ public sealed partial class AutomationController : IDisposable
 
         if (matches.Length == 0)
         {
-            throw new InvalidOperationException("Locator did not match any element.");
+            throw new InvalidOperationException("element_not_found: Locator did not match any element.");
         }
 
         return SelectMatch(matches, locator, actionKind)
-            ?? throw new InvalidOperationException("Locator did not match any element.");
+            ?? throw new InvalidOperationException("element_not_found: Locator did not match any element.");
     }
 
     private static bool IsVisibleUia(Window window, AutomationElement element, bool includeOffViewport)

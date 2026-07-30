@@ -905,12 +905,12 @@ public sealed class ControllerStateRecoverySnapshots
 
             Assert.Multiple(() =>
             {
-                Assert.That(staleElement.Message, Does.Contain("stale_element: process_replaced"));
+                Assert.That(staleElement.Message, Does.Contain("stale_element"));
                 Assert.That(
                     staleWindow?.Message,
                     oldWindow.Handle == activeWindowHandle
                         ? Is.Null
-                        : Does.Contain("stale_window: process_replaced"));
+                        : Does.Contain("stale_window"));
                 Assert.That(
                     reassignedWindow?.ReturnedNodes,
                     oldWindow.Handle == activeWindowHandle
@@ -920,19 +920,19 @@ public sealed class ControllerStateRecoverySnapshots
                     staleWindowOpenWait?.Message,
                     oldWindow.Handle == activeWindowHandle
                         ? Is.Null
-                        : Does.Contain("stale_window: process_replaced"));
+                        : Does.Contain("stale_window"));
                 Assert.That(
                     staleWindowClosedWait?.Message,
                     oldWindow.Handle == activeWindowHandle
                         ? Is.Null
-                        : Does.Contain("stale_window: process_replaced"));
+                        : Does.Contain("stale_window"));
                 Assert.That(
                     staleOwnerWindowWait?.Message,
                     oldWindow.Handle == activeWindowHandle
                         ? Is.Null
-                        : Does.Contain("stale_window: process_replaced"));
-                Assert.That(staleSession.Message, Does.Contain("stale_session: process_replaced"));
-                Assert.That(staleSession.Message, Does.Contain(successorSessionId));
+                        : Does.Contain("stale_window"));
+                Assert.That(staleSession.Message, Does.Contain("stale_session"));
+                Assert.That(staleSession.Message, Does.Not.Contain(successorSessionId));
             });
 
             var replacementElement = await mcp.CallToolAsync<ResolveElementResponse>("resolve_element", new Dictionary<string, object?>

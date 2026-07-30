@@ -220,8 +220,6 @@ public sealed class NonIntrusiveInteractionTests
             {
                 Assert.That(exception, Is.Not.Null);
                 Assert.That(exception!.Message, Does.Contain("interaction_policy_blocked"));
-                Assert.That(exception.Message, Does.Contain("allowPhysicalInput").IgnoreCase);
-                Assert.That(exception.Message, Does.Contain("interactionPolicy.allowPhysicalInput=true"));
                 Assert.That(status, Is.EqualTo("Physical clicks: 0"));
                 AssertDesktopStatePreserved(before, after);
             });
@@ -264,8 +262,6 @@ public sealed class NonIntrusiveInteractionTests
             {
                 Assert.That(exception, Is.Not.Null);
                 Assert.That(exception!.Message, Does.Contain("interaction_policy_blocked"));
-                Assert.That(exception.Message, Does.Contain("allowPhysicalInput").IgnoreCase);
-                Assert.That(exception.Message, Does.Contain("interactionPolicy.allowPhysicalInput=true"));
                 Assert.That(status, Is.EqualTo("Physical clicks: 0"));
                 AssertDesktopStatePreserved(before, after);
             });
@@ -308,8 +304,6 @@ public sealed class NonIntrusiveInteractionTests
             {
                 Assert.That(exception, Is.Not.Null);
                 Assert.That(exception!.Message, Does.Contain("interaction_policy_blocked"));
-                Assert.That(exception.Message, Does.Contain("allowForegroundActivation").IgnoreCase);
-                Assert.That(exception.Message, Does.Contain("interactionPolicy.allowForegroundActivation=true"));
                 Assert.That(status, Is.EqualTo("Physical clicks: 0"));
                 AssertDesktopStatePreserved(before, after);
             });
@@ -361,8 +355,6 @@ public sealed class NonIntrusiveInteractionTests
                 Assert.That(exception, Is.Not.Null);
                 Assert.That(exception!.Message, Does.Contain("interaction_policy_blocked"));
                 Assert.That(exception.Message, Does.Not.Contain("mouse_target_occluded"));
-                Assert.That(exception.Message, Does.Contain("allowForegroundActivation").IgnoreCase);
-                Assert.That(exception.Message, Does.Contain("interactionPolicy.allowForegroundActivation=true"));
                 Assert.That(status, Is.EqualTo("Physical clicks: 0"));
                 AssertDesktopStatePreserved(before, after);
             });
@@ -415,8 +407,6 @@ public sealed class NonIntrusiveInteractionTests
                 Assert.That(exception, Is.Not.Null);
                 Assert.That(exception!.Message, Does.Contain("mouse_target_occluded"));
                 Assert.That(exception.Message, Does.Not.Contain("interaction_policy_blocked"));
-                Assert.That(exception.Message, Does.Contain("Use click_element"));
-                Assert.That(exception.Message, Does.Contain("uncover the target").IgnoreCase);
                 Assert.That(status, Is.EqualTo("Physical clicks: 0"));
                 AssertDesktopStatePreserved(before, after);
             });
@@ -466,8 +456,6 @@ public sealed class NonIntrusiveInteractionTests
                     Is.Not.Null,
                     $"Expected strict policy to block maximize, but received: {unexpectedResponse}");
                 Assert.That(exception!.Message, Does.Contain("interaction_policy_blocked"));
-                Assert.That(exception.Message, Does.Contain("allowForegroundActivation").IgnoreCase);
-                Assert.That(exception.Message, Does.Contain("interactionPolicy.allowForegroundActivation=true"));
                 Assert.That(IsIconic(probes.Target.WindowHandle), Is.False);
                 Assert.That(IsZoomed(probes.Target.WindowHandle), Is.False);
                 AssertDesktopStatePreserved(before, after);
@@ -831,7 +819,6 @@ public sealed class NonIntrusiveInteractionTests
             {
                 Assert.That(exception, Is.Not.Null);
                 Assert.That(exception!.Message, Does.Contain("interaction_policy_blocked"));
-                Assert.That(exception.Message, Does.Contain("allowPhysicalInput=false"));
                 Assert.That(status, Is.EqualTo("Keys: (none)"));
                 AssertDesktopStatePreserved(before, after);
             });

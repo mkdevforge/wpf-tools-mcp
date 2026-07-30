@@ -584,12 +584,27 @@ public sealed class StateObservationTests
     [Test]
     public async Task Structured_wpf_value_wait_reports_when_target_unloads()
     {
+        var target = await _mcp.CallToolAsync<ResolveElementResponse>(
+            "resolve_element",
+            new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["backend"] = "wpf",
+                ["locator"] = new Dictionary<string, object?>
+                {
+                    ["automationId"] = "Observation_Target"
+                }
+            },
+            _testCts.Token);
+        Assert.That(target.Element.ElementId, Does.StartWith("wpf_"));
+
         var initial = await WaitForWpfStringConditionAsync(
             WaitConditionKind.DependencyPropertyValue,
             pathName: "propertyName",
             path: "Text",
             expected: "idle",
-            timeoutMs: 5_000);
+            timeoutMs: 5_000,
+            elementId: target.Element.ElementId);
         Assert.That(initial.Succeeded, Is.True);
 
         await InvokeAsync("Observation_RemoveTargetDelayed");
@@ -600,7 +615,8 @@ public sealed class StateObservationTests
             pathName: "propertyName",
             path: "Text",
             expected: "never-ready",
-            timeoutMs: 5_000);
+            timeoutMs: 10_000,
+            elementId: target.Element.ElementId);
         await WaitForMarkerAsync("target-removed-delayed", TimeSpan.FromSeconds(5), _testCts.Token);
 
         Assert.Multiple(() =>
@@ -734,7 +750,7 @@ public sealed class StateObservationTests
                     ["timeoutMs"] = 0
                 },
                 _testCts.Token));
-        Assert.That(oldSubscriptionFailure.Message, Does.Contain("Unknown subscriptionId").IgnoreCase);
+        Assert.That(oldSubscriptionFailure.Message, Does.Contain("subscription_not_found"));
 
         var replacement = await SubscribeAsync(dataContextPaths: ["Phase"], durationMs: 5_000);
         try
@@ -817,7 +833,8 @@ public sealed class StateObservationTests
         string path,
         string expected,
         int timeoutMs,
-        int pollIntervalMs = 25)
+        int pollIntervalMs = 25,
+        string? elementId = null)
     {
         var condition = new Dictionary<string, object?>
         {
@@ -831,20 +848,29 @@ public sealed class StateObservationTests
             }
         };
 
+        var arguments = new Dictionary<string, object?>
+        {
+            ["sessionId"] = _sessionId,
+            ["backend"] = "wpf",
+            ["condition"] = condition,
+            ["timeoutMs"] = timeoutMs,
+            ["pollIntervalMs"] = pollIntervalMs
+        };
+        if (string.IsNullOrWhiteSpace(elementId))
+        {
+            arguments["locator"] = new Dictionary<string, object?>
+            {
+                ["automationId"] = "Observation_Target"
+            };
+        }
+        else
+        {
+            arguments["elementId"] = elementId;
+        }
+
         return _mcp.CallToolAsync<WaitForResponse>(
             "wait_for",
-            new Dictionary<string, object?>
-            {
-                ["sessionId"] = _sessionId,
-                ["backend"] = "wpf",
-                ["locator"] = new Dictionary<string, object?>
-                {
-                    ["automationId"] = "Observation_Target"
-                },
-                ["condition"] = condition,
-                ["timeoutMs"] = timeoutMs,
-                ["pollIntervalMs"] = pollIntervalMs
-            },
+            arguments,
             _testCts.Token);
     }
 

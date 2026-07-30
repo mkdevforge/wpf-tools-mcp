@@ -191,6 +191,17 @@ internal static partial class McpToolErrorFilter
         out ToolErrorInfo error)
     {
         error = null!;
+        if (message?.StartsWith("wpf_resolve:not_found", StringComparison.Ordinal) is true)
+        {
+            error = CreateKnownError(
+                "element_not_found",
+                "No element matched the locator.",
+                true,
+                ["refine_locator"],
+                context);
+            return true;
+        }
+
         var code = ReadLeadingCode(message);
         if (code is null)
         {
@@ -209,6 +220,8 @@ internal static partial class McpToolErrorFilter
                 CreateKnownError("element_offscreen_after_scroll", "The target element remained offscreen after scrolling.", true, ["inspect_element"], context),
             "no_hit_at_point" =>
                 CreateKnownError("no_hit_at_point", "No automation element was found at the requested point.", false, ["correct_coordinates"], context),
+            "element_not_found" =>
+                CreateKnownError("element_not_found", "No element matched the locator.", true, ["refine_locator"], context),
             "invalid_request" =>
                 CreateKnownError("invalid_request", "The tool arguments are invalid.", false, ["correct_arguments"], context),
             "ambiguous_element" =>
@@ -235,8 +248,16 @@ internal static partial class McpToolErrorFilter
                 CreateKnownError("process_state_unavailable", "The target process state could not be confirmed.", true, ["retry"], context),
             "active_window_unavailable" =>
                 CreateKnownError("active_window_unavailable", "The active window could not be resolved.", true, ["list_windows"], context),
+            "window_outside_session" =>
+                CreateKnownError("window_outside_session", "The window is outside the attached session.", false, ["list_windows"], context),
             "interaction_policy_blocked" =>
                 CreateKnownError("interaction_policy_blocked", "The operation is blocked by the interaction policy.", false, ["update_interaction_policy"], context),
+            "mouse_target_occluded" =>
+                CreateKnownError("mouse_target_occluded", "The requested mouse target is occluded.", true, ["uncover_target", "use_semantic_interaction"], context),
+            "performance_run_not_owned" =>
+                CreateKnownError("performance_run_not_owned", "The performance run belongs to another session.", false, ["use_owning_session"], context),
+            "subscription_not_found" =>
+                CreateKnownError("subscription_not_found", "The subscription is no longer available.", false, ["subscribe_again"], context),
             "screenshot_viewport_unstable" =>
                 CreateKnownError("screenshot_viewport_unstable", "The screenshot viewport did not stabilize.", true, ["retry"], context),
             "viewport_conditions_unstable" =>

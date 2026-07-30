@@ -589,7 +589,7 @@ public sealed class ToolProfileTests
                 ["condition"] = new Dictionary<string, object?> { ["kind"] = "Visible" }
             }));
 
-        Assert.That(exception!.Message, Does.Contain("wait_for accepts either state or condition, not both."));
+        Assert.That(exception!.Message, Does.Contain("invalid_request"));
     }
 
     [TestCase("core")]
@@ -615,7 +615,7 @@ public sealed class ToolProfileTests
                 }
             }));
 
-        Assert.That(exception!.Message, Does.Contain("wait_for accepts either state or condition, not both."));
+        Assert.That(exception!.Message, Does.Contain("invalid_request"));
     }
 
     [Test]
