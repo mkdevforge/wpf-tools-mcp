@@ -17,10 +17,12 @@ public static class TraceTools
         McpToolErrors.RunAsync(() =>
         {
             var (automation, _) = sessions.GetController(sessionId);
-            return automation.RunExclusiveAsync(() => automation.TraceStartAsync(resetIfRunning, cancellationToken), cancellationToken);
+            return automation.RunExclusiveAsync(
+                () => automation.TraceStartAsync(sessionId, resetIfRunning, cancellationToken),
+                cancellationToken);
         });
 
-    [McpServerTool(Name = "trace_stop", UseStructuredContent = true), Description("Stop an active trace, write it to a JSON file, and return a summary.")]
+    [McpServerTool(Name = "trace_stop", UseStructuredContent = true), Description("Stop an active trace, write the newest 1,000 versioned events to a bounded JSON artifact, and report retention loss separately from inline truncation.")]
     public static Task<TraceStopResponse> TraceStop(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,

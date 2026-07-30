@@ -25,7 +25,7 @@ public static class SubscriptionTools
         [Description("Maximum WPF nodes scanned when resolving a locator (1-20000; ignored for elementId)")] int maxNodes = 5_000,
         [Description("Maximum target and server queued events (1-1000; oldest events are dropped when full)")] int maxQueue = 256,
         [Description("Maximum characters retained for each scalar value (1-4096)")] int maxValueLength = 512,
-        [Description("Maximum serialized event-payload characters returned per source and subscription poll (4096-1048576)")] int maxPayloadChars = 262_144,
+        [Description("Maximum serialized subscription-event characters, including envelope and payload, returned per source and poll (4096-1048576)")] int maxPayloadChars = 262_144,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(async () =>
         {
@@ -73,6 +73,7 @@ public static class SubscriptionTools
                         () => subscriptions.SubscribePropertyChanges(
                             sessionId,
                             automation,
+                            effectiveWindowHandle,
                             observation,
                             reservation,
                             cadenceMs,
@@ -102,7 +103,7 @@ public static class SubscriptionTools
             }, cancellationToken).ConfigureAwait(false);
         });
 
-    [McpServerTool(Name = "subscribe_binding_errors", UseStructuredContent = true), Description("Subscribe to binding errors in the WPF visual tree (poll-based). Requires inject_agent.")]
+    [McpServerTool(Name = "subscribe_binding_errors", UseStructuredContent = true), Description("Subscribe to binding errors in the WPF visual tree (poll-based). A source failure emits one terminal event and stops the worker. Requires inject_agent.")]
     public static Task<SubscribeBindingErrorsResponse> SubscribeBindingErrors(
         SessionManager sessions,
         SubscriptionManager subscriptions,
@@ -113,7 +114,8 @@ public static class SubscriptionTools
         [Description("Maximum errors returned per scan")] int maxErrors = 200,
         [Description("Maximum nodes scanned per scan")] int maxNodes = 5000,
         [Description("Polling interval (ms)")] int pollIntervalMs = 1000,
-        [Description("Max queued events (drops oldest when full)")] int maxQueue = 200,
+        [Description("Maximum queued events (1-1000; oldest events are dropped when full)")] int maxQueue = 200,
+        [Description("Maximum serialized subscription-event characters, including envelope and payload, returned per event and poll (4096-1048576)")] int maxPayloadChars = 262_144,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(async () =>
         {
@@ -145,9 +147,12 @@ public static class SubscriptionTools
                             maxErrors: maxErrors,
                             maxNodes: maxNodes,
                             pollIntervalMs: pollIntervalMs,
-                            maxQueue: maxQueue));
+                            maxQueue: maxQueue,
+                            maxPayloadChars: maxPayloadChars));
 
-                    trace?.SetSummary($"id={response.SubscriptionId} pollMs={pollIntervalMs} maxQueue={maxQueue}");
+                    trace?.SetSummary(
+                        $"id={response.SubscriptionId} pollMs={response.PollIntervalMs} " +
+                        $"maxQueue={response.MaxQueue} maxPayloadChars={response.MaxPayloadChars}");
                     return response;
                 }
                 catch (Exception ex)
@@ -162,7 +167,7 @@ public static class SubscriptionTools
             }, cancellationToken);
         });
 
-    [McpServerTool(Name = "poll_subscription", UseStructuredContent = true), Description("Poll a subscription for queued events.")]
+    [McpServerTool(Name = "poll_subscription", UseStructuredContent = true), Description("Poll ordered, versioned subscription events with explicit per-poll and cumulative delivery-loss counters.")]
     public static Task<PollSubscriptionResponse> PollSubscription(
         SessionManager sessions,
         SubscriptionManager subscriptions,

@@ -9,6 +9,7 @@ namespace WpfToolsMcp.SnapshotTests;
 public sealed class ActionableFailurePrivacyTests
 {
     private const string PrivateSentinel = @"C:\Users\private\project\token=super-secret";
+    private const string TestSessionId = "11111111111111111111111111111111";
 
     [Test]
     public async Task Launch_actionable_failure_returns_structured_sanitized_failure()
@@ -94,7 +95,7 @@ public sealed class ActionableFailurePrivacyTests
     public async Task Trace_records_only_actionable_code_and_safe_detail()
     {
         using var controller = new AutomationController();
-        var traceStart = await controller.TraceStartAsync(resetIfRunning: false);
+        var traceStart = await controller.TraceStartAsync(TestSessionId, resetIfRunning: false);
         var outputPath = Path.Combine(
             Path.GetTempPath(),
             $"wpf-tools-mcp-actionable-trace-test-{Guid.NewGuid():N}.json");
@@ -139,7 +140,7 @@ public sealed class ActionableFailurePrivacyTests
     public async Task Trace_replaces_non_actionable_errors_without_reading_exception_messages()
     {
         using var controller = new AutomationController();
-        var traceStart = await controller.TraceStartAsync(resetIfRunning: false);
+        var traceStart = await controller.TraceStartAsync(TestSessionId, resetIfRunning: false);
         var outputPath = Path.Combine(
             Path.GetTempPath(),
             $"wpf-tools-mcp-private-trace-test-{Guid.NewGuid():N}.json");

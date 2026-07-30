@@ -366,7 +366,8 @@ bounds, visibility, and enabled state at observation time.
 Both target and server queues are bounded. `Dropped`, `Coalesced`, and
 `Truncated`, together with their cumulative totals, make lost, merged, or
 shortened evidence explicit. `maxValueLength` bounds scalar values and
-`maxPayloadChars` bounds serialized event payloads per poll. Completion remains
+`maxPayloadChars` bounds whole serialized subscription events, including their
+envelope and payload, and the combined events returned by one poll. Completion remains
 pollable for a 60-second idle grace period, renewed by each poll, or until
 `unsubscribe`; detaching or ending the session releases the target-side handlers
 as part of session cleanup. Live and completed-retained property subscription
@@ -381,6 +382,39 @@ therefore best effort.
 
 Locator resolution is also bounded: `maxNodes` defaults to 5,000 and is capped
 at 20,000. Reusing a resolved `elementId` avoids that scan entirely.
+
+### Runtime Event Correlation
+
+MCP-owned asynchronous events from binding-error subscriptions, property-change
+subscriptions, and tool traces carry an additive version-1 `envelope`. Runtime
+producers populate `version`, UTC `observedAtUtc`, `sourceKind`, `sessionId`,
+`streamId`, and a monotonic per-stream `sequence`. Optional `windowHandle`,
+`elementId`, and `xpath` fields add live target context when it is available.
+An XPath longer than 2,000 characters is omitted in full and reported with
+`xpathOmitted=true`; it is never returned as a misleading partial locator.
+
+Sequence values order events only within one stream. A property subscription's
+outer sequence describes server delivery, while the `ObserveStateEvent` sequence
+inside its payload describes the target-side observation source. Neither sequence
+establishes ordering across streams. Clients may use `observedAtUtc` to display a
+best-effort merged chronology, but scheduler and process-clock boundaries mean it
+is not a total or causal order. This contract does not collect application logs or
+install process-wide unhandled-exception hooks.
+
+`poll_subscription` exposes canonical `droppedSinceLastPoll`,
+`coalescedSinceLastPoll`, and `truncatedSinceLastPoll` fields alongside the legacy
+`dropped`, `coalesced`, and `truncated` aliases; each pair has the same value.
+Cumulative totals remain available. Natural or source-failure completion appends
+exactly one `subscription_terminal` event with a typed `{ code, completedAtUtc }`
+payload. Keep polling while `hasMore=true` so the terminal event can be drained.
+The legacy `completed`, `completionReason`, and `completedAtUtc` fields remain
+available throughout the completed subscription's retention window.
+
+Tool traces retain at most 1,000 newest events. `trace_stop` and its JSON artifact
+report observed, retained, and dropped event counts plus the retention limit and
+whether retention truncated the trace. Inline `maxEvents` truncation is reported
+separately. Tool names are capped at 128 characters, and summaries plus
+privacy-safe error details are capped at 1,000 characters.
 
 ### Typed Wait Conditions
 
@@ -754,7 +788,8 @@ complete controls live in the `diagnostics` profile when exposing them in
 | `get_data_context` | Summary mode, depth 2, at most 50 properties per object and 2,000 characters per string | Use the additional mode and size controls in `diagnostics` | `Truncated` and bounded warnings |
 | `get_computed_properties` | Legacy compact fields; structured provenance is off | In `diagnostics`, set `includeProvenance=true`; at most 100 properties and 20 provenance scan units/candidates by default, with a hard nested limit of 50 | Outer `TruncatedReason`; nested returned/discovered counts, scan counts, `ScanComplete`, `Truncated`, and stable evidence reasons |
 | `get_layout_context` | 6 nearest ancestors, 8 relevant siblings, 32 Grid definitions, and up to 128 unavailable-evidence records | Set `maxAncestors`, `maxSiblings`, or `maxGridDefinitions` in `diagnostics`; unavailable evidence keeps its fixed 128-record cap | Discovered/returned counts for ancestors, siblings, Grid contexts, definitions, and unavailable evidence; ordered `TruncatedReasons` including `maxUnavailableEvidence` |
-| `trace_stop` | Writes the complete trace artifact but returns no inline events | Set `includeEvents=true`; at most 100 events are returned by default and `maxEvents` is capped at 1,000 | `EventCount`, `ReturnedEventCount`, `Truncated`, `TruncatedReason` |
+| `poll_subscription` | Whole events and each poll share the effective `maxPayloadChars` budget; queues retain at most the effective `maxQueue` | Set subscription bounds explicitly and keep polling while `HasMore=true` | Per-poll and cumulative dropped/coalesced/truncated counts; typed terminal event and retained completion state |
+| `trace_stop` | Writes a bounded artifact retaining the newest 1,000 trace events and returns no inline events by default | Set `includeEvents=true`; at most 100 events are returned by default and `maxEvents` is capped at 1,000 | Observed, retained, and dropped event counts; retention limit/truncation; separate inline `Truncated` and `TruncatedReason` |
 
 When `Truncated` is true, `TruncatedReason` names the budget that was reached.
 Counts describe the work performed and the evidence returned, so callers can

@@ -1473,7 +1473,11 @@ public enum SubscriptionKind
     PropertyChanges
 }
 
-public sealed record SubscribeBindingErrorsResponse(string SubscriptionId);
+public sealed record SubscribeBindingErrorsResponse(
+    string SubscriptionId,
+    int PollIntervalMs = 0,
+    int MaxQueue = 0,
+    int MaxPayloadChars = 0);
 
 public sealed record SubscribePropertyChangesResponse(
     string SubscriptionId,
@@ -1491,7 +1495,11 @@ public sealed record SubscribePropertyChangesResponse(
 public sealed record SubscriptionEvent(
     int Sequence,
     string Kind,
-    JsonNode Payload);
+    JsonNode Payload)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RuntimeEventEnvelope? Envelope { get; init; }
+}
 
 public sealed record PollSubscriptionResponse(
     IReadOnlyList<SubscriptionEvent> Events,
@@ -1504,7 +1512,14 @@ public sealed record PollSubscriptionResponse(
     int TruncatedTotal = 0,
     bool Completed = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CompletionReason = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CompletedAtUtc = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? CompletedAtUtc = null)
+{
+    public int DroppedSinceLastPoll => Dropped;
+
+    public int CoalescedSinceLastPoll => Coalesced;
+
+    public int TruncatedSinceLastPoll => Truncated;
+}
 
 public sealed record UnsubscribeResponse(bool Unsubscribed);
 
@@ -1917,7 +1932,11 @@ public sealed record TraceEvent(
     DateTime StartedAtUtc,
     int DurationMs,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Summary = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Error = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RuntimeEventEnvelope? Envelope { get; init; }
+}
 
 public sealed record TraceStartResponse(
     string TraceId,
@@ -1933,4 +1952,15 @@ public sealed record TraceStopResponse(
     int ReturnedEventCount,
     bool Truncated,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TraceEvent>? Events = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<TraceEvent>? Events = null)
+{
+    public long ObservedEventCount { get; init; }
+
+    public int RetainedEventCount { get; init; }
+
+    public long DroppedEventCount { get; init; }
+
+    public int RetentionLimit { get; init; }
+
+    public bool RetentionTruncated { get; init; }
+}

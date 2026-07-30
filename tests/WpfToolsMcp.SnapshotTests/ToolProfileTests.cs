@@ -856,6 +856,47 @@ public sealed class ToolProfileTests
     }
 
     [Test]
+    public async Task Diagnostics_profile_exposes_versioned_runtime_event_contracts()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+
+        var tools = (await mcp.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var bindingInput = GetInputPropertyNames(tools["subscribe_binding_errors"]);
+        var bindingOutput = GetOutputPropertyNames(tools["subscribe_binding_errors"]);
+        var pollOutput = GetOutputPropertyNames(tools["poll_subscription"]);
+        var traceOutput = GetOutputPropertyNames(tools["trace_stop"]);
+        var pollSchema = tools["poll_subscription"].ProtocolTool.OutputSchema!.Value.GetRawText();
+        var traceSchema = tools["trace_stop"].ProtocolTool.OutputSchema!.Value.GetRawText();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(bindingInput, Does.Contain("maxPayloadChars"));
+            Assert.That(bindingOutput, Does.Contain("pollIntervalMs"));
+            Assert.That(bindingOutput, Does.Contain("maxQueue"));
+            Assert.That(bindingOutput, Does.Contain("maxPayloadChars"));
+
+            Assert.That(pollOutput, Does.Contain("dropped"));
+            Assert.That(pollOutput, Does.Contain("droppedSinceLastPoll"));
+            Assert.That(pollOutput, Does.Contain("coalesced"));
+            Assert.That(pollOutput, Does.Contain("coalescedSinceLastPoll"));
+            Assert.That(pollOutput, Does.Contain("truncated"));
+            Assert.That(pollOutput, Does.Contain("truncatedSinceLastPoll"));
+            Assert.That(pollSchema, Does.Contain("\"envelope\""));
+            Assert.That(pollSchema, Does.Contain("\"observedAtUtc\""));
+            Assert.That(pollSchema, Does.Contain("\"sourceKind\""));
+            Assert.That(pollSchema, Does.Contain("\"streamId\""));
+
+            Assert.That(traceOutput, Does.Contain("observedEventCount"));
+            Assert.That(traceOutput, Does.Contain("retainedEventCount"));
+            Assert.That(traceOutput, Does.Contain("droppedEventCount"));
+            Assert.That(traceOutput, Does.Contain("retentionLimit"));
+            Assert.That(traceOutput, Does.Contain("retentionTruncated"));
+            Assert.That(traceSchema, Does.Contain("\"envelope\""));
+        });
+    }
+
+    [Test]
     public async Task Default_profile_auto_injects_for_visual_tree()
     {
         var serverExe = McpServerPaths.FindMcpServerExecutable();

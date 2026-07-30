@@ -87,7 +87,7 @@ public sealed partial class AutomationController : IDisposable
         {
             HighlightOverlay.Hide(_resourceOwnerId);
             _lastHighlight = null;
-            _traceSession = null;
+            CloseActiveTrace();
             _elementHandles.Clear();
             Cleanup();
         }

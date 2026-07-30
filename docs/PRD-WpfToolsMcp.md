@@ -388,9 +388,9 @@ exception messages, and target-side stack traces.
 | `get_binding_info` | Inspect bindings on an element | For each binding: path, source, mode, converter, current value, status (Active/Error/Detached), and error message if broken |
 | `get_binding_errors` | List broken or non-active bindings in the current visual tree | Binding path, target element/property, binding status, and available validation error details |
 | `get_validation_errors` | Read the current `Validation.Errors` attached state in a bounded visual-tree scope without invoking validators | Deterministic element/error order; exact, best-effort, or unavailable source evidence; bounded binding, content, exception, and adorner evidence; returned/discovered/scan counts and ordered truncation reasons |
-| `subscribe_binding_errors` | Subscribe to binding errors (poll-based) | Subscription ID |
+| `subscribe_binding_errors` | Subscribe to binding errors (poll-based) | Subscription ID and effective poll, queue, and whole-event bounds |
 | `subscribe_property_changes` | Observe an allowlist of dependency properties and dotted DataContext paths on one WPF element using target-side change notifications | Subscription ID, effective bounds, selected watches, and start/expiry metadata |
-| `poll_subscription` | Poll bounded subscription events and delivery-loss metadata | Ordered event batch; dropped, coalesced, and truncated counts; completion state |
+| `poll_subscription` | Poll bounded, versioned subscription events and delivery-loss metadata | Per-stream ordered event batch; canonical and compatibility loss counters; typed terminal event and retained completion state |
 | `unsubscribe` | Unsubscribe a subscription | Unsubscribe result |
 | `get_data_context` | Serialize the DataContext of an element | JSON representation of the DataContext object, its type, and property values. Configurable depth to avoid serializing the entire object graph. |
 | `get_computed_properties` | Inspect computed dependency property values | Effective values + optional value-source details |
@@ -401,7 +401,19 @@ exception messages, and target-side stack traces.
 | `performance_start` | Start lightweight UI-thread latency sampling | Run ID |
 | `performance_stop` | Stop a performance run | Summary |
 | `trace_start` | Start MCP tool tracing | Trace ID |
-| `trace_stop` | Stop tool tracing and write the complete JSON trace | Trace summary + output path; inline events are opt-in and bounded by `maxEvents` |
+| `trace_stop` | Stop tool tracing and write a bounded JSON trace | Trace summary + output path; newest 1,000 events retained with observed/retained/dropped counts; inline events are opt-in and bounded by `maxEvents` |
+
+Subscription and trace events emitted by the MCP server use an additive version-1
+runtime envelope with UTC observation time, source kind, session and stream IDs,
+and a monotonic sequence scoped to that stream. Optional live window/element/path
+identity is bounded, and overlong paths are omitted rather than truncated.
+Sequences do not define cross-stream or causal ordering. Subscription loss counters
+have explicit per-poll and cumulative forms, whole serialized events are subject to
+the negotiated payload budget, and completion is represented by exactly one typed
+terminal event while compatibility completion fields remain pollable during the
+retention window. Trace retention loss and inline response truncation are reported
+separately. The correlation contract is limited to MCP-owned events; it does not
+collect application logs or install unhandled-exception hooks.
 
 ### Element Locator Strategies
 

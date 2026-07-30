@@ -12,8 +12,10 @@ public sealed class SubscriptionManager : IDisposable
     private static readonly TimeSpan ResourceReleaseRetryDelay = TimeSpan.FromSeconds(5);
     private const int MaxPropertySubscriptionsPerSession = 8;
     private const int MaxPropertySubscriptionsTotal = 64;
+    private const int MaxEnvelopeXPathChars = 2_000;
+    private const int MaxEnvelopeIdentityChars = 128;
 
-    private sealed record QueuedSubscriptionEvent(SubscriptionEvent Event, int PayloadChars);
+    internal sealed record QueuedSubscriptionEvent(SubscriptionEvent Event, int SerializedChars);
 
     public sealed class PropertySubscriptionReservation : IDisposable
     {
@@ -37,23 +39,26 @@ public sealed class SubscriptionManager : IDisposable
         public void Dispose() => Interlocked.Exchange(ref _release, null)?.Invoke();
     }
 
-    private sealed record SubscriptionDrain(
+    internal sealed record SubscriptionDrain(
         IReadOnlyList<SubscriptionEvent> Events,
-        int Dropped,
+        int DroppedSinceLastPoll,
         int DroppedTotal,
-        int Coalesced,
+        int CoalescedSinceLastPoll,
         int CoalescedTotal,
-        int Truncated,
+        int TruncatedSinceLastPoll,
         int TruncatedTotal,
         bool HasMore,
         bool Completed,
         string? CompletionReason,
         string? CompletedAtUtc)
     {
-        public bool HasDeliveryMetrics => Dropped > 0 || Coalesced > 0 || Truncated > 0;
+        public bool HasDeliveryMetrics =>
+            DroppedSinceLastPoll > 0 ||
+            CoalescedSinceLastPoll > 0 ||
+            TruncatedSinceLastPoll > 0;
     }
 
-    private sealed class SubscriptionState : IDisposable
+    internal sealed class SubscriptionState : IDisposable
     {
         private readonly object _sync = new();
         private readonly Queue<QueuedSubscriptionEvent> _queue = new();
@@ -61,6 +66,12 @@ public sealed class SubscriptionManager : IDisposable
         private readonly Action? _releaseCapacity;
         private readonly SemaphoreSlim _releaseGate = new(1, 1);
         private readonly CancellationToken _token;
+        private readonly Func<DateTimeOffset> _utcNow;
+        private readonly string _sourceKind;
+        private readonly long? _windowHandle;
+        private readonly string? _elementId;
+        private readonly string? _xpath;
+        private readonly bool? _xpathOmitted;
 
         private TaskCompletionSource<bool> _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _dropped;
@@ -88,8 +99,24 @@ public sealed class SubscriptionManager : IDisposable
             CancellationTokenSource cts,
             int maxPayloadChars = int.MaxValue,
             Func<Task>? releaseResource = null,
-            Action? releaseCapacity = null)
+            Action? releaseCapacity = null,
+            long? windowHandle = null,
+            string? elementId = null,
+            string? xpath = null,
+            Func<DateTimeOffset>? utcNow = null)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
+            ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+            if (maxQueue < 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maxQueue));
+            }
+
+            if (maxPayloadChars < 1_024)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maxPayloadChars));
+            }
+
             SubscriptionId = subscriptionId;
             SessionId = sessionId;
             Kind = kind;
@@ -99,6 +126,25 @@ public sealed class SubscriptionManager : IDisposable
             _token = cts.Token;
             _releaseResource = releaseResource;
             _releaseCapacity = releaseCapacity;
+            _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+            _sourceKind = kind switch
+            {
+                SubscriptionKind.BindingErrors => RuntimeEventSourceKinds.BindingErrors,
+                SubscriptionKind.PropertyChanges => RuntimeEventSourceKinds.PropertyChanges,
+                _ => throw new ArgumentOutOfRangeException(nameof(kind))
+            };
+            _windowHandle = windowHandle is > 0 ? windowHandle : null;
+            _elementId = BoundIdentity(elementId);
+
+            xpath = string.IsNullOrWhiteSpace(xpath) ? null : xpath.Trim();
+            if (xpath is not null && xpath.Length > MaxEnvelopeXPathChars)
+            {
+                _xpathOmitted = true;
+            }
+            else
+            {
+                _xpath = xpath;
+            }
         }
 
         public string SubscriptionId { get; }
@@ -112,32 +158,18 @@ public sealed class SubscriptionManager : IDisposable
         public Task? Worker { get; set; }
         public bool IsStopping => Volatile.Read(ref _stopRequested) != 0;
         public bool ResourceReleased => Volatile.Read(ref _resourceReleased) != 0;
+        internal DateTimeOffset UtcNow => _utcNow().ToUniversalTime();
 
-        public void Enqueue(string kind, JsonNode payload)
+        public void Enqueue(
+            string kind,
+            JsonNode payload,
+            DateTimeOffset? observedAtUtc = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(kind);
             ArgumentNullException.ThrowIfNull(payload);
             if (IsStopping)
             {
                 return;
-            }
-
-            var subscriptionEvent = new SubscriptionEvent(0, kind, payload);
-            var payloadChars = kind.Length + payload.ToJsonString().Length + 64;
-            var payloadTruncated = false;
-            if (payloadChars > MaxPayloadChars)
-            {
-                payload = TryCompactObservationPayload(kind, payload) ??
-                          JsonSerializer.SerializeToNode(new
-                          {
-                              truncated = true,
-                              reason = "subscription_payload_limit",
-                              originalPayloadChars = payloadChars,
-                              maxPayloadChars = MaxPayloadChars
-                          })!;
-                subscriptionEvent = subscriptionEvent with { Payload = payload };
-                payloadChars = kind.Length + payload.ToJsonString().Length + 64;
-                payloadTruncated = true;
             }
 
             TaskCompletionSource<bool> toSignal;
@@ -148,7 +180,34 @@ public sealed class SubscriptionManager : IDisposable
                     return;
                 }
 
-                if (payloadChars > MaxPayloadChars)
+                var sequence = ++_sequence;
+                var subscriptionEvent = CreateEvent(
+                    sequence,
+                    kind,
+                    payload,
+                    (observedAtUtc ?? _utcNow()).ToUniversalTime());
+                var serializedChars = GetSerializedChars(subscriptionEvent);
+                var payloadTruncated = false;
+                if (serializedChars > MaxPayloadChars)
+                {
+                    payload = TryCompactObservationPayload(kind, payload) ??
+                              JsonSerializer.SerializeToNode(new
+                              {
+                                  truncated = true,
+                                  reason = "subscription_event_limit",
+                                  originalEventChars = serializedChars,
+                                  maxPayloadChars = MaxPayloadChars
+                              })!;
+                    subscriptionEvent = CreateEvent(
+                        sequence,
+                        kind,
+                        payload,
+                        subscriptionEvent.Envelope!.ObservedAtUtc);
+                    serializedChars = GetSerializedChars(subscriptionEvent);
+                    payloadTruncated = true;
+                }
+
+                if (serializedChars > MaxPayloadChars)
                 {
                     _dropped = SaturatingAdd(_dropped, 1);
                     _droppedTotal = SaturatingAdd(_droppedTotal, 1);
@@ -171,10 +230,9 @@ public sealed class SubscriptionManager : IDisposable
                         _droppedTotal = SaturatingAdd(_droppedTotal, 1);
                     }
 
-                    _sequence++;
                     _queue.Enqueue(new QueuedSubscriptionEvent(
-                        subscriptionEvent with { Sequence = _sequence },
-                        payloadChars));
+                        subscriptionEvent,
+                        serializedChars));
 
                     toSignal = RotateWakeLocked();
                 }
@@ -208,26 +266,51 @@ public sealed class SubscriptionManager : IDisposable
             toSignal.TrySetResult(true);
         }
 
-        public void Complete(string reason)
+        public bool Complete(string reason)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(reason);
 
-            TaskCompletionSource<bool>? toSignal = null;
+            TaskCompletionSource<bool> toSignal;
             lock (_sync)
             {
                 if (_completed)
                 {
-                    return;
+                    return false;
                 }
 
+                var completedAtUtc = _utcNow().ToUniversalTime();
+                var sequence = ++_sequence;
+                var terminalPayload = JsonSerializer.SerializeToNode(
+                    new SubscriptionTerminalEvent(reason, completedAtUtc))!;
+                var terminalEvent = CreateEvent(
+                    sequence,
+                    SubscriptionEventKinds.Terminal,
+                    terminalPayload,
+                    completedAtUtc);
+                var serializedChars = GetSerializedChars(terminalEvent);
+                if (serializedChars > MaxPayloadChars)
+                {
+                    throw new InvalidOperationException(
+                        "The configured subscription event budget cannot contain the terminal event.");
+                }
+
+                if (_queue.Count >= MaxQueue)
+                {
+                    _queue.Dequeue();
+                    _dropped = SaturatingAdd(_dropped, 1);
+                    _droppedTotal = SaturatingAdd(_droppedTotal, 1);
+                }
+
+                _queue.Enqueue(new QueuedSubscriptionEvent(terminalEvent, serializedChars));
                 _completed = true;
                 _completionReason = reason;
-                _retentionTouchedAtUtc = DateTimeOffset.UtcNow;
+                _retentionTouchedAtUtc = completedAtUtc;
                 _completedAtUtc = _retentionTouchedAtUtc.Value.ToString("O");
                 toSignal = RotateWakeLocked();
             }
 
             toSignal.TrySetResult(true);
+            return true;
         }
 
         public SubscriptionDrain Drain(int maxBatch)
@@ -236,7 +319,7 @@ public sealed class SubscriptionManager : IDisposable
             {
                 if (_completed)
                 {
-                    _retentionTouchedAtUtc = DateTimeOffset.UtcNow;
+                    _retentionTouchedAtUtc = _utcNow();
                 }
 
                 var batch = new List<SubscriptionEvent>(Math.Min(maxBatch, _queue.Count));
@@ -244,14 +327,14 @@ public sealed class SubscriptionManager : IDisposable
                 while (batch.Count < maxBatch && _queue.Count > 0)
                 {
                     var next = _queue.Peek();
-                    if ((long)payloadChars + next.PayloadChars > MaxPayloadChars)
+                    if ((long)payloadChars + next.SerializedChars > MaxPayloadChars)
                     {
                         break;
                     }
 
                     _queue.Dequeue();
                     batch.Add(next.Event);
-                    payloadChars = SaturatingAdd(payloadChars, next.PayloadChars);
+                    payloadChars = SaturatingAdd(payloadChars, next.SerializedChars);
                 }
 
                 var dropped = _dropped;
@@ -336,8 +419,9 @@ public sealed class SubscriptionManager : IDisposable
                     return true;
                 }
 
-                var touchedAt = _retentionTouchedAtUtc ?? DateTimeOffset.UtcNow;
-                retryAfter = retention - (DateTimeOffset.UtcNow - touchedAt);
+                var now = _utcNow();
+                var touchedAt = _retentionTouchedAtUtc ?? now;
+                retryAfter = retention - (now - touchedAt);
                 if (_completed && retryAfter <= TimeSpan.Zero)
                 {
                     Interlocked.Exchange(ref _stopRequested, 1);
@@ -408,10 +492,41 @@ public sealed class SubscriptionManager : IDisposable
             return wake;
         }
 
+        private SubscriptionEvent CreateEvent(
+            int sequence,
+            string kind,
+            JsonNode payload,
+            DateTimeOffset observedAtUtc) =>
+            new(sequence, kind, payload)
+            {
+                Envelope = new RuntimeEventEnvelope(
+                    Version: RuntimeEventVersions.V1,
+                    ObservedAtUtc: observedAtUtc.ToUniversalTime(),
+                    SourceKind: _sourceKind,
+                    SessionId: SessionId,
+                    StreamId: SubscriptionId,
+                    Sequence: sequence,
+                    WindowHandle: _windowHandle,
+                    ElementId: _elementId,
+                    XPath: _xpath,
+                    XPathOmitted: _xpathOmitted)
+            };
+
+        private static int GetSerializedChars(SubscriptionEvent subscriptionEvent) =>
+            JsonSerializer.Serialize(subscriptionEvent).Length;
+
+        private static string? BoundIdentity(string? value)
+        {
+            value = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            return value is not null && value.Length <= MaxEnvelopeIdentityChars
+                ? value
+                : null;
+        }
+
         private static JsonNode? TryCompactObservationPayload(string kind, JsonNode payload)
         {
-            if (!string.Equals(kind, "property_initial", StringComparison.Ordinal) &&
-                !string.Equals(kind, "property_changed", StringComparison.Ordinal))
+            if (!string.Equals(kind, SubscriptionEventKinds.PropertyInitial, StringComparison.Ordinal) &&
+                !string.Equals(kind, SubscriptionEventKinds.PropertyChanged, StringComparison.Ordinal))
             {
                 return null;
             }
@@ -503,72 +618,108 @@ public sealed class SubscriptionManager : IDisposable
         int maxErrors,
         int maxNodes,
         int pollIntervalMs,
-        int maxQueue)
+        int maxQueue,
+        int maxPayloadChars = 262_144)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(automation);
 
         var subscriptionId = Guid.NewGuid().ToString("N");
+        var effectivePollIntervalMs = Math.Clamp(pollIntervalMs, 50, 60_000);
+        var effectiveMaxQueue = Math.Clamp(maxQueue, 1, 1_000);
+        var effectiveMaxPayloadChars = Math.Clamp(maxPayloadChars, 4_096, 1_048_576);
         var cts = new CancellationTokenSource();
 
         var state = new SubscriptionState(
             subscriptionId: subscriptionId,
             sessionId: sessionId,
             kind: SubscriptionKind.BindingErrors,
-            maxQueue: Math.Clamp(maxQueue, 1, 10_000),
-            cts: cts);
+            maxQueue: effectiveMaxQueue,
+            cts: cts,
+            maxPayloadChars: effectiveMaxPayloadChars,
+            windowHandle: windowHandleUsed,
+            xpath: rootXPath);
 
         if (!_subscriptions.TryAdd(subscriptionId, state))
         {
             throw new InvalidOperationException("Failed to register subscription.");
         }
 
-        state.Worker = Task.Run(async () =>
+        state.Worker = Task.Run(() => RunBindingSubscriptionAsync(
+            state,
+            cancellationToken => automation.RunExclusiveAsync(
+                () => automation.GetBindingErrorsAsync(
+                    windowHandleUsed,
+                    rootXPath,
+                    depth,
+                    maxErrors,
+                    maxNodes,
+                    cancellationToken),
+                cancellationToken),
+            TimeSpan.FromMilliseconds(effectivePollIntervalMs),
+            exception => ClassifySubscriptionFailure(exception, automation)));
+
+        return new SubscribeBindingErrorsResponse(
+            subscriptionId,
+            effectivePollIntervalMs,
+            effectiveMaxQueue,
+            effectiveMaxPayloadChars);
+    }
+
+    internal async Task RunBindingSubscriptionAsync(
+        SubscriptionState state,
+        Func<CancellationToken, Task<GetBindingErrorsResponse>> scan,
+        TimeSpan pollDelay,
+        Func<Exception, string> classifyFailure)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(scan);
+        ArgumentNullException.ThrowIfNull(classifyFailure);
+        var lastKeys = new HashSet<string>(StringComparer.Ordinal);
+
+        try
         {
-            var pollDelay = TimeSpan.FromMilliseconds(Math.Clamp(pollIntervalMs, 50, 60_000));
-            var lastKeys = new HashSet<string>(StringComparer.Ordinal);
-
-            try
+            while (!state.Token.IsCancellationRequested)
             {
-                while (!cts.IsCancellationRequested)
-                {
-                    await TickBindingErrorsAsync(
-                        state,
-                        automation,
-                        windowHandleUsed,
-                        rootXPath,
-                        depth,
-                        maxErrors,
-                        maxNodes,
-                        lastKeys,
-                        cts.Token)
-                        .ConfigureAwait(false);
-
-                    await Task.Delay(pollDelay, cts.Token).ConfigureAwait(false);
-                }
+                var response = await scan(state.Token).ConfigureAwait(false);
+                PublishBindingErrors(state, response, lastKeys, state.Token);
+                await Task.Delay(pollDelay, state.Token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+        }
+        catch (OperationCanceledException) when (state.Token.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (!state.IsStopping && state.Complete(classifyFailure(ex)))
             {
+                RetainCompletedSubscription(state);
             }
-            catch (Exception ex)
-            {
-                state.Enqueue(
-                    kind: "subscription_error",
-                    payload: JsonSerializer.SerializeToNode(new { message = ex.Message })!);
-            }
-            finally
-            {
-                _ = _subscriptions.TryRemove(subscriptionId, out _);
-                state.DisposeCancellationSource();
-            }
-        });
-
-        return new SubscribeBindingErrorsResponse(subscriptionId);
+        }
     }
 
     public SubscribePropertyChangesResponse SubscribePropertyChanges(
         string sessionId,
         AutomationController automation,
+        WpfStateObservation observation,
+        PropertySubscriptionReservation reservation,
+        int cadenceMs,
+        int maxQueue,
+        int maxPayloadChars) =>
+        SubscribePropertyChanges(
+            sessionId,
+            automation,
+            windowHandleUsed: null,
+            observation,
+            reservation,
+            cadenceMs,
+            maxQueue,
+            maxPayloadChars);
+
+    public SubscribePropertyChangesResponse SubscribePropertyChanges(
+        string sessionId,
+        AutomationController automation,
+        long? windowHandleUsed,
         WpfStateObservation observation,
         PropertySubscriptionReservation reservation,
         int cadenceMs,
@@ -600,8 +751,11 @@ public sealed class SubscriptionManager : IDisposable
                 effectiveMaxQueue,
                 cts,
                 effectiveMaxPayloadChars,
-                () => ReleasePropertyObservationAsync(automation, observation),
-                releaseSlot);
+                releaseResource: () => ReleasePropertyObservationAsync(automation, observation),
+                releaseCapacity: releaseSlot,
+                windowHandle: windowHandleUsed,
+                elementId: observation.Started.Element.ElementId,
+                xpath: observation.Started.Element.XPath);
 
             if (!_subscriptions.TryAdd(subscriptionId, state))
             {
@@ -613,7 +767,10 @@ public sealed class SubscriptionManager : IDisposable
 
             foreach (var initialEvent in observation.Started.InitialEvents)
             {
-                state.Enqueue("property_initial", JsonSerializer.SerializeToNode(initialEvent)!);
+                state.Enqueue(
+                    SubscriptionEventKinds.PropertyInitial,
+                    JsonSerializer.SerializeToNode(initialEvent)!,
+                    initialEvent.ObservedAtUtc);
             }
 
             state.Worker = Task.Run(() => RunPropertySubscriptionAsync(
@@ -671,8 +828,9 @@ public sealed class SubscriptionManager : IDisposable
                 foreach (var observationEvent in source.Events)
                 {
                     state.Enqueue(
-                        "property_changed",
-                        JsonSerializer.SerializeToNode(observationEvent)!);
+                        SubscriptionEventKinds.PropertyChanged,
+                        JsonSerializer.SerializeToNode(observationEvent)!,
+                        observationEvent.ObservedAtUtc);
                 }
 
                 if (source.HasMore)
@@ -698,48 +856,41 @@ public sealed class SubscriptionManager : IDisposable
         {
             if (!state.IsStopping)
             {
-                await CompletePropertySubscriptionAsync(state, "agent_connection_lost").ConfigureAwait(false);
+                await CompletePropertySubscriptionAsync(
+                    state,
+                    automation.IsAttached
+                        ? SubscriptionTerminalCodes.AgentConnectionLost
+                        : SubscriptionTerminalCodes.TargetExited).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
         {
             if (!state.IsStopping)
             {
-                await CompletePropertySubscriptionAsync(state, "source_error", ex).ConfigureAwait(false);
+                await CompletePropertySubscriptionAsync(
+                    state,
+                    ClassifySubscriptionFailure(ex, automation)).ConfigureAwait(false);
             }
         }
     }
 
     private async Task CompletePropertySubscriptionAsync(
         SubscriptionState state,
-        string reason,
-        Exception? sourceError = null)
+        string reason)
     {
-        if (sourceError is not null)
-        {
-            state.Enqueue(
-                "subscription_error",
-                JsonSerializer.SerializeToNode(new { message = sourceError.GetBaseException().Message })!);
-        }
-
         try
         {
             await state.ReleaseResourceAsync().ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch
         {
-            state.Enqueue(
-                "subscription_error",
-                JsonSerializer.SerializeToNode(new
-                {
-                    message = ex.GetBaseException().Message,
-                    operation = "release_source"
-                })!);
-            reason = "source_release_failed";
+            reason = SubscriptionTerminalCodes.SourceReleaseFailed;
         }
 
-        state.Complete(reason);
-        RetainCompletedSubscription(state);
+        if (state.Complete(reason))
+        {
+            RetainCompletedSubscription(state);
+        }
     }
 
     private static async Task ReleasePropertyObservationAsync(
@@ -811,44 +962,48 @@ public sealed class SubscriptionManager : IDisposable
 
     private static string GetCompletionReason(ObserveStateStopReason? reason) => reason switch
     {
-        ObserveStateStopReason.DurationElapsed => "duration_elapsed",
-        ObserveStateStopReason.ElementUnloaded => "element_unloaded",
-        ObserveStateStopReason.ClientRequested => "client_requested",
-        _ => "completed"
+        ObserveStateStopReason.DurationElapsed => SubscriptionTerminalCodes.DurationElapsed,
+        ObserveStateStopReason.ElementUnloaded => SubscriptionTerminalCodes.ElementUnloaded,
+        ObserveStateStopReason.ClientRequested => SubscriptionTerminalCodes.ClientRequested,
+        _ => SubscriptionTerminalCodes.Completed
     };
 
-    private static async Task TickBindingErrorsAsync(
+    internal static string ClassifySubscriptionFailure(
+        Exception exception,
+        AutomationController automation)
+    {
+        for (Exception? current = exception, previous = null;
+             current is not null && !ReferenceEquals(current, previous);
+             previous = current, current = current.InnerException)
+        {
+            if (current is not ActionableFailureException actionable)
+            {
+                continue;
+            }
+
+            if (string.Equals(actionable.Failure.Code, "target_exited", StringComparison.Ordinal) ||
+                string.Equals(actionable.Failure.Code, "process_replaced", StringComparison.Ordinal))
+            {
+                return SubscriptionTerminalCodes.TargetExited;
+            }
+
+            return SubscriptionTerminalCodes.SourceError;
+        }
+
+        return automation.IsAttached
+            ? SubscriptionTerminalCodes.SourceError
+            : SubscriptionTerminalCodes.TargetExited;
+    }
+
+    private static void PublishBindingErrors(
         SubscriptionState state,
-        AutomationController automation,
-        long? windowHandleUsed,
-        string? rootXPath,
-        int depth,
-        int maxErrors,
-        int maxNodes,
+        GetBindingErrorsResponse response,
         HashSet<string> lastKeys,
         CancellationToken cancellationToken)
     {
-        GetBindingErrorsResponse response;
-        try
-        {
-            response = await automation.RunExclusiveAsync(
-                () => automation.GetBindingErrorsAsync(windowHandleUsed, rootXPath, depth, maxErrors, maxNodes, cancellationToken),
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            state.Enqueue(
-                kind: "subscription_error",
-                payload: JsonSerializer.SerializeToNode(new { message = ex.Message })!);
-            return;
-        }
-
         var currentKeys = new HashSet<string>(StringComparer.Ordinal);
         var newErrors = new List<BindingErrorInfo>();
+        var observedAtUtc = state.UtcNow;
 
         foreach (var error in response.Errors)
         {
@@ -873,8 +1028,9 @@ public sealed class SubscriptionManager : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             state.Enqueue(
-                kind: "binding_error_added",
-                payload: JsonSerializer.SerializeToNode(error)!);
+                kind: SubscriptionEventKinds.BindingErrorAdded,
+                payload: JsonSerializer.SerializeToNode(error)!,
+                observedAtUtc: observedAtUtc);
         }
     }
 
@@ -932,9 +1088,15 @@ public sealed class SubscriptionManager : IDisposable
         var afterWait = state.Drain(batchSize);
         var combined = afterWait with
         {
-            Dropped = SaturatingAdd(drain.Dropped, afterWait.Dropped),
-            Coalesced = SaturatingAdd(drain.Coalesced, afterWait.Coalesced),
-            Truncated = SaturatingAdd(drain.Truncated, afterWait.Truncated)
+            DroppedSinceLastPoll = SaturatingAdd(
+                drain.DroppedSinceLastPoll,
+                afterWait.DroppedSinceLastPoll),
+            CoalescedSinceLastPoll = SaturatingAdd(
+                drain.CoalescedSinceLastPoll,
+                afterWait.CoalescedSinceLastPoll),
+            TruncatedSinceLastPoll = SaturatingAdd(
+                drain.TruncatedSinceLastPoll,
+                afterWait.TruncatedSinceLastPoll)
         };
         return ToPollSubscriptionResponse(combined);
     }
@@ -1105,12 +1267,12 @@ public sealed class SubscriptionManager : IDisposable
     private static PollSubscriptionResponse ToPollSubscriptionResponse(SubscriptionDrain drain) =>
         new(
             drain.Events,
-            drain.Dropped,
+            drain.DroppedSinceLastPoll,
             drain.HasMore,
             drain.DroppedTotal,
-            drain.Coalesced,
+            drain.CoalescedSinceLastPoll,
             drain.CoalescedTotal,
-            drain.Truncated,
+            drain.TruncatedSinceLastPoll,
             drain.TruncatedTotal,
             drain.Completed,
             drain.CompletionReason,

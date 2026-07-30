@@ -87,6 +87,22 @@ public sealed class BindingSubscriptionSnapshots
         });
 
         Assert.That(poll.Events, Is.Not.Empty, "Expected at least one binding error event.");
+        Assert.Multiple(() =>
+        {
+            Assert.That(sub.PollIntervalMs, Is.EqualTo(200));
+            Assert.That(sub.MaxQueue, Is.EqualTo(100));
+            Assert.That(sub.MaxPayloadChars, Is.EqualTo(262_144));
+            Assert.That(poll.Events, Has.All.Matches<SubscriptionEvent>(item =>
+                item.Envelope is
+                {
+                    Version: RuntimeEventVersions.V1,
+                    SourceKind: RuntimeEventSourceKinds.BindingErrors
+                } &&
+                item.Envelope.SessionId == _sessionId &&
+                item.Envelope.StreamId == sub.SubscriptionId &&
+                item.Envelope.Sequence == item.Sequence &&
+                item.Envelope.ObservedAtUtc.Offset == TimeSpan.Zero));
+        });
 
         var stable = new
         {
@@ -96,7 +112,7 @@ public sealed class BindingSubscriptionSnapshots
             {
                 e.Sequence,
                 e.Kind,
-                Payload = e.Kind == "binding_error_added"
+                Payload = e.Kind == SubscriptionEventKinds.BindingErrorAdded
                     ? ScrubBindingError(e.Payload)
                     : (object?)null
             }).ToArray()
