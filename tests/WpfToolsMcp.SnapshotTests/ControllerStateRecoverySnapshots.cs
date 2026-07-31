@@ -640,7 +640,8 @@ public sealed class ControllerStateRecoverySnapshots
                 Assert.That(ambiguity.Context.Candidates!.Select(candidate => candidate.Index), Is.EqualTo(new[] { 0, 1 }));
                 Assert.That(ambiguity.Context.Candidates!.All(candidate => candidate.ProcessInstanceId?.Length > 0), Is.True);
                 Assert.That(ambiguity.Context.Candidates!.All(candidate => candidate.WindowHandle > 0), Is.True);
-                Assert.That(result.StructuredContent!.Value.GetRawText(), Does.Not.Contain(processName));
+                Assert.That(ambiguity.Context.Candidates!.All(candidate => candidate.ProcessName == processName), Is.True);
+                Assert.That(ambiguity.Cause?.Message, Does.Contain(processName));
             });
 
             var staleCandidate = ambiguity!.Context!.Candidates!.Single(candidate => candidate.Pid == first.Id);
