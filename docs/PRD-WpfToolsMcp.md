@@ -511,6 +511,7 @@ discovered totals are lower bounds rather than invented exhaustive counts.
 | `uia_coverage_report` | Report UIA automation coverage gaps | Findings and suggestions plus returned/discovered counts, discovered issue counts, scan completeness, and ordered truncation reasons |
 | `performance_start` | Start lightweight UI-thread latency sampling | Run ID |
 | `performance_stop` | Stop a performance run | Summary |
+| `trace_keyboard_navigation` | Observe a bounded, side-effecting Next/Previous keyboard focus path using physical Tab/Shift+Tab or WPF semantic `MoveFocus` without simulating WPF's private navigation engine | Observed start and post-step UIA/WPF identities, per-step method/timing, available WPF focus-scope/navigation metadata, stable stop reason, optional best-effort focus restoration, and interaction effects |
 | `trace_start` | Start MCP tool tracing | Trace ID |
 | `trace_stop` | Stop tool tracing and write a bounded JSON trace | Trace summary + output path; newest 1,000 events retained with observed/retained/dropped counts; inline events are opt-in and bounded by `maxEvents` |
 

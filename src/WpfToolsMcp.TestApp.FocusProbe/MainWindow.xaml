@@ -7,7 +7,7 @@
         AutomationProperties.AutomationId="FocusProbe_Window"
         Title="WPF Tools MCP FocusProbe TestApp"
         Width="640"
-        Height="620"
+        Height="720"
         ResizeMode="NoResize"
         WindowStartupLocation="Manual"
         Left="120"
@@ -25,6 +25,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0"
@@ -145,5 +146,27 @@
                        Margin="18,0,0,0"
                        VerticalAlignment="Top" />
         </Grid>
+
+        <StackPanel Grid.Row="7"
+                    AutomationProperties.AutomationId="FocusProbe_NavigationGroup"
+                    KeyboardNavigation.TabNavigation="Cycle"
+                    Orientation="Horizontal"
+                    Margin="0,18,0,0">
+            <Button x:Name="NavigationStart"
+                    AutomationProperties.AutomationId="FocusProbe_NavigationStart"
+                    Content="Navigation start"
+                    Margin="0,0,8,0" />
+            <Button AutomationProperties.AutomationId="FocusProbe_NavigationSkipped"
+                    Content="Skipped"
+                    IsTabStop="False"
+                    Margin="0,0,8,0" />
+            <Button AutomationProperties.AutomationId="FocusProbe_NavigationRedirect"
+                    Content="Redirect"
+                    GotKeyboardFocus="NavigationRedirect_GotKeyboardFocus"
+                    Margin="0,0,8,0" />
+            <Button x:Name="NavigationDestination"
+                    AutomationProperties.AutomationId="FocusProbe_NavigationDestination"
+                    Content="Redirect destination" />
+        </StackPanel>
     </Grid>
 </Window>

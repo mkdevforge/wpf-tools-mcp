@@ -70,7 +70,7 @@ agent workflows:
 | Profile | Tools | Purpose |
 |---|---:|---|
 | `core` (default) | 35 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 58 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `diagnostics` | 59 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Every advertised tool includes an MCP `outputSchema` with exactly two `oneOf`
 branches: the tool's typed success schema and the common tool-error schema.
@@ -125,7 +125,8 @@ The `diagnostics` profile additionally exposes:
 - `get_style_chain`, `get_template_info`, and `uia_coverage_report`.
 - `subscribe_binding_errors`, `subscribe_property_changes`,
   `poll_subscription`, and `unsubscribe`.
-- `trace_start`, `trace_stop`, `performance_start`, and `performance_stop`.
+- `trace_keyboard_navigation`, `trace_start`, `trace_stop`, `performance_start`,
+  and `performance_stop`.
 
 Its expanded screenshot schemas also expose capture mode, area, and clipping
 controls. `take_screenshot` additionally exposes the opt-in
@@ -723,6 +724,27 @@ moving the mouse. Both input responses report the method used plus
 the resolved `ModeUsed`. Set `interactionPolicy.allowPhysicalInput=false` to
 guarantee that a physical fallback fails with `interaction_policy_blocked`
 before focus or input is changed.
+
+The diagnostics-only `trace_keyboard_navigation` tool records an observed focus
+path rather than predicting WPF's private navigation order. It can start from a
+locator, a registered element ID, or the current focus, then take `Next` or
+`Previous` steps. `Physical` mode sends Tab or Shift+Tab and honors the session
+interaction policy. `WpfSemantic` mode calls WPF `MoveFocus` through the current
+agent and never falls back to physical input.
+
+Physical mode only passively reconnects for optional WPF metadata. An explicitly
+supplied `wpf_...` start ID may connect or inject the agent because focusing that
+WPF target requires it, matching the existing WPF-target behavior of `send_keys`.
+
+Traces default to 20 steps and clamp at 100. Each step reports its method,
+elapsed time, separate UIA and WPF focus identities when observed, and WPF
+`TabIndex`, tab-stop, focus-scope, and navigation-group metadata when available.
+Stable stop reasons distinguish the step limit, no change, a repeated focus
+cycle, focus leaving the pinned window, window closure, unavailable focus, and
+a WPF-to-interop boundary. `restoreFocus=true` attempts to restore the focus
+captured before any optional start target was focused and reports the result; it
+does not claim to undo event-handler or application state changes caused by the
+traversal.
 
 ### Session Lifecycle
 

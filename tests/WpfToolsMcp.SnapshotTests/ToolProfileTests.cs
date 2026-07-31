@@ -72,6 +72,7 @@ public sealed class ToolProfileTests
         "set_window_viewport",
         "subscribe_binding_errors",
         "subscribe_property_changes",
+        "trace_keyboard_navigation",
         "trace_start",
         "trace_stop",
         "uia_coverage_report",
@@ -1048,6 +1049,23 @@ public sealed class ToolProfileTests
         Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Does.Contain("maxGridDefinitions"));
         Assert.That(GetInputPropertyNames(tools["trace_stop"]), Does.Contain("includeEvents"));
         Assert.That(GetInputPropertyNames(tools["trace_stop"]), Does.Contain("maxEvents"));
+        Assert.That(GetInputPropertyNames(tools["trace_keyboard_navigation"]), Is.EqualTo(
+            new[]
+            {
+                "direction",
+                "elementId",
+                "interactionPolicy",
+                "locator",
+                "maxSteps",
+                "mode",
+                "restoreFocus",
+                "sessionId",
+                "windowHandle"
+            }));
+        Assert.That(GetOutputPropertyNames(tools["trace_keyboard_navigation"]), Does.Contain("start"));
+        Assert.That(GetOutputPropertyNames(tools["trace_keyboard_navigation"]), Does.Contain("steps"));
+        Assert.That(GetOutputPropertyNames(tools["trace_keyboard_navigation"]), Does.Contain("stopReason"));
+        Assert.That(GetOutputPropertyNames(tools["trace_keyboard_navigation"]), Does.Contain("restoration"));
         Assert.That(GetInputPropertyNames(tools["get_validation_errors"]), Is.EqualTo(
             new[]
             {

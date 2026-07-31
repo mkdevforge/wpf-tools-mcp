@@ -125,6 +125,9 @@ public partial class MainWindow : Window
 
     private void ProbeListBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSelectionStatus();
 
+    private void NavigationRedirect_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
+        _ = NavigationDestination.Focus();
+
     private void UpdateActivationStatus()
     {
         ActivationCountStatus.Text = $"Activated: {_activationCount}";

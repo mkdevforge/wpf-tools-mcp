@@ -21,8 +21,8 @@ internal static class AgentServer
     public static async Task RunAsync(string pipeName, CancellationToken cancellationToken)
     {
         // Allow multiple concurrent MCP sessions to connect to the same injected agent.
-        // Each connection is handled on its own task, but all WPF operations are still serialized
-        // via Dispatcher in RunOnUiAsync.
+        // Each connection is handled on its own task, but WPF operations are still serialized
+        // through the dispatcher that owns their target window.
 
         var connectionTasks = new List<Task>();
 
@@ -167,7 +167,7 @@ internal static class AgentServer
         }
     }
 
-    private static async Task<AgentResponse> HandleAsync(
+    internal static async Task<AgentResponse> HandleAsync(
         string ownerId,
         AgentRequest request,
         CancellationToken cancellationToken)
@@ -306,17 +306,40 @@ internal static class AgentServer
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
                 case AgentProtocolCapabilities.FocusElement:
-                    return await RunOnUiAsync(() =>
                     {
                         var typedRequest = request.Params?.Deserialize<FocusWpfElementRequest>(JsonOptions)
                             ?? new FocusWpfElementRequest();
+                        var dispatcher = WpfVisualTreeInspector.ResolveObservationDispatcher(
+                            typedRequest.WindowHandle);
 
-                        var response = WpfVisualTreeInspector.FocusElement(ownerId, typedRequest, cancellationToken);
-                        return new AgentResponse(
-                            request.Id,
-                            Ok: true,
-                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
-                    }, request.Id, cancellationToken);
+                        return await RunOnDispatcherAsync(dispatcher, () =>
+                        {
+                            var response = WpfVisualTreeInspector.FocusElement(ownerId, typedRequest, cancellationToken);
+                            return new AgentResponse(
+                                request.Id,
+                                Ok: true,
+                                Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                        }, request.Id, cancellationToken);
+                    }
+                case AgentProtocolCapabilities.KeyboardNavigationStep:
+                    {
+                        var typedRequest = request.Params?.Deserialize<WpfKeyboardNavigationStepRequest>(JsonOptions)
+                            ?? throw new InvalidOperationException("Missing request params.");
+                        var dispatcher = WpfVisualTreeInspector.ResolveObservationDispatcher(
+                            typedRequest.WindowHandle);
+
+                        return await RunOnDispatcherAsync(dispatcher, () =>
+                        {
+                            var response = WpfVisualTreeInspector.TraceKeyboardNavigationStep(
+                                ownerId,
+                                typedRequest,
+                                cancellationToken);
+                            return new AgentResponse(
+                                request.Id,
+                                Ok: true,
+                                Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                        }, request.Id, cancellationToken);
+                    }
                 case "wpf/invoke":
                     return await RunOnUiAsync(() =>
                     {
