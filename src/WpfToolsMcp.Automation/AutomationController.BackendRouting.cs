@@ -90,7 +90,18 @@ public sealed partial class AutomationController
                 : current.InnerException;
         }
 
-        return exception.GetBaseException().Message ?? exception.Message ?? string.Empty;
+        try
+        {
+            var baseException = exception.GetBaseException();
+            var baseMessage = ReadExceptionMessage(baseException);
+            return !string.IsNullOrWhiteSpace(baseMessage) || ReferenceEquals(baseException, exception)
+                ? baseMessage
+                : ReadExceptionMessage(exception);
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static BackendFallbackInfo CreateWpfToUiaFallback(
@@ -106,17 +117,37 @@ public sealed partial class AutomationController
             Failure = failure
         };
 
-    private static FailureInfo CreateWpfScopeFailure(string detail) =>
-        FailureDiagnostics.BackendScopeUnavailable(detail);
+    private static string ReadExceptionMessage(Exception exception)
+    {
+        try
+        {
+            return exception.Message ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static FailureInfo CreateWpfScopeFailure(string detail, Exception? cause = null) =>
+        FailureDiagnostics.BackendScopeUnavailable(detail, cause);
+
+    internal static FailureInfo CreateAutoWpfFallbackFailure(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return IsAutoWpfScopeMiss(exception)
+            ? CreateWpfScopeFailure(
+                "The requested scope is unavailable through the WPF backend.",
+                exception)
+            : exception is AgentRemoteException
+                ? FailureDiagnostics.BackendOperationFailure(exception)
+                : FailureDiagnostics.Classify(exception, FailureDiagnostics.Stages.Protocol);
+    }
 
     private FailureInfo ClassifyAutoWpfFallbackFailure(Exception exception)
     {
         var connectionHealthy = IsAgentConnected;
-        var failure = IsAutoWpfScopeMiss(exception)
-            ? CreateWpfScopeFailure("The requested scope is unavailable through the WPF backend.")
-            : exception is AgentRemoteException
-                ? FailureDiagnostics.BackendOperationFailure()
-                : FailureDiagnostics.Classify(exception, FailureDiagnostics.Stages.Protocol);
+        var failure = CreateAutoWpfFallbackFailure(exception);
         failure = PreferTargetStateFailure(failure);
         if (ShouldRecordAutoAgentFailure(exception, connectionHealthy))
         {

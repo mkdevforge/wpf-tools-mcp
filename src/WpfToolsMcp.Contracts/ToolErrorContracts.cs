@@ -20,6 +20,21 @@ public sealed record ToolErrorInfo(string Code, string Detail)
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ToolErrorContext? Context { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DiagnosticCauseInfo? Cause { get; init; }
+}
+
+public sealed record DiagnosticCauseInfo(string Type)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Message { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Details { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MessageUnavailableReason { get; init; }
 }
 
 public sealed record ToolErrorContext
@@ -72,4 +87,28 @@ public sealed record ToolErrorCandidate(ToolErrorCandidateKind Kind, int Index)
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ElementId { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProcessName { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StartTimeUtc { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MainWindowTitle { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ElementType { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AutomationId { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; init; }
+
+    [JsonPropertyName("xpath"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? XPath { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Rect? Bounds { get; init; }
 }

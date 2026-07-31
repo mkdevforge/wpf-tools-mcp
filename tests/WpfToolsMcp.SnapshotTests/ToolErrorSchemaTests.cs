@@ -89,13 +89,29 @@ public sealed class ToolErrorSchemaTests
         var schema = JsonSchema.FromText(schemaElement.GetRawText());
         var response = new ToolErrorResponse(new ToolErrorInfo("ambiguous_element", "Ambiguous.")
         {
+            Cause = new DiagnosticCauseInfo(typeof(InvalidOperationException).FullName!)
+            {
+                Message = "Observed failure.",
+                Details = "Remote details."
+            },
             Context = new ToolErrorContext
             {
-                ReturnedCandidates = 0,
+                ReturnedCandidates = 1,
                 DiscoveredCandidates = 1,
                 Truncated = true,
                 TruncatedReason = "maxCandidates",
-                Candidates = []
+                Candidates =
+                [
+                    new ToolErrorCandidate(ToolErrorCandidateKind.Element, 0)
+                    {
+                        ElementId = "uia_abcdefghijklmnop",
+                        ElementType = "Button",
+                        AutomationId = "Save",
+                        Name = "Save document",
+                        XPath = "/Window/Button",
+                        Bounds = new Rect(1, 2, 3, 4)
+                    }
+                ]
             }
         });
         var validContent = JsonSerializer.SerializeToElement(
@@ -109,7 +125,16 @@ public sealed class ToolErrorSchemaTests
         var oversizedEvaluation = schema.Evaluate(
             JsonSerializer.SerializeToElement(oversizedContent),
             new EvaluationOptions { OutputFormat = OutputFormat.List });
+        var oversizedCauseContent = JsonNode.Parse(validContent.GetRawText())!.AsObject();
+        oversizedCauseContent["error"]!["cause"]!["message"] = new string('m', 1_025);
+        var oversizedCauseEvaluation = schema.Evaluate(
+            JsonSerializer.SerializeToElement(oversizedCauseContent),
+            new EvaluationOptions { OutputFormat = OutputFormat.List });
         var errorBranch = schemaElement.GetProperty("oneOf").EnumerateArray().Single(IsErrorBranch);
+        var errorProperties = errorBranch
+            .GetProperty("properties")
+            .GetProperty("error")
+            .GetProperty("properties");
         var reasonSchema = errorBranch
             .GetProperty("properties")
             .GetProperty("error")
@@ -117,6 +142,13 @@ public sealed class ToolErrorSchemaTests
             .GetProperty("context")
             .GetProperty("properties")
             .GetProperty("truncatedReason");
+        var causeSchema = errorProperties.GetProperty("cause");
+        var candidateProperties = errorProperties
+            .GetProperty("context")
+            .GetProperty("properties")
+            .GetProperty("candidates")
+            .GetProperty("items")
+            .GetProperty("properties");
 
         Assert.Multiple(() =>
         {
@@ -125,8 +157,17 @@ public sealed class ToolErrorSchemaTests
                 Is.True,
                 $"{profile} error context rejected camelCase truncation reason: {JsonSerializer.Serialize(validEvaluation)}");
             Assert.That(oversizedEvaluation.IsValid, Is.False);
+            Assert.That(oversizedCauseEvaluation.IsValid, Is.False);
             Assert.That(reasonSchema.GetProperty("maxLength").GetInt32(), Is.EqualTo(64));
             Assert.That(reasonSchema.GetProperty("pattern").GetString(), Is.EqualTo("^[a-z][A-Za-z0-9]*$"));
+            Assert.That(
+                causeSchema.GetProperty("properties").GetProperty("message").GetProperty("maxLength").GetInt32(),
+                Is.EqualTo(1_024));
+            Assert.That(
+                causeSchema.GetProperty("properties").GetProperty("messageUnavailableReason").GetProperty("maxLength").GetInt32(),
+                Is.EqualTo(1_024));
+            Assert.That(candidateProperties.GetProperty("xpath").GetProperty("maxLength").GetInt32(), Is.EqualTo(1_024));
+            Assert.That(candidateProperties.TryGetProperty("bounds", out _), Is.True);
         });
     }
 

@@ -20,6 +20,23 @@ diagnosing running WPF applications.
 - Deep WPF inspection requires an x86 or x64 .NET 8+ WPF target running as the
   same user and at no higher elevation than the MCP server.
 
+### Local Trust Model
+
+WPF Tools MCP is a local developer tool for inspecting an application running
+under the same user account, not a multi-tenant service boundary. Normal WPF
+property getters and UIA provider calls are part of inspection. Diagnostic
+formatting may also call application-defined `ToString()` or `Exception.Message`
+on observed values; those calls are best effort, their failures are caught, and
+their returned text is bounded. The tool therefore does not promise that
+inspection is a zero-execution view of target memory.
+
+The remaining constraints protect correctness and the developer machine rather
+than treating the target application as a hostile remote client. Session,
+process, window, and element identities are validated; scans, queues, payloads,
+artifacts, and wait times stay bounded; cancellation is honored; cleanup removes
+only MCP-owned resources; and responses do not claim WPF or UIA capabilities
+that the current target and agent have not demonstrated.
+
 ## Install
 
 ```powershell
@@ -116,11 +133,12 @@ opt-in screenshot-correlation workflow described below.
 `Validation.Errors` attached state in one WPF visual-tree scope. It does not
 subscribe, retain history, move focus, send input, or invoke
 `IDataErrorInfo`/`INotifyDataErrorInfo` directly. The response reports the
-observed validation rule, active binding metadata, safely formatted scalar
-error content, bounded exception type/message, and whether a validation
-adorner was active, not observed, or unavailable. Source classification marks
-public WPF rule evidence as exact and the internal conversion-rule name match
-as best effort.
+observed validation rule, active binding metadata, bounded best-effort error
+content and exception type/message, and whether a validation adorner was active,
+not observed, or unavailable. Custom `ToString()` and `Exception.Message`
+failures are caught and reported with a stable unavailable reason and failure
+type. Source classification marks public WPF rule evidence as exact and the
+internal conversion-rule name match as best effort.
 
 ### Explained WPF-to-UIA Mapping
 
@@ -176,7 +194,8 @@ is unavailable:
 |---|---|
 | `Code` | Stable lower-snake-case failure identifier. Branch on this rather than parsing `Detail`. |
 | `Stage` | Stable phase: `process_discovery`, `attachment`, `architecture_detection`, `injection`, `pipe_connection`, `protocol`, or `target_shutdown`. |
-| `Detail` | Sanitized, human-readable summary. |
+| `Detail` | Stable, bounded human-readable summary. |
+| `Cause` | Optional bounded diagnostic cause with an exception `Type`, best-effort `Message`, optional adapter `Details`, and a reason when reading `Message` failed. It is evidence, not a stable branching contract. |
 | `Retryable` / `RetryAfterMs` | Optional retry guidance; an omitted value means no claim is made. |
 | `RecoveryActions` | Optional machine-readable next steps such as `retry`, `use_uia`, `reattach`, `restart_target`, `restart_and_reattach`, `match_elevation`, `use_supported_architecture`, `repair_installation`, or `select_process_instance`. |
 
@@ -205,14 +224,21 @@ WPF diagnostics that depend on the audited response shape require the current
 agent capability; a previously injected agent is rejected with restart and
 reattach guidance rather than returning invented counts or missing identity.
 
-Public actionable errors and trace entries use the failure code and sanitized
-detail. `FailureInfo` remains embedded in backend capability and fallback
-metadata. A failed tool call instead uses the common `error` envelope, whose
-optional retry fields mirror the same semantics and whose context can include
-only validated session, window, element, backend, and bounded candidate
-identities, counts, and truncation reason. Neither form exposes raw filesystem
-paths, process command lines, window titles, element names or paths, injector
-output, arbitrary target exception messages, or target-side stack traces.
+Public actionable errors retain a stable failure code and bounded detail.
+`FailureInfo` remains embedded in backend capability and fallback metadata and
+preserves its bounded observed `Cause` when classification had an exception.
+This means a UIA fallback and a later `list_sessions` call retain the useful WPF
+failure evidence rather than only its category. A failed tool call instead uses
+the common `error` envelope, whose optional retry fields mirror the same
+semantics and whose `Cause` follows the same bounds.
+
+Error context can include validated session, window, element, and backend
+identity plus bounded process or element candidates. Candidate evidence may
+include observed process names, window titles, start times, control types,
+element names, AutomationIds, paths, and bounds. Bounded filesystem paths,
+injector output, and target exception messages are also useful local evidence
+and may appear in `Cause` or traces. Adapter `Details` can likewise carry bounded
+remote diagnostic text. Payload limits still apply to every field.
 
 ### Coherent Diagnostic Snapshots
 
@@ -319,8 +345,8 @@ Candidate lists are not presented as winners. In particular, WPF does not
 retain exact static-resource origin, expose the winning style/template setter
 or trigger, identify the inheritance provider or animation clock, or expose a
 pre-coercion value. Dynamic-resource keys use an implementation detail and are
-best effort. Unsafe custom resource keys are omitted rather than invoking
-application-defined formatting.
+best effort. Custom resource keys use bounded best-effort formatting; a failed
+formatter leaves type evidence and an explicit unavailable reason.
 
 Resource candidates cover bounded element, ancestor, application, and
 pre-existing merged-dictionary scopes. The agent reads only already-existing
@@ -348,11 +374,14 @@ failed safely is incomplete but is not mislabeled as budget-truncated.
 
 Effective values keep useful invariant summaries for explicitly supported WPF
 types such as `Thickness`, `CornerRadius`, `GridLength`, colors, font values,
-and common geometry structs. Unknown application objects fall back to their
-type identity without invoking application-defined `ToString()` or virtual
-`Type` name members. Truncated binding details, default values, or animation
-base values carry `BestEffort/maxStringLength` evidence rather than `Exact`
-evidence.
+and common geometry structs. Unknown application objects use bounded
+best-effort `ToString()` and mark that evidence as `BestEffort`; a throwing
+formatter falls back to type identity with explicit unavailable evidence.
+`ComputedPropertyInfo.ValueEvidence` describes effective-value formatting;
+style/template contributor candidates separately report `ValueEvidence` and
+`ConditionsEvidence` so winner uncertainty does not hide formatter failures.
+Truncated binding details, default values, or animation base values carry
+`BestEffort/maxStringLength` evidence rather than `Exact` evidence.
 
 Provenance requires an agent advertising
 `wpf/get_computed_properties:provenance-v1`. When a target still hosts an older
@@ -428,8 +457,10 @@ available throughout the completed subscription's retention window.
 Tool traces retain at most 1,000 newest events. `trace_stop` and its JSON artifact
 report observed, retained, and dropped event counts plus the retention limit and
 whether retention truncated the trace. Inline `maxEvents` truncation is reported
-separately. Tool names are capped at 128 characters, and summaries plus
-privacy-safe error details are capped at 1,000 characters.
+separately. Tool names are capped at 128 characters, and summaries plus error
+strings are capped at 1,000 characters. Trace errors retain the stable code and
+detail when available, followed by a bounded best-effort underlying exception
+type and message; a throwing message getter is reported as unavailable.
 
 ### Typed Wait Conditions
 
@@ -620,8 +651,9 @@ value is not authoritative when its matching observation field is false.
 Each session is bound to one process instance, identified by PID and process
 start time. `attach_to_app` never guesses between multiple live processes with
 the same name. Instead it returns an `ambiguous_process` error with bounded,
-deterministically ordered candidates containing only their index, opaque
-`processInstanceId`, PID, and positive main-window handle. Retry with the opaque
+deterministically ordered candidates containing their index, opaque
+`processInstanceId`, PID, positive main-window handle, and bounded observed
+process name, window title, and start time when available. Retry with the opaque
 `processInstanceId` (preferred) or an explicit PID. Dotted process names are
 preserved; only a terminal `.exe` suffix is removed.
 
@@ -776,10 +808,11 @@ as `maxResults`-truncated merely because it exactly fills the requested limit.
 When a strict non-XPath `resolve_element` locator matches more than one element,
 the tool returns an `ambiguous_element` tool error with structured,
 deterministically ordered candidate data for both WPF and UIA. Up to five
-candidates include only their `index` and reusable `elementId`; the error
-context separately reports backend, window, returned/discovered counts, and
-truncation. Retry with an index or use a candidate handle directly. Compatibility
-text remains the fixed `ambiguous_element` code and sanitized detail. An
+candidates include their `index`, reusable `elementId`, and bounded observed
+type, name, AutomationId, XPath, and bounds when available; the error context
+separately reports backend, window, returned/discovered counts, and truncation.
+Retry with an index or use a candidate handle directly. Compatibility text
+remains the fixed `ambiguous_element` code and stable detail. An
 ambiguous XPath segment instead returns a
 path-specific text error asking for a one-based `[n]` index on that segment.
 
@@ -800,7 +833,7 @@ complete controls live in the `diagnostics` profile when exposing them in
 | `get_element_properties` | Summary preset, at most 25 selected UIA properties; values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, with one shared 20,000-character serialized-value budget. XPaths over 2,000 characters are omitted rather than returned incomplete. | Select the `full` preset and an explicit `maxProperties` in `diagnostics` | `ReturnedProperties`, `SelectedProperties`, `ScannedProperties`, `Truncated`, `TruncatedReason`, `TruncatedReasons` |
 | `get_binding_info` | Return at most 2,000 bindings after inspecting the target's dependency properties | In `diagnostics`, set `includeUnbound`, `maxProperties`, or `valueFormat` | `returnedBindings`, `discoveredBindings`, `scannedProperties`, `scanComplete`, `truncated`, compatibility `truncatedReason`, and ordered `truncatedReasons` |
 | `get_binding_errors` | Depth 6, at most 200 errors while scanning at most 2,000 nodes | Set the error, depth, and scan limits in `diagnostics` | `returnedErrors`, `discoveredErrors`, `scannedNodes`, `scanComplete`, `truncated`, compatibility `truncatedReason`, and ordered `truncatedReasons` |
-| `get_validation_errors` | Current state at depth 6; at most 100 errors while scanning 2,000 nodes; safe scalar content is capped at 500 characters; hidden visual-tree elements are included | In `diagnostics`, set `visibleOnly`, `depth`, `maxErrors`, `maxNodes`, and `maxValueLength`. Hard caps are depth 100, 1,000 returned errors, 200,000 scanned nodes, and 2,000 characters per value | `ReturnedErrors`, `DiscoveredErrors`, `ScannedNodes`, `ScanComplete`, `TruncatedReasons`; response root XPath is capped at 2,000 characters, binding metadata is bounded with a per-error `Truncated` flag, and warnings report returned/discovered counts with a fixed 20-entry cap |
+| `get_validation_errors` | Current state at depth 6; at most 100 errors while scanning 2,000 nodes; best-effort content is capped at 500 characters; hidden visual-tree elements are included | In `diagnostics`, set `visibleOnly`, `depth`, `maxErrors`, `maxNodes`, and `maxValueLength`. Hard caps are depth 100, 1,000 returned errors, 200,000 scanned nodes, and 2,000 characters per value | `ReturnedErrors`, `DiscoveredErrors`, `ScannedNodes`, `ScanComplete`, `TruncatedReasons`; response root XPath is capped at 2,000 characters, binding metadata is bounded with a per-error `Truncated` flag, formatting failures retain type/reason evidence, and warnings report returned/discovered counts with a fixed 20-entry cap |
 | `uia_coverage_report` | At most 200 findings while scanning at most 5,000 WPF nodes | Set the finding, node, visibility, interaction, or root controls in `diagnostics` | `summary.returnedFindings`, `summary.discoveredFindings`, `summary.scannedNodes`, `summary.scanComplete`, `summary.discoveredIssueCounts`, and `summary.truncatedReasons`; `summary.findingsCount` and `summary.issueCounts` remain returned-subset compatibility fields |
 | `get_data_context` | Summary mode, depth 2, at most 50 properties per object and 2,000 characters per string | Use the additional mode and size controls in `diagnostics` | Resolved `element`, `windowHandleUsed`, `truncated`, ordered `truncatedReasons`, and bounded warnings |
 | `get_computed_properties` | Legacy compact values; structured provenance is off | In `diagnostics`, set `includeProvenance=true`; at most 100 properties and 20 provenance scan units/candidates by default, with a hard nested limit of 50 | `returnedProperties`, `discoveredProperties`, `scannedProperties`, `scanComplete`, ordered `truncatedReasons`; nested provenance retains its own bounded evidence metadata |
@@ -900,15 +933,15 @@ nonzero exit.
 The launcher inherits Windows error-mode flags that suppress system fault
 dialogs; the MCP server's original error mode is restored immediately after
 the child starts. The runner captures bounded stdout, stderr, and process
-context internally so nonzero exits can be classified and cleaned up. Public
-MCP errors and traces expose only the sanitized failure contract, never the
-launcher path, captured output, or a target-side stack trace. Cancellation or
-timeout requests termination of the entire launcher process tree and boundedly
-waits for it. Regression coverage independently verifies that both a fixture
-launcher and its recorded child exit after cleanup. A gated GitHub Actions test
-also exercises a real unhandled fixture exit; local runs skip that test before
-starting the process, and the fixture itself requires a second dedicated
-opt-in token before its crash mode can run.
+context so nonzero exits can be classified and cleaned up. Public MCP errors
+retain the stable injection failure while their bounded `Cause`, and a running
+tool trace, can include the launcher path, exit interpretation, and captured
+output. Cancellation or timeout requests termination of the entire launcher
+process tree and boundedly waits for it. Regression coverage independently
+verifies that both a fixture launcher and its recorded child exit after cleanup.
+A gated GitHub Actions test also exercises a real unhandled fixture exit; local
+runs skip that test before starting the process, and the fixture itself requires
+a second dedicated opt-in token before its crash mode can run.
 
 The default injector timeout is 15 seconds. Set
 `WPF_TOOLS_MCP_INJECTOR_TIMEOUT_MS` to a positive millisecond value to change

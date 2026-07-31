@@ -109,7 +109,7 @@ public sealed class AutoBackendRoutingTests
     }
 
     [Test]
-    public void Sanitized_agent_errors_retain_internal_auto_routing_semantics()
+    public void Agent_errors_retain_diagnostics_and_auto_routing_semantics()
     {
         var xpathMiss = new AgentRemoteException(
             "wpf/get_visual_tree",
@@ -129,8 +129,67 @@ public sealed class AutoBackendRoutingTests
             Assert.That(AutomationController.IsWaitableWpfXPathNotFound(xpathMiss), Is.True);
             Assert.That(AutomationController.IsEligibleAutoScreenshotFallback(locatorMiss), Is.True);
             Assert.That(AutomationController.IsEligibleAutoScreenshotFallback(ambiguity), Is.False);
-            Assert.That(xpathMiss.Message, Is.EqualTo("Agent call failed."));
-            Assert.That(locatorMiss.Message, Is.EqualTo("Agent call failed."));
+            Assert.That(xpathMiss.Message, Does.Contain("Grid[2]"));
+            Assert.That(locatorMiss.Message, Does.StartWith("wpf_resolve:not_found"));
+        });
+    }
+
+    [Test]
+    public void Auto_WPF_fallback_metadata_retains_bounded_remote_causes()
+    {
+        var operationFailure = new AgentRemoteException(
+            "wpf/get_visual_tree",
+            new string('m', 1_200),
+            new string('d', 5_000));
+        var scopeFailure = new AgentRemoteException(
+            "wpf/resolve_element",
+            "wpf_resolve:not_found: Locator did not match any elements.",
+            "target-side locator details");
+
+        var operation = AutomationController.CreateAutoWpfFallbackFailure(operationFailure);
+        var scope = AutomationController.CreateAutoWpfFallbackFailure(scopeFailure);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(operation.Code, Is.EqualTo(FailureDiagnostics.Codes.BackendOperationFailed));
+            Assert.That(operation.Cause!.Type, Is.EqualTo(typeof(AgentRemoteException).FullName));
+            Assert.That(operation.Cause.Message, Has.Length.EqualTo(1_024));
+            Assert.That(operation.Cause.Details, Has.Length.EqualTo(4_096));
+            Assert.That(scope.Code, Is.EqualTo(FailureDiagnostics.Codes.BackendScopeUnavailable));
+            Assert.That(scope.Cause!.Message, Does.StartWith("wpf_resolve:not_found:"));
+            Assert.That(scope.Cause.Details, Is.EqualTo("target-side locator details"));
+        });
+    }
+
+    [Test]
+    public void Stored_auto_agent_failure_preserves_cause_in_backend_capability_state()
+    {
+        using var controller = new AutomationController();
+        controller.SetAutoAgentFailure(
+            new IOException("local pipe diagnostic"),
+            FailureDiagnostics.Stages.PipeConnection);
+
+        var capability = controller.GetWpfBackendCapabilityState();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(capability.State, Is.EqualTo("unavailable"));
+            Assert.That(capability.Failure!.Code, Is.EqualTo(FailureDiagnostics.Codes.AgentConnectionFailed));
+            Assert.That(capability.Failure.Cause!.Type, Is.EqualTo(typeof(IOException).FullName));
+            Assert.That(capability.Failure.Cause.Message, Is.EqualTo("local pipe diagnostic"));
+        });
+    }
+
+    [Test]
+    public void Internal_failure_message_tolerates_a_throwing_message_getter()
+    {
+        var hostile = new HostileMessageException();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(AutomationController.GetInternalFailureMessage(hostile), Is.Empty);
+            Assert.That(AutomationController.IsAutoWpfScopeMiss(hostile), Is.False);
+            Assert.That(hostile.GetterCalls, Is.EqualTo(2));
         });
     }
 
@@ -181,7 +240,7 @@ public sealed class AutoBackendRoutingTests
     }
 
     [Test]
-    public void Auto_WPF_ambiguity_uses_a_structured_error_without_remote_diagnostics()
+    public void Auto_WPF_ambiguity_keeps_structured_metadata_and_remote_diagnostics()
     {
         const long windowHandle = 42;
         const string privatePath = @"C:\Users\customer\private-workspace\MainWindow.xaml";
@@ -205,6 +264,23 @@ public sealed class AutoBackendRoutingTests
             Assert.That(exception.Message, Does.Not.Contain(privatePath));
             Assert.That(exception.Message, Does.Not.Contain("CustomerApp.Resolve"));
             Assert.That(exception.Message, Does.Contain("Retry with a stricter locator"));
+            Assert.That(exception.InnerException, Is.SameAs(remoteFailure));
+            Assert.That(exception.InnerException!.Message, Does.Contain(privatePath));
+            Assert.That(((AgentRemoteException)exception.InnerException).RemoteDetails, Does.Contain("CustomerApp.Resolve"));
         });
+    }
+
+    private sealed class HostileMessageException : Exception
+    {
+        public int GetterCalls { get; private set; }
+
+        public override string Message
+        {
+            get
+            {
+                GetterCalls++;
+                throw new InvalidOperationException("application message getter failed");
+            }
+        }
     }
 }

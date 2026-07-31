@@ -213,11 +213,87 @@ public sealed partial class AutomationController
             ArgumentNullException.ThrowIfNull(ex);
 
             var actionable = FindException<ActionableFailureException>(ex);
-            _error = actionable is null
+            var summary = actionable is null
                 ? "tool_failed: The tool operation failed."
-                : BoundTraceText(
-                    $"{actionable.Failure.Code}: {actionable.Failure.Detail}",
-                    MaxTraceTextChars);
+                : $"{actionable.Failure.Code}: {actionable.Failure.Detail}";
+            var storedCause = actionable?.Failure.Cause;
+            var exceptionCause = actionable?.DiagnosticCause is { } diagnosticCause
+                ? FindUnderlyingException(diagnosticCause)
+                : actionable is null
+                    ? FindUnderlyingException(ex)
+                    : null;
+            var causeText = storedCause is not null
+                ? FormatDiagnosticCause(storedCause)
+                : exceptionCause is not null
+                    ? FormatExceptionCause(exceptionCause)
+                    : null;
+
+            _error = BoundTraceText(
+                causeText is null
+                    ? summary
+                    : $"{summary} Cause: {causeText}",
+                MaxTraceTextChars);
+        }
+
+        private static string FormatDiagnosticCause(DiagnosticCauseInfo cause)
+        {
+            if (!string.IsNullOrWhiteSpace(cause.Message))
+            {
+                return $"{cause.Type}: {cause.Message}";
+            }
+
+            return string.IsNullOrWhiteSpace(cause.MessageUnavailableReason)
+                ? cause.Type
+                : $"{cause.Type} (message unavailable: {cause.MessageUnavailableReason})";
+        }
+
+        private static Exception FindUnderlyingException(Exception root)
+        {
+            var current = root;
+            var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+
+            while (visited.Count < MaxTraversedExceptions && visited.Add(current))
+            {
+                var next = current switch
+                {
+                    ActionableFailureException { DiagnosticCause: not null } actionable => actionable.DiagnosticCause,
+                    AggregateException { InnerExceptions.Count: > 0 } aggregate => aggregate.InnerExceptions[0],
+                    { InnerException: not null } => current.InnerException,
+                    _ => null
+                };
+
+                if (next is null)
+                {
+                    break;
+                }
+
+                if (visited.Count >= MaxTraversedExceptions || visited.Contains(next))
+                {
+                    break;
+                }
+
+                current = next;
+            }
+
+            return current;
+        }
+
+        private static string FormatExceptionCause(Exception exception)
+        {
+            var type = exception.GetType();
+            var typeName = type.FullName ?? type.Name;
+
+            try
+            {
+                var message = exception.Message;
+                return string.IsNullOrWhiteSpace(message)
+                    ? typeName
+                    : $"{typeName}: {message.Trim()}";
+            }
+            catch (Exception messageError)
+            {
+                return $"{typeName} (message unavailable: {messageError.GetType().Name})";
+            }
         }
 
         private static TException? FindException<TException>(Exception root)

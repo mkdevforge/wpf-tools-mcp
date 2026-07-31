@@ -41,7 +41,11 @@ public sealed class ToolErrorContractTests
             AssertCommonResult(actionableResult, actionable, "process_not_found");
             Assert.That(actionable.Error.Stage, Is.EqualTo("process_discovery"));
             Assert.That(actionable.Error.Retryable, Is.False);
-            Assert.That(actionableResult.StructuredContent!.Value.GetRawText(), Does.Not.Contain(PrivateSentinel));
+            Assert.That(actionable.Error.Cause!.Type, Is.EqualTo(typeof(FileNotFoundException).FullName));
+            Assert.That(actionable.Error.Cause.Details, Does.Contain(PrivateSentinel));
+            Assert.That(
+                actionableResult.StructuredContent!.Value.GetRawText(),
+                Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
             AssertCommonResult(argumentResult, invalidArguments, "invalid_request");
             Assert.That(invalidArguments.Error.RecoveryActions, Is.EqualTo(new[] { "correct_arguments" }));
             AssertCommonResult(bindingResult, invalidBinding, "invalid_request");
@@ -50,7 +54,7 @@ public sealed class ToolErrorContractTests
     }
 
     [Test]
-    public async Task Unvalidated_request_identities_are_not_echoed_in_failures()
+    public async Task Unvalidated_request_identities_are_not_claimed_as_validated_context()
     {
         var serverExe = McpServerPaths.FindMcpServerExecutable();
         await using var mcp = await McpTestContext.StartAsync(serverExe, "diagnostics");
@@ -66,7 +70,10 @@ public sealed class ToolErrorContractTests
         {
             AssertCommonResult(result, envelope, "stale_session");
             Assert.That(envelope.Error.Context, Is.Null);
-            Assert.That(wire, Does.Not.Contain(PrivateSentinel));
+            Assert.That(envelope.Error.Cause!.Message, Does.Contain(PrivateSentinel));
+            Assert.That(
+                wire,
+                Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
             Assert.That(result.Content.OfType<TextContentBlock>().Single().Text, Does.Not.Contain(PrivateSentinel));
         });
     }
@@ -136,7 +143,7 @@ public sealed class ToolErrorContractTests
     }
 
     [Test]
-    public void Typed_ambiguities_project_only_bounded_reusable_candidate_identity()
+    public void Typed_ambiguities_project_bounded_observed_candidate_context()
     {
         var processFailure = new ProcessSelectionAmbiguityException(new ProcessSelectionAmbiguity(
             Code: "ambiguous_process",
@@ -173,6 +180,7 @@ public sealed class ToolErrorContractTests
                         AutomationId: PrivateSentinel,
                         Name: PrivateSentinel,
                         XPath: PrivateSentinel,
+                        Bounds: new Rect(1, 2, 3, 4),
                         ElementId: "uia_abcdefghijklmnop"))
             ],
             TruncatedReason: "legacyAgent"));
@@ -197,7 +205,10 @@ public sealed class ToolErrorContractTests
                 {
                     ProcessInstanceId = "123:456",
                     Pid = 123,
-                    WindowHandle = 789
+                    WindowHandle = 789,
+                    ProcessName = PrivateSentinel,
+                    StartTimeUtc = "2026-01-01T00:00:00Z",
+                    MainWindowTitle = PrivateSentinel
                 }));
             Assert.That(element.Code, Is.EqualTo("ambiguous_element"));
             Assert.That(element.Context!.ReturnedCandidates, Is.EqualTo(element.Context.Candidates!.Count));
@@ -205,13 +216,18 @@ public sealed class ToolErrorContractTests
             Assert.That(element.Context!.Candidates!.Single(), Is.EqualTo(
                 new ToolErrorCandidate(ToolErrorCandidateKind.Element, 0)
                 {
-                    ElementId = "uia_abcdefghijklmnop"
+                    ElementId = "uia_abcdefghijklmnop",
+                    ElementType = PrivateSentinel,
+                    AutomationId = PrivateSentinel,
+                    Name = PrivateSentinel,
+                    XPath = PrivateSentinel,
+                    Bounds = new Rect(1, 2, 3, 4)
                 }));
             Assert.That(invalidReason.Context!.TruncatedReason, Is.Null);
             Assert.That(oversizedReason.Context!.TruncatedReason, Is.Null);
-            Assert.That(processJson, Does.Not.Contain(PrivateSentinel));
-            Assert.That(elementJson, Does.Not.Contain(PrivateSentinel));
-            Assert.That(invalidReasonJson, Does.Not.Contain(PrivateSentinel));
+            Assert.That(processJson, Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
+            Assert.That(elementJson, Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
+            Assert.That(invalidReasonJson, Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
         });
     }
 
@@ -285,7 +301,7 @@ public sealed class ToolErrorContractTests
     }
 
     [Test]
-    public void Unknown_and_known_code_mappings_never_copy_exception_suffixes()
+    public void Unknown_and_known_code_mappings_keep_stable_details_and_bounded_cause_evidence()
     {
         var unknown = MapException(new InvalidOperationException(PrivateSentinel));
         var stale = MapException(new InvalidOperationException($"wpf_handle_stale: {PrivateSentinel}"));
@@ -295,13 +311,19 @@ public sealed class ToolErrorContractTests
         var performanceOwner = MapException(new InvalidOperationException("performance_run_not_owned"));
         var subscription = MapException(new InvalidOperationException($"subscription_not_found: {PrivateSentinel}"));
         var missingWpfElement = MapException(new InvalidOperationException($"wpf_resolve:not_found: {PrivateSentinel}"));
+        var oversized = MapException(new InvalidOperationException(new string('m', 1_200)));
 
         Assert.Multiple(() =>
         {
             Assert.That(unknown.Code, Is.EqualTo("tool_failed"));
             Assert.That(unknown.Detail, Is.EqualTo("The tool operation failed."));
+            Assert.That(unknown.Cause, Is.EqualTo(new DiagnosticCauseInfo(typeof(InvalidOperationException).FullName!)
+            {
+                Message = PrivateSentinel
+            }));
             Assert.That(stale.Code, Is.EqualTo("stale_element"));
             Assert.That(stale.Detail, Is.EqualTo("The element handle is no longer valid."));
+            Assert.That(stale.Cause!.Message, Is.EqualTo($"wpf_handle_stale: {PrivateSentinel}"));
             Assert.That(capability.Code, Is.EqualTo("agent_capability_unavailable"));
             Assert.That(capability.RecoveryActions, Is.EqualTo(new[] { "restart_and_reattach" }));
             Assert.That(outsideSession.Code, Is.EqualTo("window_outside_session"));
@@ -309,6 +331,7 @@ public sealed class ToolErrorContractTests
             Assert.That(performanceOwner.Code, Is.EqualTo("performance_run_not_owned"));
             Assert.That(subscription.Code, Is.EqualTo("subscription_not_found"));
             Assert.That(missingWpfElement.Code, Is.EqualTo("element_not_found"));
+            Assert.That(oversized.Cause!.Message, Has.Length.EqualTo(1_024));
             Assert.That(
                 JsonSerializer.Serialize(
                     new[]
@@ -320,15 +343,16 @@ public sealed class ToolErrorContractTests
                         occluded,
                         performanceOwner,
                         subscription,
-                        missingWpfElement
+                        missingWpfElement,
+                        oversized
                     },
                     JsonOptions),
-                Does.Not.Contain(PrivateSentinel));
+                Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
         });
     }
 
     [Test]
-    public void Error_mapping_never_invokes_overridden_exception_message_getters()
+    public void Error_mapping_reads_overridden_exception_messages_best_effort()
     {
         var directHostile = new HostileMessageException();
         var aggregateHostile = new HostileMessageException();
@@ -340,8 +364,74 @@ public sealed class ToolErrorContractTests
         {
             Assert.That(direct.Code, Is.EqualTo("tool_failed"));
             Assert.That(aggregate.Code, Is.EqualTo("tool_failed"));
-            Assert.That(directHostile.GetterCalls, Is.Zero);
-            Assert.That(aggregateHostile.GetterCalls, Is.Zero);
+            Assert.That(direct.Cause!.Type, Is.EqualTo(typeof(HostileMessageException).FullName));
+            Assert.That(direct.Cause.Message, Is.Null);
+            Assert.That(direct.Cause.MessageUnavailableReason, Does.StartWith("getter_threw: System.InvalidOperationException:"));
+            Assert.That(directHostile.GetterCalls, Is.EqualTo(1));
+            Assert.That(aggregateHostile.GetterCalls, Is.GreaterThanOrEqualTo(1));
+        });
+    }
+
+    [Test]
+    public void Actionable_and_remote_failures_expose_their_real_bounded_diagnostic_cause()
+    {
+        var actionable = MapException(new ActionableFailureException(
+            new FailureInfo("injection_failed", "injection", "Injection failed."),
+            new InvalidOperationException("injector exit code 7")));
+        var remote = MapException(new AgentRemoteException(
+            "wpf/inspect",
+            new string('m', 1_200),
+            new string('d', 5_000)));
+        var embeddedCause = MapException(new ActionableFailureException(
+            new FailureInfo("backend_operation_failed", "protocol", "Backend failed.")
+            {
+                Cause = new DiagnosticCauseInfo("Customer.BackendException")
+                {
+                    Message = new string('e', 1_200),
+                    Details = "stored backend evidence"
+                }
+            }));
+        var legacyRemote = new AgentRemoteException(
+            "wpf/resolve_element",
+            "wpf_resolve:ambiguous: Locator is ambiguous (found 2).",
+            "remote target stack");
+        var legacyAmbiguity = MapException(
+            AutomationController.CreateLegacyWpfAmbiguityException(legacyRemote, 42));
+        var performance = MapException(new InvalidOperationException(
+            "performance_run_not_owned",
+            new AgentRemoteException(
+                "wpf/performance_stop",
+                "performance_run_not_owned: activeRunId=observed-run",
+                "remote performance details")));
+        var surrogateBoundary = MapException(new InvalidOperationException(
+            new string('s', 1_023) + char.ConvertFromUtf32(0x1F600)));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(actionable.Code, Is.EqualTo("injection_failed"));
+            Assert.That(actionable.Stage, Is.EqualTo("injection"));
+            Assert.That(actionable.Detail, Is.EqualTo("Injection failed."));
+            Assert.That(actionable.Cause, Is.EqualTo(new DiagnosticCauseInfo(typeof(InvalidOperationException).FullName!)
+            {
+                Message = "injector exit code 7"
+            }));
+            Assert.That(remote.Code, Is.EqualTo("tool_failed"));
+            Assert.That(remote.Cause!.Type, Is.EqualTo(typeof(AgentRemoteException).FullName));
+            Assert.That(remote.Cause.Message, Has.Length.EqualTo(1_024));
+            Assert.That(remote.Cause.Details, Has.Length.EqualTo(4_096));
+            Assert.That(embeddedCause.Cause!.Type, Is.EqualTo("Customer.BackendException"));
+            Assert.That(embeddedCause.Cause.Message, Has.Length.EqualTo(1_024));
+            Assert.That(embeddedCause.Cause.Details, Is.EqualTo("stored backend evidence"));
+            Assert.That(legacyAmbiguity.Code, Is.EqualTo("ambiguous_element"));
+            Assert.That(legacyAmbiguity.Cause!.Type, Is.EqualTo(typeof(AgentRemoteException).FullName));
+            Assert.That(legacyAmbiguity.Cause.Message, Does.StartWith("wpf_resolve:ambiguous"));
+            Assert.That(legacyAmbiguity.Cause.Details, Is.EqualTo("remote target stack"));
+            Assert.That(performance.Code, Is.EqualTo("performance_run_not_owned"));
+            Assert.That(performance.Cause!.Type, Is.EqualTo(typeof(AgentRemoteException).FullName));
+            Assert.That(performance.Cause.Message, Does.Contain("activeRunId=observed-run"));
+            Assert.That(performance.Cause.Details, Is.EqualTo("remote performance details"));
+            Assert.That(surrogateBoundary.Cause!.Message, Has.Length.EqualTo(1_023));
+            Assert.That(surrogateBoundary.Cause.Message, Does.EndWith("s"));
         });
     }
 

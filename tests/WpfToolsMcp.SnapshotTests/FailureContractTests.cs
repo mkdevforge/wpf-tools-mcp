@@ -27,7 +27,12 @@ public sealed class FailureContractTests
             "The WPF backend could not be initialized in the target process.")
         {
             Retryable = false,
-            RecoveryActions = ["use_uia"]
+            RecoveryActions = ["use_uia"],
+            Cause = new DiagnosticCauseInfo(typeof(InvalidOperationException).FullName!)
+            {
+                Message = "local diagnostic message",
+                Details = "bounded adapter details"
+            }
         };
         var fallback = new BackendFallbackInfo(
             FromBackend: "wpf",
@@ -51,12 +56,18 @@ public sealed class FailureContractTests
             Assert.That(stateJson["failure"]?["code"]?.GetValue<string>(), Is.EqualTo("injection_failed"));
             Assert.That(stateJson["failure"]?["retryable"]?.GetValue<bool>(), Is.False);
             Assert.That(stateJson["failure"]?.AsObject().ContainsKey("retryAfterMs"), Is.False);
+            Assert.That(
+                stateJson["failure"]?["cause"]?["message"]?.GetValue<string>(),
+                Is.EqualTo("local diagnostic message"));
             Assert.That(fallbackJson["fromBackend"]?.GetValue<string>(), Is.EqualTo("wpf"));
             Assert.That(fallbackJson["toBackend"]?.GetValue<string>(), Is.EqualTo("uia"));
             Assert.That(fallbackJson["attempted"]?.GetValue<bool>(), Is.True);
             Assert.That(fallbackJson["available"]?.GetValue<bool>(), Is.True);
             Assert.That(fallbackJson["used"]?.GetValue<bool>(), Is.True);
             Assert.That(fallbackJson["failure"]?["stage"]?.GetValue<string>(), Is.EqualTo("injection"));
+            Assert.That(
+                fallbackJson["failure"]?["cause"]?["details"]?.GetValue<string>(),
+                Is.EqualTo("bounded adapter details"));
         });
     }
 

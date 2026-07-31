@@ -5573,13 +5573,24 @@ internal static partial class WpfVisualTreeInspector
             : property.OwnerType.FullName ?? property.OwnerType.Name;
         string? value = null;
         string? valueType = null;
+        ProvenanceEvidence? valueEvidence = null;
 
         try
         {
             var rawValue = element.GetValue(property);
-            value = includeProvenance
-                ? FormatSafeProvenanceValue(rawValue, valueFormat, maxStringLength)
-                : FormatValueForBinding(rawValue, valueFormat, maxStringLength);
+            if (includeProvenance)
+            {
+                var formatted = FormatProvenanceValueWithEvidence(
+                    rawValue,
+                    valueFormat,
+                    maxStringLength);
+                value = formatted.Value;
+                valueEvidence = formatted.Evidence;
+            }
+            else
+            {
+                value = FormatValueForBinding(rawValue, valueFormat, maxStringLength);
+            }
 
             if (rawValue is not null && !ReferenceEquals(rawValue, DependencyProperty.UnsetValue))
             {
@@ -5588,8 +5599,16 @@ internal static partial class WpfVisualTreeInspector
                     : rawValue.GetType().FullName ?? rawValue.GetType().Name;
             }
         }
-        catch
+        catch (Exception valueReadFailure)
         {
+            if (includeProvenance)
+            {
+                valueEvidence = new ProvenanceEvidence(
+                    ProvenanceEvidenceKind.Unavailable,
+                    BuildFormattingFailureReason(
+                        "value_read_failed",
+                        valueReadFailure.GetType().FullName ?? valueReadFailure.GetType().Name));
+            }
         }
 
         string? valueSource = null;
@@ -5683,7 +5702,10 @@ internal static partial class WpfVisualTreeInspector
             Mode: mode,
             UpdateSourceTrigger: updateSourceTrigger,
             Converter: converter,
-            Provenance: provenance);
+            Provenance: provenance)
+        {
+            ValueEvidence = valueEvidence
+        };
     }
 
     private static bool TryResolvePropertyByName(

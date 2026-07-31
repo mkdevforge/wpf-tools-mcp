@@ -168,10 +168,10 @@ public sealed class ThrowingValueProbe : Border
 public sealed class ThrowingDisplayValue
 {
     public override string ToString() =>
-        throw new InvalidOperationException("Provenance must not invoke application-defined ToString().");
+        throw new InvalidOperationException("Application value formatting failed.");
 
     public override bool Equals(object? obj) =>
-        throw new InvalidOperationException("Provenance must not invoke application-defined Equals().");
+        throw new InvalidOperationException("Application value comparison failed.");
 
     public override int GetHashCode() => 1;
 }
@@ -179,7 +179,7 @@ public sealed class ThrowingDisplayValue
 public sealed class UnsafeResourceKey
 {
     public override string ToString() =>
-        throw new InvalidOperationException("Provenance must not invoke application-defined ToString().");
+        throw new InvalidOperationException("Application resource-key formatting failed.");
 }
 
 public sealed class DeferredRealizationSentinel

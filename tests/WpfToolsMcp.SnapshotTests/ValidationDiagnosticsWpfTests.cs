@@ -18,7 +18,7 @@ namespace WpfToolsMcp.SnapshotTests;
 public sealed class ValidationDiagnosticsWpfTests
 {
     [Test]
-    public void Safe_current_state_does_not_call_arbitrary_error_content_ToString()
+    public void Current_state_catches_application_error_content_and_message_failures()
     {
         const string targetName = "ValidationSafeContentTarget";
         var ownerId = $"validation-safe-content-{Guid.NewGuid():N}";
@@ -65,12 +65,14 @@ public sealed class ValidationDiagnosticsWpfTests
                 Assert.That(error.Binding.Truncated, Is.False);
                 Assert.That(error.Content.Type, Does.EndWith(nameof(ThrowingStringifier)));
                 Assert.That(error.Content.Value, Is.Null);
-                Assert.That(error.Content.UnavailableReason, Is.EqualTo("value_not_safely_serializable"));
+                Assert.That(
+                    error.Content.UnavailableReason,
+                    Is.EqualTo("value_to_string_failed:System.InvalidOperationException"));
                 Assert.That(error.Exception!.Type, Is.EqualTo(typeof(AggregateException).FullName));
                 Assert.That(error.Exception.Message, Is.Null);
                 Assert.That(
                     error.Exception.MessageUnavailableReason,
-                    Is.EqualTo("message_getter_not_safe"));
+                    Is.EqualTo("message_getter_failed:System.InvalidOperationException"));
                 Assert.That(error.Visual.HasError, Is.True);
                 Assert.That(
                     error.Visual.AdornerState,
@@ -78,8 +80,50 @@ public sealed class ValidationDiagnosticsWpfTests
                 Assert.That(
                     bindingInfo.Bindings.Single(binding => binding.TargetProperty == "Text").ErrorMessage,
                     Does.EndWith(nameof(ThrowingStringifier)));
-                Assert.That(unsafeContent.ToStringCalls, Is.Zero);
-                Assert.That(unsafeException.MessageCalls, Is.Zero);
+                Assert.That(unsafeContent.ToStringCalls, Is.EqualTo(2));
+                Assert.That(unsafeException.MessageCalls, Is.EqualTo(1));
+            });
+        }
+        finally
+        {
+            CloseAndRelease(window, ownerId);
+        }
+    }
+
+    [Test]
+    public void Current_state_reports_application_error_content_and_message_best_effort()
+    {
+        const string targetName = "ValidationCustomContentTarget";
+        var ownerId = $"validation-custom-content-{Guid.NewGuid():N}";
+        var target = CreateBoundTextBox(targetName, nameof(ValidationModel.First));
+        var window = CreateWindow(target);
+        var content = new DisplayValue("Application validation content");
+        var exception = new CustomMessageException("Application validation exception");
+
+        try
+        {
+            ShowAndLayout(window);
+            var expression = RequireTextBinding(target);
+            Validation.MarkInvalid(
+                expression,
+                new ValidationError(new FixtureValidationRule(), expression, content, exception));
+            PumpValidation(window.Dispatcher);
+
+            var response = Inspect(window, ownerId, maxValueLength: 80);
+            var error = response.Errors.Single();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(error.Content.Type, Does.EndWith(nameof(DisplayValue)));
+                Assert.That(error.Content.Value, Is.EqualTo("Application validation content"));
+                Assert.That(error.Content.Truncated, Is.False);
+                Assert.That(error.Content.UnavailableReason, Is.Null);
+                Assert.That(error.Exception!.Type, Is.EqualTo(typeof(CustomMessageException).FullName));
+                Assert.That(error.Exception.Message, Is.EqualTo("Application validation exception"));
+                Assert.That(error.Exception.MessageTruncated, Is.False);
+                Assert.That(error.Exception.MessageUnavailableReason, Is.Null);
+                Assert.That(content.ToStringCalls, Is.EqualTo(1));
+                Assert.That(exception.MessageCalls, Is.EqualTo(1));
             });
         }
         finally
@@ -397,7 +441,32 @@ public sealed class ValidationDiagnosticsWpfTests
         public override string ToString()
         {
             ToStringCalls++;
-            throw new InvalidOperationException("ToString must not be called by validation inspection.");
+            throw new InvalidOperationException("Application validation content formatting failed.");
+        }
+    }
+
+    private sealed class DisplayValue(string text)
+    {
+        public int ToStringCalls { get; private set; }
+
+        public override string ToString()
+        {
+            ToStringCalls++;
+            return text;
+        }
+    }
+
+    private sealed class CustomMessageException(string message) : Exception
+    {
+        public int MessageCalls { get; private set; }
+
+        public override string Message
+        {
+            get
+            {
+                MessageCalls++;
+                return message;
+            }
         }
     }
 
@@ -410,7 +479,7 @@ public sealed class ValidationDiagnosticsWpfTests
             get
             {
                 MessageCalls++;
-                throw new InvalidOperationException("Message must not be called by validation inspection.");
+                throw new InvalidOperationException("Application validation exception message failed.");
             }
         }
     }

@@ -154,7 +154,7 @@ public sealed partial class AutomationController
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"Failed to validate picked element: {ex.Message}");
+                throw new InvalidOperationException("Failed to validate picked element.", ex);
             }
 
             var resolved = ResolveContainingWindowUia(element, rawWalker);
@@ -253,7 +253,7 @@ public sealed partial class AutomationController
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException($"Failed to validate picked element: {ex.Message}");
+            throw new InvalidOperationException("Failed to validate picked element.", ex);
         }
 
         return ResolveContainingWindowUia(element, rawWalker).WindowHandle;

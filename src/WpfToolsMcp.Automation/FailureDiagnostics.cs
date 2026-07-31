@@ -11,6 +11,11 @@ internal static class FailureDiagnostics
     private const int ShortRetryDelayMs = 1_000;
     private const int InjectionRetryDelayMs = 10_000;
     private const int MaximumDetailLength = 512;
+    private const int MaximumCauseTypeLength = 256;
+    private const int MaximumCauseMessageLength = 1_024;
+    private const int MaximumCauseDetailsLength = 4_096;
+    private const int MaximumCauseUnavailableReasonLength = 1_024;
+    private const int MaximumTraversedCauses = 16;
     private const int ErrorAccessDenied = 5;
     private const int HResultAccessDenied = unchecked((int)0x80070005u);
 
@@ -93,6 +98,7 @@ internal static class FailureDiagnostics
             retryable,
             recoveryActions,
             retryAfterMs);
+        failure = WithDiagnosticCause(failure, inner);
         return inner is null
             ? new ActionableFailureException(failure)
             : new ActionableFailureException(failure, inner);
@@ -109,49 +115,45 @@ internal static class FailureDiagnostics
         ArgumentNullException.ThrowIfNull(exception);
         EnsureKnownStage(stage);
 
-        if (exception is ActionableFailureException actionable)
+        if (FindActionableFailure(exception) is { } actionable)
         {
-            return actionable.Failure;
+            return WithDiagnosticCause(actionable.Failure, actionable.DiagnosticCause);
         }
 
-        var cause = exception.GetBaseException();
-        if (cause is ActionableFailureException actionableCause)
-        {
-            return actionableCause.Failure;
-        }
+        var cause = FindUnderlyingCause(exception);
 
         if (IsAccessDenied(cause))
         {
-            return AccessDenied(stage, integrityComparison);
+            return WithDiagnosticCause(AccessDenied(stage, integrityComparison), cause);
         }
 
         if (cause is TimeoutException)
         {
-            return Timeout(stage);
+            return WithDiagnosticCause(Timeout(stage), cause);
         }
 
         if (stage == Stages.ProcessDiscovery)
         {
-            return ProcessDiscovery(cause, integrityComparison);
+            return WithDiagnosticCause(ProcessDiscovery(cause, integrityComparison), cause);
         }
 
         if (stage == Stages.TargetShutdown)
         {
-            return TargetExited();
+            return WithDiagnosticCause(TargetExited(), cause);
         }
 
         if (stage == Stages.Injection && cause is FileNotFoundException or DirectoryNotFoundException)
         {
-            return MissingAssets();
+            return WithDiagnosticCause(MissingAssets(), cause);
         }
 
         if ((stage == Stages.ArchitectureDetection || stage == Stages.Injection) &&
             cause is NotSupportedException)
         {
-            return UnsupportedArchitecture();
+            return WithDiagnosticCause(UnsupportedArchitecture(), cause);
         }
 
-        return stage switch
+        var classified = stage switch
         {
             Stages.Attachment => AttachmentFailure(),
             Stages.ArchitectureDetection => ArchitectureDetectionFailure(),
@@ -160,6 +162,7 @@ internal static class FailureDiagnostics
             Stages.Protocol => ProtocolFailure(cause),
             _ => UnexpectedFailure(stage)
         };
+        return WithDiagnosticCause(classified, cause);
     }
 
     internal static FailureInfo MissingAssets() =>
@@ -300,21 +303,21 @@ internal static class FailureDiagnostics
             recoveryActions: [Recovery.UseUia, Recovery.Retry, Recovery.RestartTarget]);
     }
 
-    internal static FailureInfo BackendOperationFailure() =>
-        Create(
+    internal static FailureInfo BackendOperationFailure(Exception? cause = null) =>
+        WithDiagnosticCause(Create(
             Codes.BackendOperationFailed,
             Stages.Protocol,
             "The WPF backend could not complete the requested operation.",
             retryable: null,
-            recoveryActions: [Recovery.UseUia]);
+            recoveryActions: [Recovery.UseUia]), cause);
 
-    internal static FailureInfo BackendScopeUnavailable(string detail) =>
-        Create(
+    internal static FailureInfo BackendScopeUnavailable(string detail, Exception? cause = null) =>
+        WithDiagnosticCause(Create(
             Codes.BackendScopeUnavailable,
             Stages.Protocol,
             detail,
             retryable: false,
-            recoveryActions: [Recovery.UseUia]);
+            recoveryActions: [Recovery.UseUia]), cause);
 
     internal static FailureInfo TargetExited(bool processReplaced = false) =>
         processReplaced
@@ -445,6 +448,163 @@ internal static class FailureDiagnostics
             RetryAfterMs = retryAfterMs,
             RecoveryActions = copiedRecoveryActions
         };
+    }
+
+    internal static FailureInfo WithDiagnosticCause(FailureInfo failure, Exception? exception)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        if (exception is null || failure.Cause is not null)
+        {
+            return failure;
+        }
+
+        return failure with { Cause = CreateDiagnosticCause(exception) };
+    }
+
+    internal static DiagnosticCauseInfo CreateDiagnosticCause(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        var cause = FindUnderlyingCause(exception);
+        var type = BoundCauseText(
+            cause.GetType().FullName ?? cause.GetType().Name,
+            MaximumCauseTypeLength)!;
+        var message = ReadCauseMessage(cause, out var messageUnavailableReason);
+        var details = cause switch
+        {
+            AgentRemoteException remote => BoundCauseText(remote.RemoteDetails, MaximumCauseDetailsLength),
+            FileNotFoundException { FileName: { } fileName } =>
+                BoundCauseText($"File name: '{fileName}'", MaximumCauseDetailsLength),
+            _ => null
+        };
+
+        return new DiagnosticCauseInfo(type)
+        {
+            Message = message,
+            Details = details,
+            MessageUnavailableReason = messageUnavailableReason
+        };
+    }
+
+    private static Exception FindUnderlyingCause(Exception root)
+    {
+        var current = root;
+        var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+
+        while (visited.Count < MaximumTraversedCauses && visited.Add(current))
+        {
+            var next = current switch
+            {
+                ActionableFailureException { DiagnosticCause: not null } actionable => actionable.DiagnosticCause,
+                AggregateException { InnerExceptions.Count: > 0 } aggregate => aggregate.InnerExceptions[0],
+                { InnerException: not null } => current.InnerException,
+                _ => null
+            };
+            if (next is null)
+            {
+                break;
+            }
+
+            if (visited.Count >= MaximumTraversedCauses || visited.Contains(next))
+            {
+                break;
+            }
+
+            current = next;
+        }
+
+        return current;
+    }
+
+    private static ActionableFailureException? FindActionableFailure(Exception root)
+    {
+        var pending = new Stack<Exception>();
+        var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+        pending.Push(root);
+
+        while (pending.Count > 0 && visited.Count < MaximumTraversedCauses)
+        {
+            var current = pending.Pop();
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+
+            if (current is ActionableFailureException actionable)
+            {
+                return actionable;
+            }
+
+            if (current is AggregateException aggregate)
+            {
+                var enqueueCount = Math.Min(
+                    aggregate.InnerExceptions.Count,
+                    MaximumTraversedCauses - visited.Count - pending.Count);
+                for (var index = enqueueCount - 1; index >= 0; index--)
+                {
+                    pending.Push(aggregate.InnerExceptions[index]);
+                }
+            }
+            else if (current.InnerException is not null &&
+                     visited.Count + pending.Count < MaximumTraversedCauses)
+            {
+                pending.Push(current.InnerException);
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ReadCauseMessage(
+        Exception cause,
+        out string? messageUnavailableReason)
+    {
+        try
+        {
+            messageUnavailableReason = null;
+            return BoundCauseText(cause.Message, MaximumCauseMessageLength);
+        }
+        catch (Exception messageFailure)
+        {
+            var failureType = messageFailure.GetType().FullName ?? messageFailure.GetType().Name;
+            string? failureMessage;
+            try
+            {
+                failureMessage = BoundCauseText(messageFailure.Message, MaximumCauseMessageLength);
+            }
+            catch
+            {
+                failureMessage = null;
+            }
+
+            messageUnavailableReason = BoundCauseText(
+                failureMessage is null
+                    ? $"getter_threw: {failureType}"
+                    : $"getter_threw: {failureType}: {failureMessage}",
+                MaximumCauseUnavailableReasonLength);
+            return null;
+        }
+    }
+
+    private static string? BoundCauseText(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (trimmed.Length <= maxLength)
+        {
+            return trimmed;
+        }
+
+        var length = maxLength;
+        if (length > 0 && char.IsHighSurrogate(trimmed[length - 1]))
+        {
+            length--;
+        }
+
+        return trimmed[..length];
     }
 
     private static bool IsAccessDenied(Exception exception) =>

@@ -46,10 +46,13 @@ public sealed class FailureDiagnosticsTests
     }
 
     [Test]
-    public void Missing_assets_are_classified_without_exposing_the_path()
+    public void Missing_assets_keep_stable_classification_and_bounded_path_cause()
     {
         var failure = FailureDiagnostics.Classify(
             new DirectoryNotFoundException(PrivateSentinel),
+            FailureDiagnostics.Stages.Injection);
+        var missingFile = FailureDiagnostics.Classify(
+            new FileNotFoundException("The requested file was not found.", PrivateSentinel),
             FailureDiagnostics.Stages.Injection);
 
         AssertFailure(
@@ -59,7 +62,14 @@ public sealed class FailureDiagnosticsTests
             retryable: false,
             FailureDiagnostics.Recovery.UseUia,
             FailureDiagnostics.Recovery.RepairInstallation);
-        Assert.That(JsonSerializer.Serialize(failure), Does.Not.Contain(PrivateSentinel));
+        Assert.Multiple(() =>
+        {
+            Assert.That(failure.Cause!.Type, Is.EqualTo(typeof(DirectoryNotFoundException).FullName));
+            Assert.That(failure.Cause.Message, Is.EqualTo(PrivateSentinel));
+            Assert.That(JsonSerializer.Serialize(failure), Does.Contain("token=super-secret"));
+            Assert.That(missingFile.Cause!.Message, Is.EqualTo("The requested file was not found."));
+            Assert.That(missingFile.Cause.Details, Does.Contain(PrivateSentinel));
+        });
     }
 
     [Test]
@@ -105,7 +115,7 @@ public sealed class FailureDiagnosticsTests
     }
 
     [Test]
-    public void Com_access_denied_hresult_uses_measured_integrity_without_exposing_the_message()
+    public void Com_access_denied_hresult_uses_measured_integrity_and_preserves_the_cause()
     {
         var unmeasured = FailureDiagnostics.Classify(
             new COMException(PrivateSentinel, unchecked((int)0x80070005u)),
@@ -121,8 +131,10 @@ public sealed class FailureDiagnosticsTests
             Assert.That(targetHigher.Code, Is.EqualTo(FailureDiagnostics.Codes.ElevationMismatch));
             Assert.That(unmeasured.Stage, Is.EqualTo(FailureDiagnostics.Stages.Attachment));
             Assert.That(targetHigher.Stage, Is.EqualTo(FailureDiagnostics.Stages.Attachment));
-            Assert.That(JsonSerializer.Serialize(unmeasured), Does.Not.Contain(PrivateSentinel));
-            Assert.That(JsonSerializer.Serialize(targetHigher), Does.Not.Contain(PrivateSentinel));
+            Assert.That(unmeasured.Cause!.Message, Is.EqualTo(PrivateSentinel));
+            Assert.That(targetHigher.Cause!.Message, Is.EqualTo(PrivateSentinel));
+            Assert.That(JsonSerializer.Serialize(unmeasured), Does.Contain("token=super-secret"));
+            Assert.That(JsonSerializer.Serialize(targetHigher), Does.Contain("token=super-secret"));
         });
     }
 
@@ -143,11 +155,12 @@ public sealed class FailureDiagnosticsTests
             Assert.That(failure.Retryable, Is.True);
             Assert.That(failure.RetryAfterMs, Is.EqualTo(expectedRetryAfterMs));
             Assert.That(failure.Detail, Does.Not.Contain(PrivateSentinel));
+            Assert.That(failure.Cause!.Message, Is.EqualTo(PrivateSentinel));
         });
     }
 
     [Test]
-    public void Injector_exit_distinguishes_crashes_from_reported_failures_without_output_leaks()
+    public void Injector_exit_classification_distinguishes_crashes_from_reported_failures()
     {
         var crash = FailureDiagnostics.ClassifyInjectorFailure(
             new InjectionRunResult(unchecked((int)0xE0434352u), PrivateSentinel, PrivateSentinel));
@@ -162,6 +175,31 @@ public sealed class FailureDiagnosticsTests
             Assert.That(reportedFailure.Retryable, Is.False);
             Assert.That(JsonSerializer.Serialize(crash), Does.Not.Contain(PrivateSentinel));
             Assert.That(JsonSerializer.Serialize(reportedFailure), Does.Not.Contain(PrivateSentinel));
+        });
+    }
+
+    [Test]
+    public void Injector_failure_exception_retains_bounded_runner_evidence_as_its_diagnostic_cause()
+    {
+        var result = new InjectionRunResult(7, "launcher stdout evidence", "launcher stderr evidence")
+        {
+            ExecutablePath = @"C:\tools\Snoop.InjectorLauncher.x64.exe",
+            ProcessId = 4242,
+            Duration = TimeSpan.FromMilliseconds(321)
+        };
+
+        var exception = AutomationController.CreateInjectorFailureException(result);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception.Failure.Code, Is.EqualTo(FailureDiagnostics.Codes.InjectionFailed));
+            Assert.That(exception.DiagnosticCause, Is.TypeOf<InvalidOperationException>());
+            Assert.That(exception.DiagnosticCause!.Message, Does.Contain("exit code 7"));
+            Assert.That(exception.DiagnosticCause.Message, Does.Contain("launcher stdout evidence"));
+            Assert.That(exception.DiagnosticCause.Message, Does.Contain("launcher stderr evidence"));
+            Assert.That(exception.Failure.Cause!.Message, Does.Contain("exit code 7"));
+            Assert.That(exception.Failure.Cause.Message, Does.Contain("launcher stdout evidence"));
+            Assert.That(exception.Failure.Cause.Message, Does.Contain("launcher stderr evidence"));
         });
     }
 
@@ -225,7 +263,7 @@ public sealed class FailureDiagnosticsTests
     }
 
     [Test]
-    public void Integration_factory_bounds_detail_and_keeps_the_raw_cause_out_of_exception_text()
+    public void Integration_factory_bounds_detail_and_retains_the_diagnostic_cause_separately()
     {
         var oversizedDetail = new string('a', 700);
         var exception = FailureDiagnostics.Exception(
@@ -241,8 +279,65 @@ public sealed class FailureDiagnosticsTests
             Assert.That(exception, Is.InstanceOf<InvalidOperationException>());
             Assert.That(exception.Failure.Detail, Has.Length.EqualTo(512));
             Assert.That(exception.Message, Does.Not.Contain(PrivateSentinel));
-            Assert.That(exception.GetBaseException(), Is.SameAs(exception));
+            Assert.That(exception.InnerException, Is.SameAs(exception.DiagnosticCause));
+            Assert.That(exception.GetBaseException(), Is.SameAs(exception.DiagnosticCause));
+            Assert.That(exception.DiagnosticCause!.Message, Is.EqualTo(PrivateSentinel));
+            Assert.That(exception.Failure.Cause!.Type, Is.EqualTo(typeof(InvalidOperationException).FullName));
+            Assert.That(exception.Failure.Cause.Message, Is.EqualTo(PrivateSentinel));
             Assert.That(exception.Failure.RecoveryActions, Is.EqualTo(new[] { "use_uia" }));
+        });
+    }
+
+    [Test]
+    public void Classification_bounds_cause_evidence_and_tolerates_a_throwing_message_getter()
+    {
+        var oversized = FailureDiagnostics.Classify(
+            new InvalidOperationException(new string('m', 1_200)),
+            FailureDiagnostics.Stages.Protocol);
+        var hostile = new HostileMessageException();
+        var getterFailure = FailureDiagnostics.Classify(
+            hostile,
+            FailureDiagnostics.Stages.Protocol);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(oversized.Cause!.Type, Is.EqualTo(typeof(InvalidOperationException).FullName));
+            Assert.That(oversized.Cause.Message, Has.Length.EqualTo(1_024));
+            Assert.That(oversized.Cause.Details, Is.Null);
+            Assert.That(getterFailure.Cause!.Type, Is.EqualTo(typeof(HostileMessageException).FullName));
+            Assert.That(getterFailure.Cause.Message, Is.Null);
+            Assert.That(
+                getterFailure.Cause.MessageUnavailableReason,
+                Does.StartWith($"getter_threw: {typeof(InvalidOperationException).FullName}:"));
+            Assert.That(hostile.GetterCalls, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public void Classification_preserves_a_nested_actionable_failure_before_examining_its_cause()
+    {
+        var actionable = FailureDiagnostics.Exception(
+            FailureDiagnostics.Codes.InjectionFailed,
+            FailureDiagnostics.Stages.Injection,
+            "The WPF backend could not be initialized in the target process.",
+            retryable: false,
+            recoveryActions: [FailureDiagnostics.Recovery.UseUia],
+            inner: new InvalidOperationException("injector diagnostic"));
+        var wrapped = new AggregateException(
+            new IOException("parallel wrapper"),
+            new InvalidOperationException("outer wrapper", actionable));
+
+        var classified = FailureDiagnostics.Classify(
+            wrapped,
+            FailureDiagnostics.Stages.Protocol);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(classified.Code, Is.EqualTo(FailureDiagnostics.Codes.InjectionFailed));
+            Assert.That(classified.Stage, Is.EqualTo(FailureDiagnostics.Stages.Injection));
+            Assert.That(classified.RecoveryActions, Is.EqualTo(new[] { FailureDiagnostics.Recovery.UseUia }));
+            Assert.That(classified.Cause!.Type, Is.EqualTo(typeof(InvalidOperationException).FullName));
+            Assert.That(classified.Cause.Message, Is.EqualTo("injector diagnostic"));
         });
     }
 
@@ -289,4 +384,18 @@ public sealed class FailureDiagnosticsTests
             character == '_' ||
             char.IsAsciiLetterLower(character) ||
             char.IsAsciiDigit(character));
+
+    private sealed class HostileMessageException : Exception
+    {
+        public int GetterCalls { get; private set; }
+
+        public override string Message
+        {
+            get
+            {
+                GetterCalls++;
+                throw new InvalidOperationException("application message getter failed");
+            }
+        }
+    }
 }

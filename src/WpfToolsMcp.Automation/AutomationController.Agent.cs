@@ -373,8 +373,7 @@ public sealed partial class AutomationController
 
             if (injectResult.ExitCode != 0)
             {
-                throw new ActionableFailureException(
-                    FailureDiagnostics.ClassifyInjectorFailure(injectResult, integrityComparison));
+                throw CreateInjectorFailureException(injectResult, integrityComparison);
             }
 
             stage = FailureDiagnostics.Stages.PipeConnection;
@@ -534,7 +533,7 @@ public sealed partial class AutomationController
                 throw;
             }
 
-            throw new InvalidOperationException(publicCode);
+            throw new InvalidOperationException(publicCode, ex);
         }
     }
 
@@ -1399,9 +1398,7 @@ public sealed partial class AutomationController
                 throw;
             }
 
-            var failure = ex is AgentRemoteException
-                ? FailureDiagnostics.BackendOperationFailure()
-                : FailureDiagnostics.Classify(ex, FailureDiagnostics.Stages.Protocol);
+            var failure = CreateAutoWpfFallbackFailure(ex);
             failure = PreferTargetStateFailure(failure);
             if (autoInject && ShouldRecordAutoAgentFailure(ex, client.IsConnected))
             {
@@ -1462,9 +1459,7 @@ public sealed partial class AutomationController
                 throw;
             }
 
-            var failure = ex is AgentRemoteException
-                ? FailureDiagnostics.BackendOperationFailure()
-                : FailureDiagnostics.Classify(ex, FailureDiagnostics.Stages.Protocol);
+            var failure = CreateAutoWpfFallbackFailure(ex);
             failure = PreferTargetStateFailure(failure);
             if (autoInject && ShouldRecordAutoAgentFailure(ex, client.IsConnected))
             {
@@ -1958,13 +1953,11 @@ public sealed partial class AutomationController
         }
     }
 
-    private void SetAutoAgentFailure(
+    internal void SetAutoAgentFailure(
         Exception ex,
         string stage = FailureDiagnostics.Stages.Injection)
     {
-        var failure = ex is ActionableFailureException actionable
-            ? actionable.Failure
-            : FailureDiagnostics.Classify(ex, stage);
+        var failure = FailureDiagnostics.Classify(ex, stage);
         failure = PreferTargetStateFailure(failure);
         lock (_agentSync)
         {
@@ -1989,7 +1982,7 @@ public sealed partial class AutomationController
         var identity = _processIdentity;
         return identity is not null &&
                ProcessTargetResolver.Observe(identity.Value) == ProcessInstanceState.ExitedOrReused
-            ? FailureDiagnostics.TargetExited()
+            ? FailureDiagnostics.TargetExited() with { Cause = fallback.Cause }
             : fallback;
     }
 
@@ -2042,6 +2035,17 @@ public sealed partial class AutomationController
         }
 
         return null;
+    }
+
+    internal static ActionableFailureException CreateInjectorFailureException(
+        InjectionRunResult result,
+        ProcessIntegrityLevelComparison? integrityComparison = null)
+    {
+        var diagnosticCause = new InvalidOperationException(BuildInjectorFailureDetails(result));
+        var failure = FailureDiagnostics.WithDiagnosticCause(
+            FailureDiagnostics.ClassifyInjectorFailure(result, integrityComparison),
+            diagnosticCause);
+        return new ActionableFailureException(failure, diagnosticCause);
     }
 
     internal static string BuildInjectorFailureDetails(InjectionRunResult result)

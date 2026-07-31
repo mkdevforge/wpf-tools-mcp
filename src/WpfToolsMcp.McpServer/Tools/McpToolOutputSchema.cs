@@ -122,9 +122,25 @@ internal static class McpToolOutputSchema
                             ["uniqueItems"] = true,
                             ["items"] = TokenSchema()
                         },
-                        ["context"] = CreateContextSchema()
+                        ["context"] = CreateContextSchema(),
+                        ["cause"] = CreateCauseSchema()
                     }
                 }
+            }
+        };
+
+    private static JsonObject CreateCauseSchema() =>
+        new()
+        {
+            ["type"] = "object",
+            ["required"] = new JsonArray("type"),
+            ["additionalProperties"] = false,
+            ["properties"] = new JsonObject
+            {
+                ["type"] = BoundedStringSchema(256),
+                ["message"] = BoundedStringSchema(1024),
+                ["details"] = BoundedStringSchema(4096),
+                ["messageUnavailableReason"] = BoundedStringSchema(1024)
             }
         };
 
@@ -183,7 +199,30 @@ internal static class McpToolOutputSchema
                 },
                 ["pid"] = PositiveIntegerSchema(),
                 ["windowHandle"] = PositiveIntegerSchema(),
-                ["elementId"] = ElementIdSchema()
+                ["elementId"] = ElementIdSchema(),
+                ["processName"] = BoundedStringSchema(512),
+                ["startTimeUtc"] = BoundedStringSchema(512),
+                ["mainWindowTitle"] = BoundedStringSchema(512),
+                ["elementType"] = BoundedStringSchema(512),
+                ["automationId"] = BoundedStringSchema(512),
+                ["name"] = BoundedStringSchema(512),
+                ["xpath"] = BoundedStringSchema(1024),
+                ["bounds"] = CreateRectSchema()
+            }
+        };
+
+    private static JsonObject CreateRectSchema() =>
+        new()
+        {
+            ["type"] = "object",
+            ["required"] = new JsonArray("x", "y", "width", "height"),
+            ["additionalProperties"] = false,
+            ["properties"] = new JsonObject
+            {
+                ["x"] = NumberSchema(),
+                ["y"] = NumberSchema(),
+                ["width"] = NumberSchema(),
+                ["height"] = NumberSchema()
             }
         };
 
@@ -212,6 +251,17 @@ internal static class McpToolOutputSchema
             ["maxLength"] = 128,
             ["pattern"] = "^(uia|wpf)_[A-Za-z0-9_-]{16}$"
         };
+
+    private static JsonObject BoundedStringSchema(int maxLength) =>
+        new()
+        {
+            ["type"] = "string",
+            ["minLength"] = 1,
+            ["maxLength"] = maxLength
+        };
+
+    private static JsonObject NumberSchema() =>
+        new() { ["type"] = "number" };
 
     private static JsonObject PositiveIntegerSchema() =>
         new()

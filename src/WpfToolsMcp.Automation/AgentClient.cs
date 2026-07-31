@@ -5,31 +5,26 @@ using WpfToolsMcp.AgentProtocol;
 
 namespace WpfToolsMcp.Automation;
 
-internal sealed class AgentRemoteException : InvalidOperationException
+public sealed class AgentRemoteException : InvalidOperationException
 {
-    private const string SafeMessage = "Agent call failed.";
+    private const string DefaultMessage = "Agent call failed.";
 
     internal AgentRemoteException(string method, string? remoteMessage, string? remoteDetails)
-        : base(GetPublicMessage(method, remoteMessage))
+        : base(GetMessage(remoteMessage))
     {
         Method = method;
         RemoteMessage = remoteMessage;
         RemoteDetails = remoteDetails;
     }
 
-    internal string Method { get; }
+    public string Method { get; }
 
-    internal string? RemoteMessage { get; }
+    public string? RemoteMessage { get; }
 
-    internal string? RemoteDetails { get; }
+    public string? RemoteDetails { get; }
 
-    private static string GetPublicMessage(string method, string? remoteMessage)
-    {
-        var unknownMethodMessage = $"Unknown method '{method}'.";
-        return string.Equals(remoteMessage, unknownMethodMessage, StringComparison.Ordinal)
-            ? unknownMethodMessage
-            : SafeMessage;
-    }
+    private static string GetMessage(string? remoteMessage) =>
+        string.IsNullOrWhiteSpace(remoteMessage) ? DefaultMessage : remoteMessage;
 }
 
 internal sealed class AgentClient : IAsyncDisposable

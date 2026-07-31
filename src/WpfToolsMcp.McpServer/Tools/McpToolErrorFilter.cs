@@ -16,6 +16,11 @@ internal static partial class McpToolErrorFilter
     private const int MaxCodeLength = 64;
     private const int MaxDetailLength = 512;
     private const int MaxIdentityLength = 128;
+    private const int MaxCauseTypeLength = 256;
+    private const int MaxCauseMessageLength = 1024;
+    private const int MaxCauseDetailsLength = 4096;
+    private const int MaxCandidateTextLength = 512;
+    private const int MaxCandidateXPathLength = 1024;
     private const int MaxRecoveryActions = 8;
     private const int MaxTruncatedReasonLength = 64;
 
@@ -61,55 +66,71 @@ internal static partial class McpToolErrorFilter
 
     private static ToolErrorInfo MapException(Exception exception, ToolErrorContext? requestContext)
     {
-        if (FindException<ActionableFailureException>(exception) is { } actionable)
+        var exceptions = EnumerateExceptions(exception).ToArray();
+        var messages = new Dictionary<Exception, ExceptionMessageRead>(ReferenceEqualityComparer.Instance);
+
+        if (exceptions.OfType<ActionableFailureException>().FirstOrDefault() is { } actionable)
         {
-            return FromActionableFailure(actionable.Failure, requestContext);
+            var mapped = FromActionableFailure(actionable.Failure, requestContext);
+            return mapped.Cause is not null
+                ? mapped
+                : WithCause(mapped, SelectDeepestCause(actionable), messages);
         }
 
-        if (FindException<ProcessSelectionAmbiguityException>(exception) is { } processAmbiguity)
+        if (exceptions.OfType<ProcessSelectionAmbiguityException>().FirstOrDefault() is { } processAmbiguity)
         {
-            return FromProcessAmbiguity(processAmbiguity.Ambiguity, requestContext);
+            return WithCause(
+                FromProcessAmbiguity(processAmbiguity.Ambiguity, requestContext),
+                SelectDeepestCause(processAmbiguity),
+                messages);
         }
 
-        if (FindException<ElementResolutionAmbiguityException>(exception) is { } elementAmbiguity)
+        if (exceptions.OfType<ElementResolutionAmbiguityException>().FirstOrDefault() is { } elementAmbiguity)
         {
-            return FromElementAmbiguity(elementAmbiguity.Ambiguity, requestContext);
+            return WithCause(
+                FromElementAmbiguity(elementAmbiguity.Ambiguity, requestContext),
+                SelectDeepestCause(elementAmbiguity),
+                messages);
         }
 
-        foreach (var candidate in EnumerateExceptions(exception))
+        foreach (var candidate in exceptions)
         {
-            if (TryGetSafeMessage(candidate, out var message) &&
+            if (TryGetExceptionMessage(candidate, messages, out var message) &&
                 TryMapKnownCode(message, requestContext, out var mapped))
             {
-                return mapped;
+                return WithCause(mapped, SelectDeepestCause(candidate), messages);
             }
         }
 
-        if (FindException<TimeoutException>(exception) is not null ||
-            FindException<OperationCanceledException>(exception) is not null)
+        if (exceptions.FirstOrDefault(candidate =>
+                candidate is TimeoutException or OperationCanceledException) is { } timeout)
         {
-            return CreateKnownError(
-                "timeout",
-                "The tool operation timed out.",
-                retryable: true,
-                ["retry"],
-                requestContext);
+            return WithCause(
+                CreateKnownError(
+                    "timeout",
+                    "The tool operation timed out.",
+                    retryable: true,
+                    ["retry"],
+                    requestContext),
+                timeout,
+                messages);
         }
 
-        if (FindException<ArgumentException>(exception) is not null ||
-            FindException<JsonException>(exception) is not null ||
-            FindException<NotSupportedException>(exception) is not null ||
-            FindException<McpException>(exception) is not null)
+        if (exceptions.FirstOrDefault(candidate =>
+                candidate is ArgumentException or JsonException or NotSupportedException or McpException) is { } invalidRequest)
         {
-            return CreateKnownError(
-                "invalid_request",
-                "The tool arguments are invalid.",
-                retryable: false,
-                ["correct_arguments"],
-                requestContext);
+            return WithCause(
+                CreateKnownError(
+                    "invalid_request",
+                    "The tool arguments are invalid.",
+                    retryable: false,
+                    ["correct_arguments"],
+                    requestContext),
+                invalidRequest,
+                messages);
         }
 
-        return CreateUnknownError(requestContext);
+        return WithCause(CreateUnknownError(requestContext), SelectDeepestCause(exception), messages);
     }
 
     private static ToolErrorInfo FromActionableFailure(
@@ -124,7 +145,8 @@ internal static partial class McpToolErrorFilter
             Retryable = failure.Retryable,
             RetryAfterMs = failure.RetryAfterMs is > 0 ? failure.RetryAfterMs : null,
             RecoveryActions = actions,
-            Context = requestContext
+            Context = requestContext,
+            Cause = NormalizeCause(failure.Cause)
         };
     }
 
@@ -138,7 +160,10 @@ internal static partial class McpToolErrorFilter
             {
                 ProcessInstanceId = NormalizeProcessInstanceId(candidate.ProcessInstanceId),
                 Pid = candidate.Pid > 0 ? candidate.Pid : null,
-                WindowHandle = candidate.MainWindowHandle > 0 ? candidate.MainWindowHandle : null
+                WindowHandle = candidate.MainWindowHandle > 0 ? candidate.MainWindowHandle : null,
+                ProcessName = BoundOptional(candidate.ProcessName, MaxCandidateTextLength),
+                StartTimeUtc = BoundOptional(candidate.StartTimeUtc, MaxCandidateTextLength),
+                MainWindowTitle = BoundOptional(candidate.MainWindowTitle, MaxCandidateTextLength)
             })
             .ToArray();
         var filterCapped = ambiguity.Candidates.Count > candidates.Length;
@@ -168,7 +193,12 @@ internal static partial class McpToolErrorFilter
             .Take(MaxCandidates)
             .Select(candidate => new ToolErrorCandidate(ToolErrorCandidateKind.Element, candidate.Index)
             {
-                ElementId = NormalizeElementId(candidate.Element.ElementId)
+                ElementId = NormalizeElementId(candidate.Element.ElementId),
+                ElementType = BoundOptional(candidate.Element.Type, MaxCandidateTextLength),
+                AutomationId = BoundOptional(candidate.Element.AutomationId, MaxCandidateTextLength),
+                Name = BoundOptional(candidate.Element.Name, MaxCandidateTextLength),
+                XPath = BoundOptional(candidate.Element.XPath, MaxCandidateXPathLength),
+                Bounds = NormalizeBounds(candidate.Element.Bounds)
             })
             .ToArray();
         var filterCapped = ambiguity.Candidates.Count > candidates.Length;
@@ -444,7 +474,171 @@ internal static partial class McpToolErrorFilter
         }
 
         var trimmed = value.Trim();
-        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
+        return TruncateUtf16(trimmed, maxLength);
+    }
+
+    private static string? BoundOptional(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        return TruncateUtf16(trimmed, maxLength);
+    }
+
+    private static string TruncateUtf16(string value, int maxLength)
+    {
+        if (value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        var length = maxLength;
+        if (length > 0 &&
+            char.IsHighSurrogate(value[length - 1]) &&
+            char.IsLowSurrogate(value[length]))
+        {
+            length--;
+        }
+
+        return value[..length];
+    }
+
+    private static ToolErrorInfo WithCause(
+        ToolErrorInfo error,
+        Exception exception,
+        IDictionary<Exception, ExceptionMessageRead> messages) =>
+        error with { Cause = CreateCause(exception, messages) };
+
+    private static DiagnosticCauseInfo CreateCause(
+        Exception exception,
+        IDictionary<Exception, ExceptionMessageRead> messages)
+    {
+        var hasMessage = TryGetExceptionMessage(exception, messages, out var message);
+        var messageRead = messages[exception];
+        var type = Bound(
+            exception.GetType().FullName ?? exception.GetType().Name,
+            MaxCauseTypeLength,
+            nameof(Exception));
+        var details = exception switch
+        {
+            AgentRemoteException remote => BoundOptional(remote.RemoteDetails, MaxCauseDetailsLength),
+            FileNotFoundException { FileName: { } fileName } =>
+                BoundOptional($"File name: '{fileName}'", MaxCauseDetailsLength),
+            _ => null
+        };
+        return new DiagnosticCauseInfo(type)
+        {
+            Message = hasMessage ? message : null,
+            Details = details,
+            MessageUnavailableReason = messageRead.UnavailableReason
+        };
+    }
+
+    private static DiagnosticCauseInfo? NormalizeCause(DiagnosticCauseInfo? cause)
+    {
+        var type = BoundOptional(cause?.Type, MaxCauseTypeLength);
+        return type is null
+            ? null
+            : new DiagnosticCauseInfo(type)
+            {
+                Message = BoundOptional(cause!.Message, MaxCauseMessageLength),
+                Details = BoundOptional(cause.Details, MaxCauseDetailsLength),
+                MessageUnavailableReason = BoundOptional(
+                    cause.MessageUnavailableReason,
+                    MaxCauseMessageLength)
+            };
+    }
+
+    private static bool TryGetExceptionMessage(
+        Exception exception,
+        IDictionary<Exception, ExceptionMessageRead> messages,
+        out string message)
+    {
+        if (!messages.TryGetValue(exception, out var read))
+        {
+            try
+            {
+                read = new ExceptionMessageRead(
+                    BoundOptional(exception.Message, MaxCauseMessageLength),
+                    null);
+            }
+            catch (Exception messageException)
+            {
+                read = new ExceptionMessageRead(
+                    null,
+                    FormatMessageUnavailableReason(messageException));
+            }
+
+            messages.Add(exception, read);
+        }
+
+        message = read.Message ?? string.Empty;
+        return read.Message is not null;
+    }
+
+    private static string FormatMessageUnavailableReason(Exception exception)
+    {
+        var type = Bound(
+            exception.GetType().FullName ?? exception.GetType().Name,
+            MaxCauseTypeLength,
+            nameof(Exception));
+        string? message;
+        try
+        {
+            message = BoundOptional(exception.Message, MaxCauseMessageLength);
+        }
+        catch
+        {
+            message = null;
+        }
+
+        return Bound(
+            message is null ? $"getter_threw: {type}" : $"getter_threw: {type}: {message}",
+            MaxCauseMessageLength,
+            "getter_threw");
+    }
+
+    private static Exception SelectDeepestCause(Exception root)
+    {
+        var traversed = EnumerateExceptions(root).ToArray();
+        if (traversed.OfType<AgentRemoteException>().FirstOrDefault() is { } remote)
+        {
+            return remote;
+        }
+
+        var current = root;
+        var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance) { current };
+        for (var depth = 1; depth < MaxTraversedExceptions; depth++)
+        {
+            var next = current is AggregateException aggregate
+                ? aggregate.InnerExceptions.FirstOrDefault()
+                : current.InnerException;
+            if (next is null || !visited.Add(next))
+            {
+                break;
+            }
+
+            current = next;
+        }
+
+        return current;
+    }
+
+    private static Rect? NormalizeBounds(Rect? bounds)
+    {
+        if (bounds is not { } value ||
+            !double.IsFinite(value.X) ||
+            !double.IsFinite(value.Y) ||
+            !double.IsFinite(value.Width) ||
+            !double.IsFinite(value.Height))
+        {
+            return null;
+        }
+
+        return value;
     }
 
     private static string? NormalizeSessionId(string? value) =>
@@ -490,19 +684,6 @@ internal static partial class McpToolErrorFilter
         return NormalizeToken(code);
     }
 
-    private static bool TryGetSafeMessage(Exception exception, out string message)
-    {
-        message = string.Empty;
-        var getter = exception.GetType().GetProperty(nameof(Exception.Message))?.GetMethod;
-        if (getter?.DeclaringType != typeof(Exception))
-        {
-            return false;
-        }
-
-        message = exception.Message;
-        return true;
-    }
-
     private static OperationCanceledException CreateRequestCancellation(
         Exception exception,
         CancellationToken cancellationToken) =>
@@ -510,10 +691,6 @@ internal static partial class McpToolErrorFilter
             "The MCP tool request was canceled.",
             exception,
             cancellationToken);
-
-    private static TException? FindException<TException>(Exception exception)
-        where TException : Exception =>
-        EnumerateExceptions(exception).OfType<TException>().FirstOrDefault();
 
     private static IEnumerable<Exception> EnumerateExceptions(Exception root)
     {
@@ -546,6 +723,8 @@ internal static partial class McpToolErrorFilter
             }
         }
     }
+
+    private readonly record struct ExceptionMessageRead(string? Message, string? UnavailableReason);
 
     [GeneratedRegex("^[a-z][a-z0-9_]{0,63}$", RegexOptions.CultureInvariant)]
     private static partial Regex TokenRegex();

@@ -174,7 +174,7 @@ public sealed class AgentClientLifecycleTests
     }
 
     [Test]
-    public async Task Remote_error_hides_diagnostics_but_retains_them_for_internal_handling()
+    public async Task Remote_error_preserves_diagnostics_for_local_callers()
     {
         const string method = "wpf/private_operation";
         const string remoteMessage = @"Backend failed at C:\work\secret-project with api-key=message-secret.";
@@ -212,10 +212,10 @@ public sealed class AgentClientLifecycleTests
 
             Assert.Multiple(() =>
             {
-                Assert.That(exception!.Message, Is.EqualTo("Agent call failed."));
-                Assert.That(exception.Message, Does.Not.Contain("message-secret"));
+                Assert.That(exception!.Message, Is.EqualTo(remoteMessage));
+                Assert.That(exception.Message, Does.Contain("message-secret"));
                 Assert.That(exception.Message, Does.Not.Contain("details-secret"));
-                Assert.That(exception.Message, Does.Not.Contain(@"C:\work\secret-project"));
+                Assert.That(exception.Message, Does.Contain(@"C:\work\secret-project"));
                 Assert.That(exception.Method, Is.EqualTo(method));
                 Assert.That(exception.RemoteMessage, Is.EqualTo(remoteMessage));
                 Assert.That(exception.RemoteDetails, Is.EqualTo(remoteDetails));
@@ -235,7 +235,7 @@ public sealed class AgentClientLifecycleTests
     [TestCase("performance_run_not_owned", "performance_run_not_owned")]
     [TestCase("performance_run_id_mismatch: activeRunId=private-run", "performance_run_id_mismatch")]
     [TestCase("performance_stop_failed", "performance_stop_failed")]
-    public async Task Performance_agent_errors_expose_only_allowlisted_stable_codes(
+    public async Task Performance_agent_errors_keep_stable_codes_and_preserve_remote_causes(
         string remoteMessage,
         string expectedCode)
     {
@@ -248,12 +248,14 @@ public sealed class AgentClientLifecycleTests
             Assert.That(exception.Message, Is.EqualTo(expectedCode));
             Assert.That(exception.Message, Does.Not.Contain("private-run"));
             Assert.That(exception.Message, Does.Not.Contain("details-secret"));
-            Assert.That(exception.InnerException, Is.Null);
+            Assert.That(exception.InnerException, Is.TypeOf<AgentRemoteException>());
+            Assert.That(exception.InnerException!.Message, Is.EqualTo(remoteMessage));
+            Assert.That(((AgentRemoteException)exception.InnerException).RemoteDetails, Is.EqualTo(remoteDetails));
         });
     }
 
     [Test]
-    public async Task Performance_agent_errors_keep_unrecognized_remote_content_private()
+    public async Task Performance_agent_errors_preserve_unrecognized_remote_content()
     {
         const string remoteMessage = @"performance_private_failure: C:\work\secret-project api-key=message-secret";
         const string remoteDetails = @"stderr: token=details-secret; source=C:\Users\operator\private.log";
@@ -262,10 +264,10 @@ public sealed class AgentClientLifecycleTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(exception.Message, Is.EqualTo("Agent call failed."));
-            Assert.That(exception.Message, Does.Not.Contain("message-secret"));
+            Assert.That(exception.Message, Is.EqualTo(remoteMessage));
+            Assert.That(exception.Message, Does.Contain("message-secret"));
             Assert.That(exception.Message, Does.Not.Contain("details-secret"));
-            Assert.That(exception.Message, Does.Not.Contain(@"C:\work\secret-project"));
+            Assert.That(exception.Message, Does.Contain(@"C:\work\secret-project"));
         });
     }
 
@@ -774,7 +776,7 @@ public sealed class AgentClientLifecycleTests
     }
 
     [Test]
-    public async Task Legacy_agent_ambiguity_returns_a_structured_safe_error()
+    public async Task Legacy_agent_ambiguity_keeps_structured_metadata_and_remote_diagnostics()
     {
         var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
         await using var server = new NamedPipeServerStream(
@@ -849,6 +851,9 @@ public sealed class AgentClientLifecycleTests
                 Assert.That(exception.Ambiguity.TruncatedReason, Is.EqualTo("legacyAgent"));
                 Assert.That(exception.Message, Does.Not.Contain("customer"));
                 Assert.That(exception.Message, Does.Not.Contain("private target stack"));
+                Assert.That(exception.InnerException, Is.TypeOf<AgentRemoteException>());
+                Assert.That(exception.InnerException!.Message, Does.Contain(@"C:\work\customer"));
+                Assert.That(((AgentRemoteException)exception.InnerException).RemoteDetails, Is.EqualTo("private target stack"));
             });
         }
         finally

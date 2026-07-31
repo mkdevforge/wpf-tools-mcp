@@ -366,7 +366,9 @@ internal static partial class WpfVisualTreeInspector
                 type,
                 Value: null,
                 Truncated: false,
-                UnavailableReason: "value_not_safely_serializable");
+                UnavailableReason: BuildFormattingFailureReason(
+                    "value_to_string_failed",
+                    formatted.FormattingFailureType));
     }
 
     private static ValidationExceptionInfo? BuildValidationExceptionInfo(
@@ -379,7 +381,7 @@ internal static partial class WpfVisualTreeInspector
             return null;
         }
 
-        _ = TryFormatTrustedExceptionMessage(
+        _ = TryFormatExceptionMessage(
             exception,
             maxValueLength,
             out var message,
@@ -468,13 +470,16 @@ internal static partial class WpfVisualTreeInspector
         var content = error.ErrorContent;
         if (content is not null)
         {
-            return FormatSafeProvenanceValueDetails(content, "string", maxValueLength).Text;
+            var formatted = FormatSafeProvenanceValueDetails(content, "string", maxValueLength);
+            return formatted.Text ?? TruncateProvenanceText(
+                content.GetType().FullName ?? content.GetType().Name,
+                maxValueLength);
         }
 
         var exception = error.Exception;
         if (exception is not null)
         {
-            if (TryFormatTrustedExceptionMessage(
+            if (TryFormatExceptionMessage(
                     exception,
                     maxValueLength,
                     out var message,
@@ -492,7 +497,7 @@ internal static partial class WpfVisualTreeInspector
         return "Validation error";
     }
 
-    private static bool TryFormatTrustedExceptionMessage(
+    private static bool TryFormatExceptionMessage(
         Exception exception,
         int maxValueLength,
         out string? message,
@@ -503,26 +508,20 @@ internal static partial class WpfVisualTreeInspector
         truncated = false;
         unavailableReason = null;
 
-        var messageGetter = exception
-            .GetType()
-            .GetProperty(nameof(Exception.Message))?
-            .GetMethod;
-        if (messageGetter?.DeclaringType != typeof(Exception))
-        {
-            unavailableReason = "message_getter_not_safe";
-            return false;
-        }
-
         try
         {
-            var rawMessage = exception.Message;
+            var rawMessage = exception.Message ?? string.Empty;
             message = TruncateProvenanceText(rawMessage, maxValueLength);
             truncated = rawMessage.Length > maxValueLength;
             return true;
         }
-        catch
+        catch (Exception messageFailure)
         {
-            unavailableReason = "message_getter_failed";
+            unavailableReason = BuildFormattingFailureReason(
+                "message_getter_failed",
+                TruncateProvenanceText(
+                    messageFailure.GetType().FullName ?? messageFailure.GetType().Name,
+                    512));
             return false;
         }
     }

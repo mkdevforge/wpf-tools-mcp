@@ -18,6 +18,16 @@ An MCP server that gives AI models the ability to see and interact with running 
 
 This hybrid gives the AI model WPF-native inspection depth alongside the interaction capability of an automation framework, without requiring source changes to the target application.
 
+### Local trust model
+
+This is a same-user local development tool, not a multi-tenant backend. Reading
+live WPF and UIA state normally invokes framework getters and provider code, and
+bounded diagnostic formatting may invoke application-defined `ToString()` or
+`Exception.Message`. Those calls are best effort and caught when they fail. The
+correctness boundaries remain strict identity validation, bounded work and
+artifacts, cancellation, cleanup limited to MCP-owned resources, and honest
+reporting of the capabilities the current target actually exposes.
+
 ### Snoop integration approach: Thin Wrapper (confirmed by feasibility spike)
 
 A code-level analysis of the Snoop repository (commit `c1cc286`, 2025-12-21) confirmed that **Approach B (Thin Wrapper)** is the right path:
@@ -122,7 +132,7 @@ see `README.md` for the current profile split and configuration.
 | `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`), viewport evidence (`includeViewport=true`), and diagnostics-only point/region correlation (`correlation`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload, `ViewportConditions`, and bounded WPF/UIA correlation evidence |
 | `get_visual_tree` | Return an inspection tree (UIA or WPF) for the main window or a subtree | Structured JSON. Configurable depth. `visibleOnly=true` means **in-viewport**; use `includeOffViewport=true` to include offscreen elements. |
 | `find_elements` | Find elements without dumping the full tree; minimal or standard result context | Deterministically ordered matches, returned/discovered/scanned counts, truncation metadata, and optional `elementId`s |
-| `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef on success; non-XPath ambiguity returns an `ambiguous_element` tool error with up to five index-addressable candidates containing only index and reusable element ID; ambiguous XPath segments return a path-specific indexing error |
+| `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef on success; non-XPath ambiguity returns an `ambiguous_element` tool error with up to five index-addressable candidates containing reusable identity and bounded observed type/name/AutomationId/path/bounds evidence; ambiguous XPath segments return a path-specific indexing error |
 | `get_path_to_element` | Get the XPath for a resolved element | XPath string |
 | `pick_element_at_point` | Pick an element at a coordinate (`coordSpace`: screen/client) | ElementRef + optional ancestor chain |
 | `highlight_element` | Highlight an element on-screen. Can optionally return an annotated screenshot (`returnScreenshot=true`). | Highlight result + bounds + method used |
@@ -357,7 +367,7 @@ available, inspection tools can return deeper WPF-native data. Backend-neutral
 tools fall back to UIA where an equivalent exists. UIA fallbacks in auto tree,
 search, and resolve responses include structured WPF-to-UIA metadata, while
 tree and search retain compatibility warning text. WPF-only diagnostics return
-a stable sanitized failure code and detail; callers can inspect `list_sessions`
+a stable bounded failure code and detail; callers can inspect `list_sessions`
 for the full structured backend failure state.
 
 Every tool advertises a success-or-error `outputSchema`. Tool execution failures
@@ -365,11 +375,14 @@ set `isError=true` and return `{ "error": { "code", "detail", ... } }` as
 structured content plus fixed `code: detail` compatibility text. The envelope
 can add optional `stage`, `retryable`, `retryAfterMs`, `recoveryActions`, and
 validated session/window/element/backend or bounded candidate/count/truncation
-context. Embedded backend `FailureInfo` values retain the same retry semantics.
+context. An optional bounded cause retains observed exception type/message and
+adapter details. Candidate context can include bounded process/window/element
+names, paths, times, and bounds. Embedded backend `FailureInfo` values retain the
+same retry semantics and cause evidence in capability and fallback state; a
+throwing message getter is represented by a bounded unavailable reason.
 Malformed JSON-RPC, unknown tools, request cancellation, and server lifecycle
-failures remain protocol errors. Public failure payloads and compatibility text
-omit raw filesystem paths, command lines, names/titles, injector output,
-arbitrary target exception messages, and target-side stack traces.
+failures remain protocol errors. Bounded local paths, injector output, target
+exception messages, and adapter-provided remote details are diagnostic evidence.
 
 Successful response metadata is intentionally targeted rather than a universal
 envelope. A one-shot inspection resolved relative to a window reports the
@@ -604,10 +617,12 @@ Current build, focused-test, full-test, and smoke commands are documented in
   internal storage access makes only the resource section incomplete.
 - **Provenance request and rendering work is bounded.** Opt-in calls inspect at
   most 100 explicit property names, bound each name before the agent pipe, and
-  cap `MissingPropertyNames` accordingly. Effective values use an explicit
-  allowlist of invariant WPF formatters; arbitrary application `ToString()` is
-  never invoked. A safely formatted default or animation value is exact only
-  when it is complete; bounded text is best effort with `maxStringLength`.
+  cap `MissingPropertyNames` accordingly. Effective values use invariant WPF
+  formatters where available and bounded best-effort application `ToString()`
+  otherwise. Formatter failures retain type identity and explicit unavailable
+  evidence on the effective value and on style/template contributor values and
+  conditions. A formatted default or animation value is exact only when it is
+  complete; bounded text is best effort with `maxStringLength`.
 - **DataContext change notifications are best effort.** Live state observation uses WPF bindings so dependency properties and `INotifyPropertyChanged` paths are event-driven. Plain CLR properties that emit no notification do not produce changes; the tool does not add invasive target polling.
 - **Live observation work is capped across subscriptions.** Each subscription has bounded watches and queues, and the server admits at most eight live or completed-retained property subscription handles per session and 64 per server process. Completed handles free capacity on explicit unsubscribe or idle-grace retirement.
 - **Live state observation requires a live WPF window source.** Explicit window handles are resolved to their owning `HwndSource` before traversal, including windows on secondary UI dispatchers; non-WPF or already-destroyed handles fail without attaching handlers.

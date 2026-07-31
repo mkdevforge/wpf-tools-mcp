@@ -11,6 +11,12 @@ public sealed class ElementResolutionAmbiguityException : InvalidOperationExcept
         Ambiguity = ambiguity;
     }
 
+    internal ElementResolutionAmbiguityException(ResolveElementAmbiguity ambiguity, Exception diagnosticCause)
+        : base(BuildMessage(ambiguity), diagnosticCause ?? throw new ArgumentNullException(nameof(diagnosticCause)))
+    {
+        Ambiguity = ambiguity;
+    }
+
     public ResolveElementAmbiguity Ambiguity { get; }
 
     private static string BuildMessage(ResolveElementAmbiguity ambiguity)

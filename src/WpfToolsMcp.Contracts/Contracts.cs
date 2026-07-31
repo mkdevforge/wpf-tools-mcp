@@ -121,6 +121,9 @@ public sealed record FailureInfo(
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? RecoveryActions { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DiagnosticCauseInfo? Cause { get; init; }
 }
 
 public sealed record BackendFallbackInfo(
@@ -1679,7 +1682,11 @@ public sealed record ComputedPropertyInfo(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Mode = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UpdateSourceTrigger = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Converter = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DependencyPropertyProvenance? Provenance = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DependencyPropertyProvenance? Provenance = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProvenanceEvidence? ValueEvidence { get; init; }
+}
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ProvenanceEvidenceKind
@@ -1776,7 +1783,14 @@ public sealed record PropertyContributorCandidate(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TargetName,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Value,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Conditions,
-    ProvenanceEvidence Evidence);
+    ProvenanceEvidence Evidence)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProvenanceEvidence? ValueEvidence { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProvenanceEvidence? ConditionsEvidence { get; init; }
+}
 
 public sealed record StylePropertyProvenance(
     StyleProvenanceKind Kind,

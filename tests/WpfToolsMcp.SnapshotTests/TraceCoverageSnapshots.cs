@@ -342,6 +342,7 @@ public sealed class TraceResponseTests
         var outputPath = CreateOutputPath();
         var span = controller.BeginToolTrace(new string('t', 256))!;
         span.SetSummary(new string('s', 2_000));
+        span.SetError(new InvalidOperationException(new string('e', 2_000)));
 
         try
         {
@@ -359,6 +360,7 @@ public sealed class TraceResponseTests
                 Assert.That(response.Events, Has.Count.EqualTo(1));
                 Assert.That(response.Events![0].Tool, Has.Length.EqualTo(128));
                 Assert.That(response.Events[0].Summary, Has.Length.EqualTo(1_000));
+                Assert.That(response.Events[0].Error, Has.Length.EqualTo(1_000));
             });
 
             span.Dispose();

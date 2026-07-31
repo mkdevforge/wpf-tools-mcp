@@ -127,6 +127,9 @@ public sealed class PropertyProvenanceSnapshots
             Assert.That(styleSetter.Provenance.Style.KindEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.Exact));
             Assert.That(styleSetter.Provenance.Style.BasedOnTargetTypes, Is.Not.Empty);
             Assert.That(styleSetter.Provenance.Style.Candidates.Select(c => c.Kind), Does.Contain("StyleSetter"));
+            Assert.That(
+                styleSetter.Provenance.Style.Candidates.First(c => c.Kind == "StyleSetter").ValueEvidence!.Kind,
+                Is.EqualTo(ProvenanceEvidenceKind.Exact));
             Assert.That(styleSetter.Provenance.Style.ContributorEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
             Assert.That(styleSetter.Provenance.Style.ResourceKey, Is.Null);
             Assert.That(styleSetter.Provenance.Style.ResourceKeyEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.Unavailable));
@@ -135,6 +138,12 @@ public sealed class PropertyProvenanceSnapshots
             Assert.That(styleTrigger.Provenance.Style!.Candidates.Select(c => c.Kind), Does.Contain("StyleTrigger"));
             Assert.That(styleTrigger.Provenance.Style.Candidates.Select(c => c.Value), Does.Contain("Bold"));
             Assert.That(styleTrigger.Provenance.Style.Candidates.All(c => c.Evidence.Kind == ProvenanceEvidenceKind.BestEffort), Is.True);
+            Assert.That(
+                styleTrigger.Provenance.Style.Candidates.All(c => c.ValueEvidence is not null),
+                Is.True);
+            Assert.That(
+                styleTrigger.Provenance.Style.Candidates.All(c => c.ConditionsEvidence is not null),
+                Is.True);
 
             Assert.That(styleResource.Provenance!.Resource!.Candidates.Select(c => c.Key), Does.Contain("Provenance.StaticBrush"));
             Assert.That(styleResource.Provenance.Resource.OriginEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
@@ -149,6 +158,9 @@ public sealed class PropertyProvenanceSnapshots
                 Is.EqualTo("resource_dictionary_internal_access"));
             Assert.That(staticResource.Provenance.Resource.Candidates.Select(c => c.Key), Does.Contain("Provenance.StaticBrush"));
             Assert.That(staticResource.Provenance.Resource.KeyEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
+            Assert.That(
+                staticResource.Provenance.Resource.KeyEvidence.Reason,
+                Is.EqualTo("resource_reference_candidate"));
             Assert.That(staticResource.Provenance.Resource.ScopeEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
             Assert.That(staticResource.Provenance.Resource.OriginEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
 
@@ -173,9 +185,14 @@ public sealed class PropertyProvenanceSnapshots
                 Is.EqualTo("Element.Resources.MergedDictionaries[0]"));
 
             Assert.That(unsafeDynamicResource.Provenance!.Resource!.ReferenceKind, Is.EqualTo("DynamicResource"));
-            Assert.That(unsafeDynamicResource.Provenance.Resource.Key, Is.Null);
+            Assert.That(
+                unsafeDynamicResource.Provenance.Resource.Key,
+                Is.EqualTo("WpfToolsMcp.TestApp.ProvenanceProbe.UnsafeResourceKey"));
+            Assert.That(
+                unsafeDynamicResource.Provenance.Resource.KeyEvidence.Kind,
+                Is.EqualTo(ProvenanceEvidenceKind.Unavailable));
             Assert.That(unsafeDynamicResource.Provenance.Resource.KeyEvidence.Reason,
-                Is.EqualTo("dynamic_resource_key_not_safely_serializable"));
+                Is.EqualTo("resource_key_to_string_failed:System.InvalidOperationException"));
 
             Assert.That(implicitStyle.Provenance!.Style!.Kind, Is.EqualTo(StyleProvenanceKind.Implicit));
             Assert.That(implicitStyle.Value, Is.EqualTo("12,4,12,4"));
@@ -344,7 +361,7 @@ public sealed class PropertyProvenanceSnapshots
     }
 
     [Test]
-    public async Task Provenance_uses_safe_value_summaries_for_application_objects()
+    public async Task Provenance_uses_type_fallback_when_application_value_formatting_fails()
     {
         var property = await GetPropertyAsync("Provenance_ThrowingValue", "Payload");
 
@@ -354,6 +371,10 @@ public sealed class PropertyProvenanceSnapshots
                 "WpfToolsMcp.TestApp.ProvenanceProbe.ThrowingDisplayValue"));
             Assert.That(property.ValueType, Is.EqualTo(
                 "WpfToolsMcp.TestApp.ProvenanceProbe.ThrowingDisplayValue"));
+            Assert.That(property.ValueEvidence!.Kind, Is.EqualTo(ProvenanceEvidenceKind.Unavailable));
+            Assert.That(
+                property.ValueEvidence.Reason,
+                Is.EqualTo("value_to_string_failed:System.InvalidOperationException"));
             Assert.That(property.Provenance!.ValueSource.BaseValueSource,
                 Is.EqualTo(DependencyPropertyBaseValueSource.Local));
         });

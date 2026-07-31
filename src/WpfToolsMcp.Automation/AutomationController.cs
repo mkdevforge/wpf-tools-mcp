@@ -196,7 +196,10 @@ public sealed partial class AutomationController : IDisposable
                 stage: "process_discovery",
                 detail: "The requested executable was not found.",
                 retryable: false,
-                recoveryActions: [FailureDiagnostics.Recovery.RepairInstallation]);
+                recoveryActions: [FailureDiagnostics.Recovery.RepairInstallation],
+                inner: new FileNotFoundException(
+                    "The requested executable was not found.",
+                    request.ExePath));
         }
 
         var waitMs = Math.Clamp(request.WaitForMainWindowMs, 1000, 120000);
@@ -4377,7 +4380,7 @@ public sealed partial class AutomationController : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    throw new InvalidOperationException($"Failed to validate picked element: {ex.Message}");
+                    throw new InvalidOperationException("Failed to validate picked element.", ex);
                 }
             }
             else if (containerHandle.Backend == InspectionBackend.Uia)

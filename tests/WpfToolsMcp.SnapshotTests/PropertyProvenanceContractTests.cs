@@ -39,7 +39,50 @@ public sealed class PropertyProvenanceContractTests
             Assert.That(request.IncludeProvenance, Is.False);
             Assert.That(request.MaxProvenanceCandidates, Is.EqualTo(20));
             Assert.That(property.Provenance, Is.Null);
+            Assert.That(property.ValueEvidence, Is.Null);
             Assert.That(json, Does.Not.Contain("Provenance"));
+            Assert.That(json, Does.Not.Contain("ValueEvidence"));
+        });
+    }
+
+    [Test]
+    public void Computed_and_contributor_values_round_trip_formatting_evidence()
+    {
+        var valueEvidence = new ProvenanceEvidence(
+            ProvenanceEvidenceKind.Unavailable,
+            "value_to_string_failed:System.InvalidOperationException");
+        var property = new ComputedPropertyInfo(
+            Name: "Payload",
+            OwnerType: "Customer.Control",
+            Value: "Customer.ThrowingValue")
+        {
+            ValueEvidence = valueEvidence
+        };
+        var candidate = new PropertyContributorCandidate(
+            Kind: "StyleTrigger",
+            DeclaringType: "Customer.Control",
+            TargetName: null,
+            Value: "Customer.ThrowingValue",
+            Conditions: "Customer.State == Customer.ThrowingValue",
+            Evidence: new ProvenanceEvidence(
+                ProvenanceEvidenceKind.BestEffort,
+                "style_winner_not_exposed"))
+        {
+            ValueEvidence = valueEvidence,
+            ConditionsEvidence = valueEvidence
+        };
+
+        var propertyRoundTrip = JsonSerializer.Deserialize<ComputedPropertyInfo>(
+            JsonSerializer.Serialize(property));
+        var candidateRoundTrip = JsonSerializer.Deserialize<PropertyContributorCandidate>(
+            JsonSerializer.Serialize(candidate));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(propertyRoundTrip!.ValueEvidence, Is.EqualTo(valueEvidence));
+            Assert.That(candidateRoundTrip!.ValueEvidence, Is.EqualTo(valueEvidence));
+            Assert.That(candidateRoundTrip.ConditionsEvidence, Is.EqualTo(valueEvidence));
+            Assert.That(candidateRoundTrip.Evidence.Reason, Is.EqualTo("style_winner_not_exposed"));
         });
     }
 
@@ -146,7 +189,7 @@ public sealed class PropertyProvenanceContractTests
     }
 
     [Test]
-    public void Safe_value_formatter_preserves_common_wpf_values_without_calling_application_to_string()
+    public void Value_formatter_preserves_common_wpf_values_and_calls_application_to_string_best_effort()
     {
         var thickness = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
             new Thickness(1, 2, 3, 4),
@@ -172,8 +215,14 @@ public sealed class PropertyProvenanceContractTests
             new FontFamily("Segoe UI"),
             "string",
             2000);
+        var displayValue = new DisplayValue("application display");
         var applicationValue = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
-            new ThrowingDisplayValue(),
+            displayValue,
+            "string",
+            2000);
+        var throwingValue = new ThrowingDisplayValue();
+        var failedApplicationValue = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+            throwingValue,
             "string",
             2000);
 
@@ -185,8 +234,15 @@ public sealed class PropertyProvenanceContractTests
             Assert.That(color.Text, Is.EqualTo("#FF6495ED"));
             Assert.That(fontWeight.Text, Is.EqualTo("Bold"));
             Assert.That(fontFamily.Text, Is.EqualTo("Segoe UI"));
-            Assert.That(applicationValue.Text, Does.EndWith("ThrowingDisplayValue"));
-            Assert.That(applicationValue.RepresentsValue, Is.False);
+            Assert.That(applicationValue.Text, Is.EqualTo("application display"));
+            Assert.That(applicationValue.RepresentsValue, Is.True);
+            Assert.That(applicationValue.BestEffortReason, Is.EqualTo("application_to_string"));
+            Assert.That(displayValue.ToStringCalls, Is.EqualTo(1));
+            Assert.That(failedApplicationValue.Text, Does.EndWith("ThrowingDisplayValue"));
+            Assert.That(failedApplicationValue.RepresentsValue, Is.False);
+            Assert.That(failedApplicationValue.FormattingFailureType,
+                Is.EqualTo(typeof(InvalidOperationException).FullName));
+            Assert.That(throwingValue.ToStringCalls, Is.EqualTo(1));
         });
     }
 
@@ -283,6 +339,55 @@ public sealed class PropertyProvenanceContractTests
             Assert.That(formatted.Value, Is.EqualTo("ab..."));
             Assert.That(formatted.Evidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
             Assert.That(formatted.Evidence.Reason, Is.EqualTo("maxStringLength"));
+        });
+    }
+
+    [Test]
+    public void Application_values_and_resource_keys_report_best_effort_and_formatting_failures()
+    {
+        var formattedValue = WpfVisualTreeInspector.FormatProvenanceValueWithEvidence(
+            new DisplayValue("custom value"),
+            "string",
+            maxLength: 200);
+        var failedValue = WpfVisualTreeInspector.FormatProvenanceValueWithEvidence(
+            new ThrowingDisplayValue(),
+            "string",
+            maxLength: 200);
+        var boundedValue = WpfVisualTreeInspector.FormatProvenanceValueWithEvidence(
+            new DisplayValue("abcdefgh"),
+            "string",
+            maxLength: 5);
+        var formattedKey = WpfVisualTreeInspector.FormatResourceKeyDetails(
+            new DisplayValue("custom key"));
+        var failedKey = WpfVisualTreeInspector.FormatResourceKeyDetails(
+            new ThrowingDisplayValue());
+        var boundedKey = WpfVisualTreeInspector.FormatResourceKeyDetails(
+            new DisplayValue(new string('k', 300)));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(formattedValue.Value, Is.EqualTo("custom value"));
+            Assert.That(formattedValue.Evidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
+            Assert.That(formattedValue.Evidence.Reason, Is.EqualTo("application_to_string"));
+
+            Assert.That(failedValue.Value, Does.EndWith("ThrowingDisplayValue"));
+            Assert.That(failedValue.Evidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.Unavailable));
+            Assert.That(failedValue.Evidence.Reason,
+                Is.EqualTo("value_to_string_failed:System.InvalidOperationException"));
+            Assert.That(boundedValue.Value, Is.EqualTo("ab..."));
+            Assert.That(boundedValue.Evidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.BestEffort));
+            Assert.That(boundedValue.Evidence.Reason, Is.EqualTo("maxStringLength"));
+
+            Assert.That(formattedKey.Text, Is.EqualTo("custom key"));
+            Assert.That(formattedKey.RepresentsValue, Is.True);
+            Assert.That(formattedKey.BestEffortReason, Is.EqualTo("application_to_string"));
+
+            Assert.That(failedKey.Text, Does.EndWith("ThrowingDisplayValue"));
+            Assert.That(failedKey.RepresentsValue, Is.False);
+            Assert.That(failedKey.FormattingFailureType,
+                Is.EqualTo(typeof(InvalidOperationException).FullName));
+            Assert.That(boundedKey.Text, Has.Length.EqualTo(200));
+            Assert.That(boundedKey.Truncated, Is.True);
         });
     }
 
@@ -407,10 +512,26 @@ public sealed class PropertyProvenanceContractTests
         return false;
     }
 
+    private sealed class DisplayValue(string text)
+    {
+        public int ToStringCalls { get; private set; }
+
+        public override string ToString()
+        {
+            ToStringCalls++;
+            return text;
+        }
+    }
+
     private sealed class ThrowingDisplayValue
     {
-        public override string ToString() =>
-            throw new InvalidOperationException("The safe formatter must not call application ToString().");
+        public int ToStringCalls { get; private set; }
+
+        public override string ToString()
+        {
+            ToStringCalls++;
+            throw new InvalidOperationException("Application ToString failed.");
+        }
     }
 
     private sealed class ThrowingTypeValue : TypeDelegator

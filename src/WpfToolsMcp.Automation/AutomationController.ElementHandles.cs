@@ -622,7 +622,7 @@ public sealed partial class AutomationController
             Truncated: true,
             Candidates: [],
             TruncatedReason: "legacyAgent");
-        return new ElementResolutionAmbiguityException(ambiguity);
+        return new ElementResolutionAmbiguityException(ambiguity, exception);
     }
 
     private static int GetLegacyWpfAmbiguityCount(InvalidOperationException exception)

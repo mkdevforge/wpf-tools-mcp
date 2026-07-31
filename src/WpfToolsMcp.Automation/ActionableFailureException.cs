@@ -11,9 +11,9 @@ public sealed class ActionableFailureException : InvalidOperationException
     }
 
     internal ActionableFailureException(FailureInfo failure, Exception diagnosticCause)
-        : this(failure)
+        : base(CreateMessage(failure), diagnosticCause ?? throw new ArgumentNullException(nameof(diagnosticCause)))
     {
-        ArgumentNullException.ThrowIfNull(diagnosticCause);
+        Failure = failure;
         DiagnosticCause = diagnosticCause;
     }
 
