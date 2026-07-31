@@ -40,8 +40,8 @@ that the current target and agent have not demonstrated.
 ## Install
 
 ```powershell
-dotnet tool install -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.24
-dotnet tool update -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.24
+dotnet tool install -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.25
+dotnet tool update -g MkDevForge.WpfToolsMcp --version 0.1.0-preview.25
 ```
 
 Run the server directly with:
