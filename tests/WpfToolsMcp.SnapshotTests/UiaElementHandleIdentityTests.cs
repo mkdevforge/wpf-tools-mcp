@@ -39,10 +39,6 @@ public sealed class UiaElementHandleIdentityTests
                     locators.SourceElementIdentityStatus,
                     Is.EqualTo(UiaSourceIdentityStatus.Verified));
                 Assert.That(locators.UiaMapping, Is.Null);
-                Assert.That(locators.WpfMapping?.Available, Is.True);
-                Assert.That(locators.WpfMapping?.Status, Is.EqualTo(ElementMappingStatus.Exact));
-                Assert.That(locators.WpfMapping?.SelectedElementId, Is.EqualTo(locators.Wpf?.ElementId));
-                Assert.That(locators.Wpf?.ElementId, Does.StartWith("wpf_"));
                 Assert.That(locators.LocatorSuggestions, Is.Not.Null);
                 Assert.That(locators.FlaUi, Is.Not.Null);
             });
@@ -107,12 +103,6 @@ public sealed class UiaElementHandleIdentityTests
                 Assert.That(
                     replacementLocators.Uia?.AutomationId,
                     Is.EqualTo("Dynamic_NewButton"));
-                Assert.That(replacementLocators.WpfMapping?.Available, Is.True);
-                Assert.That(replacementLocators.WpfMapping?.Status, Is.EqualTo(ElementMappingStatus.Exact));
-                Assert.That(replacementLocators.Wpf?.ElementId, Does.StartWith("wpf_"));
-                Assert.That(
-                    replacementLocators.WpfMapping?.SelectedElementId,
-                    Is.EqualTo(replacementLocators.Wpf?.ElementId));
             });
 
             var staleElementId = original.Element.ElementId!;

@@ -58,6 +58,23 @@ public sealed class UiaLocatorSnapshots
                 Assert.That(result.WpfMapping?.Candidates.Count, Is.LessThanOrEqualTo(10));
             });
 
+            var reverseFromUiaId = await _mcp.CallToolAsync<GetUiaLocatorsResponse>(
+                "get_uia_locators",
+                new Dictionary<string, object?>
+                {
+                    ["sessionId"] = _sessionId,
+                    ["elementId"] = result.Uia!.ElementId
+                });
+            Assert.Multiple(() =>
+            {
+                Assert.That(reverseFromUiaId.SourceElementId, Is.EqualTo(result.Uia.ElementId));
+                Assert.That(
+                    reverseFromUiaId.SourceElementIdentityStatus,
+                    Is.EqualTo(UiaSourceIdentityStatus.Verified));
+                Assert.That(reverseFromUiaId.WpfMapping?.Status, Is.EqualTo(ElementMappingStatus.Exact));
+                Assert.That(reverseFromUiaId.Wpf?.ElementId, Does.StartWith("wpf_"));
+            });
+
             var roundTrip = await _mcp.CallToolAsync<GetUiaLocatorsResponse>("get_uia_locators", new Dictionary<string, object?>
             {
                 ["sessionId"] = _sessionId,
@@ -394,7 +411,8 @@ public sealed class UiaLocatorSnapshots
                 : response.Wpf with
                 {
                     ElementId = response.Wpf.ElementId is null ? null : "<element>",
-                    ClassName = string.IsNullOrWhiteSpace(response.Wpf.ClassName) ? null : "<class>"
+                    ClassName = string.IsNullOrWhiteSpace(response.Wpf.ClassName) ? null : "<class>",
+                    Bounds = null
                 },
             Uia = response.Uia is null
                 ? null
