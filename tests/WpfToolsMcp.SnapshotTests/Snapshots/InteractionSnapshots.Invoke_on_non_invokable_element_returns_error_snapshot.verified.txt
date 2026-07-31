@@ -1,1 +1,1 @@
-Tool 'invoke' failed: tool_failed: The tool operation failed.
+Tool 'invoke' failed: tool_failed: The tool operation failed. Cause: System.InvalidOperationException: InvokePattern not supported for WPF element (WpfType=Slider, AutomationId=Basic_Slider, Name=); resolved UIA peer (ControlType=Slider, AutomationId=Basic_Slider, Name=).

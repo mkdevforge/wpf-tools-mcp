@@ -10696,10 +10696,10 @@ public sealed partial class AutomationController : IDisposable
             var expected = locator.ControlTypeEquals.Trim();
             if (expected.Length > 0)
             {
-                var actual = element.ControlType.ToString();
+                var actual = GetControlTypeName(element);
                 if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
                 {
-                    errors.Add($"controlTypeEquals expected '{expected}' actual '{actual}'");
+                    errors.Add($"controlTypeEquals expected '{expected}' actual '{actual ?? ""}'");
                 }
             }
         }
@@ -10789,7 +10789,7 @@ public sealed partial class AutomationController : IDisposable
             var expected = locator.ControlTypeEquals.Trim();
             if (expected.Length > 0)
             {
-                var actual = element.ControlType.ToString();
+                var actual = GetControlTypeName(element);
                 if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
                 {
                     return false;
@@ -11690,7 +11690,7 @@ public sealed partial class AutomationController : IDisposable
     }
 
     private static string GetFlaUiXPathLabel(AutomationElement element) =>
-        element.ControlType.ToString();
+        GetControlTypeName(element) ?? GetClassName(element) ?? "Unknown";
 
     private static string ComputeXPathSegment(AutomationElement parent, AutomationElement child, ITreeWalker walker)
     {
@@ -11780,13 +11780,14 @@ public sealed partial class AutomationController : IDisposable
 
     private static string GetXPathLabel(AutomationElement element)
     {
-        if (element.ControlType == ControlType.Window)
+        var controlType = GetControlTypeName(element);
+        if (string.Equals(controlType, ControlType.Window.ToString(), StringComparison.Ordinal))
         {
             return "Window";
         }
 
         var className = GetClassName(element);
-        return !string.IsNullOrWhiteSpace(className) ? className : element.ControlType.ToString();
+        return !string.IsNullOrWhiteSpace(className) ? className : controlType ?? "Unknown";
     }
 
     private readonly record struct TreeFieldSet(
@@ -12240,11 +12241,12 @@ public sealed partial class AutomationController : IDisposable
                 string? elementId = null;
                 if (includeElementIds)
                 {
+                    var elementType = GetControlTypeName(current) ?? GetClassName(current) ?? "Unknown";
                     elementId = _elementHandles.RegisterUia(
                         windowHandle,
                         currentXPath,
                         TryGetRuntimeId(current),
-                        current.ControlType.ToString(),
+                        elementType,
                         GetAutomationId(current),
                         GetName(current),
                         GetClassName(current));
@@ -12346,7 +12348,7 @@ public sealed partial class AutomationController : IDisposable
     {
         if (!string.IsNullOrWhiteSpace(query.TypeEquals))
         {
-            var type = element.ControlType.ToString();
+            var type = GetControlTypeName(element);
             var className = GetClassName(element);
             if (!string.Equals(type, query.TypeEquals, StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(className, query.TypeEquals, StringComparison.OrdinalIgnoreCase))
@@ -12401,6 +12403,7 @@ public sealed partial class AutomationController : IDisposable
         string? elementId,
         Rect? viewportBounds = null)
     {
+        var type = GetControlTypeName(element) ?? GetClassName(element) ?? "Unknown";
         if (returnFields == FindReturnFields.Standard)
         {
             var rawBounds = TryGetBounds(element);
@@ -12411,7 +12414,7 @@ public sealed partial class AutomationController : IDisposable
                 : rawBounds.Value.Width > 0 && rawBounds.Value.Height > 0 && !isOffscreen.Value;
 
             return new ElementRef(
-                Type: element.ControlType.ToString(),
+                Type: type,
                 AutomationId: GetAutomationId(element),
                 Name: GetName(element),
                 XPath: xpath,
@@ -12425,7 +12428,7 @@ public sealed partial class AutomationController : IDisposable
         }
 
         return new ElementRef(
-            Type: element.ControlType.ToString(),
+            Type: type,
             AutomationId: GetAutomationId(element),
             Name: GetName(element),
             XPath: xpath,
@@ -12915,6 +12918,9 @@ public sealed partial class AutomationController : IDisposable
             return null;
         }
     }
+
+    private static string? GetControlTypeName(AutomationElement element) =>
+        SafeGetString(() => element.ControlType.ToString());
 
     private static Rect ToRect(Rectangle rectangle) =>
         new(X: rectangle.Left, Y: rectangle.Top, Width: rectangle.Width, Height: rectangle.Height);

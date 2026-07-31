@@ -2510,12 +2510,18 @@ internal static partial class WpfVisualTreeInspector
     {
         if (!formatting.RepresentsValue)
         {
+            var failureReason = string.Equals(
+                formatting.FormattingFailureReason,
+                "value_to_string_failed",
+                StringComparison.Ordinal)
+                    ? "resource_key_to_string_failed"
+                    : formatting.FormattingFailureReason ?? "resource_key_to_string_failed";
             return new ProvenanceEvidence(
                 ProvenanceEvidenceKind.Unavailable,
                 formatting.Text is null && formatting.FormattingFailureType is null
                     ? "resource_key_unavailable"
                     : BuildFormattingFailureReason(
-                        formatting.FormattingFailureReason ?? "resource_key_to_string_failed",
+                        failureReason,
                         formatting.FormattingFailureType));
         }
 

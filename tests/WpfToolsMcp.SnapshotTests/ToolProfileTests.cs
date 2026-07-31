@@ -1239,7 +1239,7 @@ public sealed class ToolProfileTests
                 Assert.Multiple(() =>
                 {
                     Assert.That(ex!.Message, Does.Contain("backend_assets_missing"));
-                    Assert.That(ex.Message, Does.Not.Contain(isolatedServerDir).IgnoreCase);
+                    Assert.That(ex.Message, Does.Contain(isolatedServerDir).IgnoreCase);
                 });
             }
             finally

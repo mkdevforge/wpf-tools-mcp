@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Threading;
 using NUnit.Framework;
 using VerifyNUnit;
@@ -93,6 +94,7 @@ public sealed class MinimalInteractionSnapshots
             }
 
             var message = ex!.Message.Split("--- server stderr", StringSplitOptions.None)[0].TrimEnd();
+            message = Regex.Replace(message, @":line \d+", ":line <line>");
             await Verifier.Verify(message);
         }
         finally

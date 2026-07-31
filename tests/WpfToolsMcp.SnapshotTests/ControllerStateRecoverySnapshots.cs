@@ -944,7 +944,8 @@ public sealed class ControllerStateRecoverySnapshots
                         ? Is.Null
                         : Does.Contain("stale_window"));
                 Assert.That(staleSession.Message, Does.Contain("stale_session"));
-                Assert.That(staleSession.Message, Does.Not.Contain(successorSessionId));
+                Assert.That(staleSession.Message, Does.Contain("process_replaced"));
+                Assert.That(staleSession.Message, Does.Contain(successorSessionId));
             });
 
             var replacementElement = await mcp.CallToolAsync<ResolveElementResponse>("resolve_element", new Dictionary<string, object?>

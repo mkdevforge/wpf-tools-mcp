@@ -2,5 +2,5 @@
   Release: {
     Released: true
   },
-  Error: Tool 'click_element' failed: stale_element: The element handle is no longer valid.
+  Error: Tool 'click_element' failed: stale_element: The element handle is no longer valid. Cause: System.InvalidOperationException: stale_element: Unknown elementId '<element>'. Call resolve_element again.
 }

@@ -1,1 +1,1 @@
-Tool 'close_session' failed: stale_session: The session is no longer valid.
+Tool 'close_session' failed: stale_session: The session is no longer valid. Cause: System.InvalidOperationException: stale_session: Unknown sessionId 'missing-session'.

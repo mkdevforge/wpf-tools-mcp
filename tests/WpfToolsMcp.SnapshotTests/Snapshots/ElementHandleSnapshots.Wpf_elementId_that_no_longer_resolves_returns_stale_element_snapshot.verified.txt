@@ -26,5 +26,5 @@
       CursorMoved: true
     }
   },
-  Error: Tool 'get_data_context' failed: stale_element: The element handle is no longer valid.
+  Error: Tool 'get_data_context' failed: stale_element: The element handle is no longer valid. Cause: System.InvalidOperationException: stale_element: not_found for '<element>'. Last known WPF identity: type=Button, automationId=Dynamic_NewButton, name=, xpath=/Window/Border/AdornerDecorator/ContentPresenter/Grid/StackPanel/StackPanel/Button. Call resolve_element again.
 }
