@@ -105,7 +105,7 @@ public static class AgentTools
         [Description("Only inspect visible elements")] bool visibleOnly = false,
         [Description("Maximum validation errors returned")] int maxErrors = 100,
         [Description("Maximum nodes scanned")] int maxNodes = 2000,
-        [Description("Maximum characters returned for safe scalar error content")] int maxValueLength = 500,
+        [Description("Maximum characters returned for best-effort validation error content")] int maxValueLength = 500,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {

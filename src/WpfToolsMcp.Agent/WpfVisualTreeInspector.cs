@@ -4253,12 +4253,42 @@ internal static partial class WpfVisualTreeInspector
         return JsonValue.Create(value)!;
     }
 
+    private static string FormatDataContextTextBestEffort(
+        object value,
+        string nullResultFallback,
+        string warningTarget,
+        int maxStringLength,
+        DataContextTruncationTracker truncation,
+        List<string> warnings)
+    {
+        string text;
+        try
+        {
+            text = value.ToString() ?? nullResultFallback;
+        }
+        catch (Exception ex)
+        {
+            var valueType = value.GetType();
+            text = valueType.FullName ?? valueType.Name;
+            warnings.Add($"{warningTarget}: {ex.GetType().Name}");
+        }
+
+        var bounded = TruncateString(text, maxStringLength, out var wasTruncated);
+        if (wasTruncated)
+        {
+            truncation.MarkMaxStringLength();
+        }
+
+        return bounded;
+    }
+
     private static JsonNode? SerializeDataContextValueFull(
         object? value,
         DataContextSerializationOptions options,
         int remainingDepth,
         HashSet<object> visited,
         DataContextTruncationTracker truncation,
+        List<string> warnings,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -4361,13 +4391,22 @@ internal static partial class WpfVisualTreeInspector
                     break;
                 }
 
-                var key = entry.Key?.ToString() ?? "null";
+                var key = entry.Key is null
+                    ? "null"
+                    : FormatDataContextTextBestEffort(
+                        value: entry.Key,
+                        nullResultFallback: "null",
+                        warningTarget: "DataContext dictionary key ToString",
+                        maxStringLength: options.MaxStringLength,
+                        truncation: truncation,
+                        warnings: warnings);
                 var node = SerializeDataContextValueFull(
                     entry.Value,
                     options,
                     remainingDepth - 1,
                     visited,
                     truncation,
+                    warnings,
                     cancellationToken);
 
                 obj[key] = node;
@@ -4398,6 +4437,7 @@ internal static partial class WpfVisualTreeInspector
                     remainingDepth - 1,
                     visited,
                     truncation,
+                    warnings,
                     cancellationToken);
                 if (node is null && !options.IncludeNulls)
                 {
@@ -4461,6 +4501,7 @@ internal static partial class WpfVisualTreeInspector
                 remainingDepth - 1,
                 visited,
                 truncation,
+                warnings,
                 cancellationToken);
 
             json[property.Name] = node;
@@ -4584,7 +4625,15 @@ internal static partial class WpfVisualTreeInspector
                     break;
                 }
 
-                var key = entry.Key?.ToString() ?? "null";
+                var key = entry.Key is null
+                    ? "null"
+                    : FormatDataContextTextBestEffort(
+                        value: entry.Key,
+                        nullResultFallback: "null",
+                        warningTarget: "DataContext dictionary key ToString",
+                        maxStringLength: options.MaxStringLength,
+                        truncation: truncation,
+                        warnings: warnings);
                 var node = SerializeDataContextValueSummary(
                     entry.Value,
                     options,
@@ -4835,11 +4884,14 @@ internal static partial class WpfVisualTreeInspector
 
         var dataContextType = dataContext.GetType().FullName ?? dataContext.GetType().Name;
         var truncation = new DataContextTruncationTracker();
-        var summary = TruncateString(dataContext.ToString() ?? "", maxStringLength, out var summaryTruncated);
-        if (summaryTruncated)
-        {
-            truncation.MarkMaxStringLength();
-        }
+        var warnings = new List<string>();
+        var summary = FormatDataContextTextBestEffort(
+            value: dataContext,
+            nullResultFallback: "",
+            warningTarget: "DataContext.ToString",
+            maxStringLength: maxStringLength,
+            truncation: truncation,
+            warnings: warnings);
 
         if (request.Mode == DataContextMode.Full)
         {
@@ -4858,6 +4910,7 @@ internal static partial class WpfVisualTreeInspector
                 maxDepth,
                 visited,
                 truncation,
+                warnings,
                 cancellationToken);
             var truncatedReasons = truncation.GetReasons();
 
@@ -4865,7 +4918,8 @@ internal static partial class WpfVisualTreeInspector
                 DataContextType: dataContextType,
                 Data: data,
                 Summary: summary,
-                Truncated: truncation.Truncated)
+                Truncated: truncation.Truncated,
+                Warnings: warnings.Count > 0 ? warnings : null)
             {
                 Element = elementRef,
                 WindowHandleUsed = windowHandleUsed,
@@ -4889,7 +4943,6 @@ internal static partial class WpfVisualTreeInspector
             PropertyAllowList: allowList);
 
         var summaryVisited = new HashSet<object>(ReferenceEqualityComparer.Instance);
-        var warnings = new List<string>();
         var summaryData = SerializeDataContextValueSummary(
             dataContext,
             summaryOptions,

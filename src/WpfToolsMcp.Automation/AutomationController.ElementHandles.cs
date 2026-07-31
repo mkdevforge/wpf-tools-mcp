@@ -928,6 +928,23 @@ public sealed partial class AutomationController
         }
     }
 
+    private static UiaSourceIdentityStatus ClassifyUiaSourceIdentity(
+        ElementHandle handle,
+        AutomationElement current,
+        out int[]? currentRuntimeId)
+    {
+        currentRuntimeId = TryGetRuntimeId(current);
+        if (handle.UiaRuntimeId is not { Length: > 0 } registeredRuntimeId ||
+            currentRuntimeId is not { Length: > 0 })
+        {
+            return UiaSourceIdentityStatus.Unverifiable;
+        }
+
+        return registeredRuntimeId.SequenceEqual(currentRuntimeId)
+            ? UiaSourceIdentityStatus.Verified
+            : UiaSourceIdentityStatus.Changed;
+    }
+
     private enum UiaHandleResolutionMode
     {
         ObserveCurrentXPathOccupant,

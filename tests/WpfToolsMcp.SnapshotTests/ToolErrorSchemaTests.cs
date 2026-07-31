@@ -166,6 +166,16 @@ public sealed class ToolErrorSchemaTests
             Assert.That(
                 causeSchema.GetProperty("properties").GetProperty("messageUnavailableReason").GetProperty("maxLength").GetInt32(),
                 Is.EqualTo(1_024));
+            Assert.That(
+                candidateProperties.GetProperty("executablePath").GetProperty("maxLength").GetInt32(),
+                Is.EqualTo(512));
+            Assert.That(
+                candidateProperties.GetProperty("executablePathUnavailableReason").GetProperty("maxLength").GetInt32(),
+                Is.EqualTo(256));
+            Assert.That(
+                candidateProperties.TryGetProperty("commandLine", out _),
+                Is.False,
+                "Command-line discovery is deferred because Process has no public in-process source contract, not because local diagnostics are private.");
             Assert.That(candidateProperties.GetProperty("xpath").GetProperty("maxLength").GetInt32(), Is.EqualTo(1_024));
             Assert.That(candidateProperties.TryGetProperty("bounds", out _), Is.True);
         });

@@ -161,7 +161,8 @@ public sealed class ToolErrorContractTests
                     ProcessName: PrivateSentinel,
                     StartTimeUtc: "2026-01-01T00:00:00Z",
                     MainWindowHandle: 789,
-                    MainWindowTitle: PrivateSentinel)
+                    MainWindowTitle: PrivateSentinel,
+                    ExecutablePath: PrivateSentinel)
             ],
             Recovery: PrivateSentinel));
         var elementFailure = new ElementResolutionAmbiguityException(new ResolveElementAmbiguity(
@@ -208,7 +209,8 @@ public sealed class ToolErrorContractTests
                     WindowHandle = 789,
                     ProcessName = PrivateSentinel,
                     StartTimeUtc = "2026-01-01T00:00:00Z",
-                    MainWindowTitle = PrivateSentinel
+                    MainWindowTitle = PrivateSentinel,
+                    ExecutablePath = PrivateSentinel
                 }));
             Assert.That(element.Code, Is.EqualTo("ambiguous_element"));
             Assert.That(element.Context!.ReturnedCandidates, Is.EqualTo(element.Context.Candidates!.Count));
@@ -228,6 +230,77 @@ public sealed class ToolErrorContractTests
             Assert.That(processJson, Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
             Assert.That(elementJson, Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
             Assert.That(invalidReasonJson, Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
+        });
+    }
+
+    [Test]
+    public void Process_candidate_executable_path_is_bounded_without_treating_local_paths_as_private()
+    {
+        var observedPath = PrivateSentinel + new string('x', 600);
+        var failure = new ProcessSelectionAmbiguityException(new ProcessSelectionAmbiguity(
+            Code: "ambiguous_process",
+            RequestedProcessName: "test",
+            DiscoveredCandidates: 1,
+            ReturnedCandidates: 1,
+            Truncated: false,
+            TruncatedReason: null,
+            Candidates:
+            [
+                new ProcessCandidateInfo(
+                    Index: 0,
+                    ProcessInstanceId: "123:456",
+                    Pid: 123,
+                    ProcessName: "test",
+                    StartTimeUtc: "2026-01-01T00:00:00Z",
+                    MainWindowHandle: 789,
+                    MainWindowTitle: "test",
+                    ExecutablePath: observedPath)
+            ],
+            Recovery: "select"));
+
+        var error = MapException(failure);
+        var executablePath = error.Context!.Candidates!.Single().ExecutablePath;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(executablePath, Has.Length.EqualTo(512));
+            Assert.That(executablePath, Is.EqualTo(observedPath[..512]));
+            Assert.That(executablePath, Does.StartWith(PrivateSentinel));
+        });
+    }
+
+    [Test]
+    public void Process_candidate_executable_path_unavailable_reason_is_explicit_and_bounded()
+    {
+        var observedReason = "mainModuleReadFailed:" + new string('r', 300);
+        var failure = new ProcessSelectionAmbiguityException(new ProcessSelectionAmbiguity(
+            Code: "ambiguous_process",
+            RequestedProcessName: "test",
+            DiscoveredCandidates: 1,
+            ReturnedCandidates: 1,
+            Truncated: false,
+            TruncatedReason: null,
+            Candidates:
+            [
+                new ProcessCandidateInfo(
+                    Index: 0,
+                    ProcessInstanceId: "123:456",
+                    Pid: 123,
+                    ProcessName: "test",
+                    StartTimeUtc: "2026-01-01T00:00:00Z",
+                    MainWindowHandle: 789,
+                    MainWindowTitle: "test",
+                    ExecutablePathUnavailableReason: observedReason)
+            ],
+            Recovery: "select"));
+
+        var candidate = MapException(failure).Context!.Candidates!.Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(candidate.ExecutablePath, Is.Null);
+            Assert.That(candidate.ExecutablePathUnavailableReason, Has.Length.EqualTo(256));
+            Assert.That(candidate.ExecutablePathUnavailableReason, Is.EqualTo(observedReason[..256]));
         });
     }
 

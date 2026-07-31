@@ -191,6 +191,10 @@ start time. Process-name attachment returns structured candidates rather than
 silently choosing when multiple live instances match. Candidate retries use an
 opaque `processInstanceId` so PID reuse or candidate exit fails as
 `stale_process_candidate` without falling through to another process.
+Candidates include a bounded executable path when the public process API can
+read it, or an explicit bounded unavailability reason. Command lines remain
+outside the current public in-process source contract rather than being hidden
+as a confidentiality rule for this local tool.
 The `launch_app` existing-instance fallback uses the same structured ambiguity
 result instead of choosing an existing process by recency.
 
@@ -503,8 +507,13 @@ have explicit per-poll and cumulative forms, whole serialized events are subject
 the negotiated payload budget, and completion is represented by exactly one typed
 terminal event while compatibility completion fields remain pollable during the
 retention window. Trace retention loss and inline response truncation are reported
-separately. The correlation contract is limited to MCP-owned events; it does not
-collect application logs or install unhandled-exception hooks.
+separately. The runtime envelope currently covers MCP-owned streams. Arbitrary
+application logs have no generic WPF source or ordering contract and therefore
+require explicit adapters that define capture, parsing, ordering, and bounds. An
+unhandled-exception adapter is permitted when it is explicitly enabled and
+bounded, observes only, and never marks an exception handled or otherwise alters
+the application's exception flow. This is a source-contract boundary rather than
+a confidentiality prohibition for a same-user local tool.
 
 ### Element Locator Strategies
 
@@ -652,7 +661,9 @@ Current build, focused-test, full-test, and smoke commands are documented in
   (holding the WPF application resource lock where required), then inspect raw
   dictionary storage. They never call lazy `Resources` getters, copy an
   unbounded key set, or inflate deferred values; their scan evidence remains
-  best effort even when the bounded scope scan completes. Missing or changed
+  best effort even when the bounded scope scan completes. Same-type custom
+  resource values use caught application `Equals`; comparison failures mark the
+  scan incomplete with explicit evidence. Missing or changed
   internal storage access makes only the resource section incomplete.
 - **Provenance request and rendering work is bounded.** Opt-in calls inspect at
   most 100 explicit property names, bound each name before the agent pipe, and
@@ -709,7 +720,7 @@ Phase 1 delivers a fully functional MCP server that can see and interact with WP
 - Playwright-like robustness: `wait_for` (attached|visible|enabled|actionable|stable|value_equals|name_contains)
 - Pointer interactions: `drag` (for sliders, splitters, reorder, etc.)
 - `scroll_to_element`, `set_active_window`
-- Element handles: `resolve_element` returns an `elementId` handle for re-use across subsequent tool calls (and `find_elements` can include `elementId` values). Strict non-XPath ambiguity is a structured tool error whose bounded WPF/UIA candidates use the same deterministic ordering as locator `index`; ambiguous XPath segments retain their path-specific one-based indexing error. `uia_...` handles are validated best-effort (XPath + RuntimeId) while `wpf_...` handles are soft (XPath-based) and may go stale if the visual tree changes.
+- Element handles: `resolve_element` returns an `elementId` handle for re-use across subsequent tool calls (and `find_elements` can include `elementId` values). Strict non-XPath ambiguity is a structured tool error whose bounded WPF/UIA candidates use the same deterministic ordering as locator `index`; ambiguous XPath segments retain their path-specific one-based indexing error. `uia_...` interactions validate XPath plus RuntimeId. When `get_uia_locators` performs read-only current-occupant observation, it reports whether the source identity was verified, changed, or unverifiable and registers a fresh ID rather than projecting a stale ID onto a replacement. `wpf_...` handles are XPath-based and may go stale if the visual tree changes.
 - Test app expanded with all pages (DataGrid, Navigation, DeeplyNested, DynamicContent, Dialogs, CustomControls)
 - Integration flow tests: launch → inspect → interact → re-inspect → verify state changed
 - Error handling: element not found, ambiguous locator, process not running, stale references

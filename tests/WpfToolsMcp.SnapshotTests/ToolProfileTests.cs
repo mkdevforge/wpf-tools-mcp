@@ -397,7 +397,17 @@ public sealed class ToolProfileTests
             Is.EqualTo(new[] { "backendUsed", "element", "fallback", "windowHandleUsed" }));
         Assert.That(
             GetOutputPropertyNames(tools["get_uia_locators"]),
-            Is.EqualTo(new[] { "flaUi", "locatorSuggestions", "uia", "uiaMapping", "windowHandleUsed", "wpf" }));
+            Is.EqualTo(new[]
+            {
+                "flaUi",
+                "locatorSuggestions",
+                "sourceElementId",
+                "sourceElementIdentityStatus",
+                "uia",
+                "uiaMapping",
+                "windowHandleUsed",
+                "wpf"
+            }));
         Assert.That(
             GetOutputRequiredPropertyNames(tools["get_uia_locators"]),
             Is.Empty);

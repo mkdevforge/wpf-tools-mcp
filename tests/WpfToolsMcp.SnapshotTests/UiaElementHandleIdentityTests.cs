@@ -34,6 +34,10 @@ public sealed class UiaElementHandleIdentityTests
             {
                 Assert.That(elementId, Does.StartWith("uia_"));
                 Assert.That(locators.Uia?.ElementId, Is.EqualTo(elementId));
+                Assert.That(locators.SourceElementId, Is.EqualTo(elementId));
+                Assert.That(
+                    locators.SourceElementIdentityStatus,
+                    Is.EqualTo(UiaSourceIdentityStatus.Verified));
                 Assert.That(locators.UiaMapping, Is.Null);
                 Assert.That(locators.LocatorSuggestions, Is.Not.Null);
                 Assert.That(locators.FlaUi, Is.Not.Null);
@@ -81,6 +85,25 @@ public sealed class UiaElementHandleIdentityTests
             var observedReplacement = await controller.GetElementPropertiesAsync(
                 elementId: original.Element.ElementId);
             Assert.That(observedReplacement.Element.AutomationId, Is.EqualTo("Dynamic_NewButton"));
+
+            var replacementLocators = await controller.GetUiaLocatorsAsync(
+                elementId: original.Element.ElementId);
+            Assert.Multiple(() =>
+            {
+                Assert.That(
+                    replacementLocators.SourceElementId,
+                    Is.EqualTo(original.Element.ElementId));
+                Assert.That(
+                    replacementLocators.SourceElementIdentityStatus,
+                    Is.EqualTo(UiaSourceIdentityStatus.Changed));
+                Assert.That(replacementLocators.Uia?.ElementId, Does.StartWith("uia_"));
+                Assert.That(
+                    replacementLocators.Uia?.ElementId,
+                    Is.Not.EqualTo(original.Element.ElementId));
+                Assert.That(
+                    replacementLocators.Uia?.AutomationId,
+                    Is.EqualTo("Dynamic_NewButton"));
+            });
 
             var staleElementId = original.Element.ElementId!;
             await AssertRejectsStaleIdentityAsync(
@@ -147,7 +170,7 @@ public sealed class UiaElementHandleIdentityTests
                 locator: new ElementLocator(AutomationId: "Dynamic_Status"));
             Assert.That(status.Element.Name, Is.EqualTo("Clicks: 0"));
 
-            _ = await InvokeUiaElementAsync(controller, replacement.Element.ElementId!);
+            _ = await InvokeUiaElementAsync(controller, replacementLocators.Uia!.ElementId!);
             status = await controller.GetElementPropertiesAsync(
                 locator: new ElementLocator(AutomationId: "Dynamic_Status"));
             Assert.That(status.Element.Name, Is.EqualTo("Clicks: 1"));

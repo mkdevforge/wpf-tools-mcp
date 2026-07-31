@@ -38,12 +38,18 @@ internal enum ProcessInstanceState
     Unavailable
 }
 
+internal readonly record struct ProcessExecutablePathObservation(
+    string? ExecutablePath,
+    string? UnavailableReason);
+
 internal sealed record ResolvedProcessTarget(
     ProcessInstanceIdentity Identity,
     string ProcessName,
     DateTime StartTimeUtc,
     long MainWindowHandle,
-    string MainWindowTitle)
+    string MainWindowTitle,
+    string? ExecutablePath,
+    string? ExecutablePathUnavailableReason)
 {
     internal ProcessCandidateInfo ToContract(int index) =>
         new(
@@ -53,12 +59,15 @@ internal sealed record ResolvedProcessTarget(
             ProcessName: ProcessName,
             StartTimeUtc: StartTimeUtc.ToString("O", CultureInfo.InvariantCulture),
             MainWindowHandle: MainWindowHandle,
-            MainWindowTitle: MainWindowTitle);
+            MainWindowTitle: MainWindowTitle,
+            ExecutablePath: ExecutablePath,
+            ExecutablePathUnavailableReason: ExecutablePathUnavailableReason);
 }
 
 internal static class ProcessTargetResolver
 {
     private const int MaximumReturnedCandidates = 25;
+    internal const int MaximumExecutablePathLength = 512;
 
     internal static ResolvedProcessTarget Resolve(AttachToAppRequest request)
     {
@@ -284,12 +293,15 @@ internal static class ProcessTargetResolver
 
             var startTimeUtc = process.StartTime.ToUniversalTime();
             var identity = new ProcessInstanceIdentity(process.Id, startTimeUtc.ToFileTimeUtc());
+            var executablePath = GetExecutablePathBestEffort(process);
             return new ResolvedProcessTarget(
                 Identity: identity,
                 ProcessName: process.ProcessName,
                 StartTimeUtc: startTimeUtc,
                 MainWindowHandle: SafeGetMainWindowHandle(process),
-                MainWindowTitle: Bound(SafeGetMainWindowTitle(process), 512));
+                MainWindowTitle: Bound(SafeGetMainWindowTitle(process), 512),
+                ExecutablePath: executablePath.ExecutablePath,
+                ExecutablePathUnavailableReason: executablePath.UnavailableReason);
         }
         catch (ProcessExitedDuringDiscoveryException)
         {
@@ -341,6 +353,34 @@ internal static class ProcessTargetResolver
         }
 
         return value.Length <= maximumLength ? value : value[..maximumLength];
+    }
+
+    internal static ProcessExecutablePathObservation GetExecutablePathBestEffort(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
+        // MainModule.FileName is the public in-process .NET source available here.
+        // Command-line retrieval is deferred because Process has no equivalent public
+        // contract; adding WMI or a native platform source is separate scope, not a
+        // privacy restriction for this trusted local tool.
+        try
+        {
+            var executablePath = process.MainModule?.FileName;
+            return string.IsNullOrWhiteSpace(executablePath)
+                ? new ProcessExecutablePathObservation(
+                    ExecutablePath: null,
+                    UnavailableReason: "mainModuleFileNameUnavailable")
+                : new ProcessExecutablePathObservation(
+                    ExecutablePath: Bound(executablePath, MaximumExecutablePathLength),
+                    UnavailableReason: null);
+        }
+        catch (Exception ex)
+        {
+            var exceptionType = ex.GetType().FullName ?? ex.GetType().Name;
+            return new ProcessExecutablePathObservation(
+                ExecutablePath: null,
+                UnavailableReason: Bound($"mainModuleReadFailed:{exceptionType}", 256));
+        }
     }
 
     private static long SafeGetMainWindowHandle(Process process)

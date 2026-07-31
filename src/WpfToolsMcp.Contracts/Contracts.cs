@@ -55,7 +55,9 @@ public sealed record ProcessCandidateInfo(
     string ProcessName,
     string StartTimeUtc,
     long MainWindowHandle,
-    string MainWindowTitle);
+    string MainWindowTitle,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExecutablePath = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExecutablePathUnavailableReason = null);
 
 public sealed record ProcessSelectionAmbiguity(
     string Code,
@@ -395,6 +397,14 @@ public sealed record UiaLocatorIdentity(
     public string? ElementId { get; init; }
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum UiaSourceIdentityStatus
+{
+    Verified,
+    Changed,
+    Unverifiable
+}
+
 public sealed record UiaLocatorSuggestions(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ByAutomationId,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ByName,
@@ -415,6 +425,12 @@ public sealed record GetUiaLocatorsResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null)
 {
     public long WindowHandleUsed { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceElementId { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UiaSourceIdentityStatus? SourceElementIdentityStatus { get; init; }
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

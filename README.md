@@ -194,9 +194,16 @@ Successful WPF-origin results include reusable `wpf_...` and `uia_...`
 element IDs, WPF and UIA paths, automation properties, and bounds. The source
 WPF handle is validated against its pinned agent identity before scanning, so
 a missing, evicted, or replaced source fails with `stale_element` rather than
-healing to a locator occupant. Returned UIA handles retain their registered
-runtime identity and fail closed if that identity later changes. WPF XPath is
-never evaluated against the different UIA tree.
+healing to a locator occupant. Returned UIA handles retain their registration
+metadata. Operations that interact with or mutate a target validate the
+registered runtime identity and fail with `stale_element` if a different UIA
+element now occupies that XPath. A read-only operation may explicitly observe
+the current XPath occupant instead; its result then describes current state and
+does not assert continuity with the originally registered element. Each tool
+chooses that mode deliberately. When `get_uia_locators` observes a replacement,
+it returns `SourceElementIdentityStatus=Changed` and registers a fresh UIA ID for
+that occupant rather than attaching the stale source ID to new evidence. WPF
+XPath is never evaluated against the different UIA tree.
 
 ### Backend Status and Failures
 
@@ -374,6 +381,10 @@ pre-existing merged-dictionary scopes. The agent reads only already-existing
 owner backing fields and raw dictionary storage through guarded implementation
 access. It never calls lazy WPF `Resources` getters, creates a missing resource
 collection, copies a whole dictionary, or realizes a deferred resource.
+Same-type application resource values are compared through caught best-effort
+`Equals`; a throwing comparison marks the scan incomplete with explicit
+`resource_value_comparison_failed` evidence instead of silently omitting a
+candidate while claiming completeness.
 `ScanComplete` only describes that candidate scan; it does not upgrade a
 candidate into exact WPF lookup origin or claim complete precedence/shadowing
 analysis. A deferred value or an incompatible runtime marks the scan incomplete
@@ -463,8 +474,16 @@ outer sequence describes server delivery, while the `ObserveStateEvent` sequence
 inside its payload describes the target-side observation source. Neither sequence
 establishes ordering across streams. Clients may use `observedAtUtc` to display a
 best-effort merged chronology, but scheduler and process-clock boundaries mean it
-is not a total or causal order. This contract does not collect application logs or
-install process-wide unhandled-exception hooks.
+is not a total or causal order.
+
+The runtime envelope currently covers MCP-owned streams. WPF applications do
+not expose one generic application-log source or ordering contract, so arbitrary
+application logs require explicit source adapters that define capture, parsing,
+ordering, and bounds. An unhandled-exception adapter is also a valid
+source-specific extension when explicitly enabled and bounded; it must observe
+only and must never mark an exception handled or otherwise change the
+application's exception flow. This is a source-contract boundary, not a
+confidentiality prohibition for the same-user local tool.
 
 `poll_subscription` exposes canonical `droppedSinceLastPoll`,
 `coalescedSinceLastPoll`, and `truncatedSinceLastPoll` fields alongside the legacy
@@ -709,9 +728,14 @@ start time. `attach_to_app` never guesses between multiple live processes with
 the same name. Instead it returns an `ambiguous_process` error with bounded,
 deterministically ordered candidates containing their index, opaque
 `processInstanceId`, PID, positive main-window handle, and bounded observed
-process name, window title, and start time when available. Retry with the opaque
-`processInstanceId` (preferred) or an explicit PID. Dotted process names are
-preserved; only a terminal `.exe` suffix is removed.
+process name, window title, start time, and executable path when available. If
+the public process API cannot read the executable path, the candidate carries a
+bounded `executablePathUnavailableReason` instead of silently hiding the field.
+Retry with the opaque `processInstanceId` (preferred) or an explicit PID. Dotted
+process names are preserved; only a terminal `.exe` suffix is removed. Command
+line discovery is not currently included because `Process` has no equivalent
+public in-process source contract; this is a platform scope choice, not local
+path or argument confidentiality policy.
 
 When `launch_app` uses its existing-instance fallback (for example, a
 single-instance launcher exits without owning a window), it applies the same
@@ -734,7 +758,10 @@ replacement response. Passing an old identity to the successor reports
 `stale_window` or `stale_element` rather than exposing its last-known target
 details. A raw numeric HWND cannot encode a process generation, so a
 value Windows has already reassigned to a live successor window represents that
-new window. Existing subscriptions are stopped during the successful
+new window. This cross-session invalidation is absolute: read-only
+current-occupant observation applies only within the originating live session
+and never revives an identity across process instances. Existing subscriptions
+are stopped during the successful
 replacement after the successor and predecessor tombstone are committed, and
 before the recovery response is returned. A failed pre-commit replacement does
 not remove them. Restarting only the MCP server while the target stays alive

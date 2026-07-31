@@ -203,6 +203,8 @@ internal static class McpToolOutputSchema
                 ["processName"] = BoundedStringSchema(512),
                 ["startTimeUtc"] = BoundedStringSchema(512),
                 ["mainWindowTitle"] = BoundedStringSchema(512),
+                ["executablePath"] = BoundedStringSchema(512),
+                ["executablePathUnavailableReason"] = BoundedStringSchema(256),
                 ["elementType"] = BoundedStringSchema(512),
                 ["automationId"] = BoundedStringSchema(512),
                 ["name"] = BoundedStringSchema(512),

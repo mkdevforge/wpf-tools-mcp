@@ -20,6 +20,8 @@ internal static partial class McpToolErrorFilter
     private const int MaxCauseMessageLength = 1024;
     private const int MaxCauseDetailsLength = 4096;
     private const int MaxCandidateTextLength = 512;
+    private const int MaxCandidateExecutablePathLength = 512;
+    private const int MaxCandidateExecutablePathUnavailableReasonLength = 256;
     private const int MaxCandidateXPathLength = 1024;
     private const int MaxRecoveryActions = 8;
     private const int MaxTruncatedReasonLength = 64;
@@ -163,7 +165,11 @@ internal static partial class McpToolErrorFilter
                 WindowHandle = candidate.MainWindowHandle > 0 ? candidate.MainWindowHandle : null,
                 ProcessName = BoundOptional(candidate.ProcessName, MaxCandidateTextLength),
                 StartTimeUtc = BoundOptional(candidate.StartTimeUtc, MaxCandidateTextLength),
-                MainWindowTitle = BoundOptional(candidate.MainWindowTitle, MaxCandidateTextLength)
+                MainWindowTitle = BoundOptional(candidate.MainWindowTitle, MaxCandidateTextLength),
+                ExecutablePath = BoundOptional(candidate.ExecutablePath, MaxCandidateExecutablePathLength),
+                ExecutablePathUnavailableReason = BoundOptional(
+                    candidate.ExecutablePathUnavailableReason,
+                    MaxCandidateExecutablePathUnavailableReasonLength)
             })
             .ToArray();
         var filterCapped = ambiguity.Candidates.Count > candidates.Length;

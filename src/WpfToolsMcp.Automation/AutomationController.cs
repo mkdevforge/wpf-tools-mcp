@@ -9516,6 +9516,9 @@ public sealed partial class AutomationController : IDisposable
             string? uiaXPath = null;
             string? mappedFlaUiXPath = null;
             string? mappedUiaElementId = null;
+            string? sourceUiaElementId = null;
+            UiaSourceIdentityStatus? sourceUiaIdentityStatus = null;
+            int[]? currentUiaRuntimeId = null;
             IReadOnlyList<AutomationElement>? scannedElements = null;
             WpfLocatorIdentity? wpf = null;
             UiaMappingDiagnostics? uiaMapping = null;
@@ -9585,7 +9588,14 @@ public sealed partial class AutomationController : IDisposable
                         id,
                         out uiaXPath,
                         UiaHandleResolutionMode.ObserveCurrentXPathOccupant);
-                    mappedUiaElementId = id;
+                    sourceUiaElementId = id;
+                    sourceUiaIdentityStatus = ClassifyUiaSourceIdentity(
+                        handle,
+                        element,
+                        out currentUiaRuntimeId);
+                    mappedUiaElementId = sourceUiaIdentityStatus == UiaSourceIdentityStatus.Verified
+                        ? id
+                        : null;
                 }
             }
             else
@@ -9691,7 +9701,23 @@ public sealed partial class AutomationController : IDisposable
 
             var allElements = scannedElements ?? EnumerateSelfAndDescendantsDepthFirst(window, controlWalker).ToArray();
             var flaUiXPath = mappedFlaUiXPath ?? ComputeFlaUiXPath(window, element, controlWalker);
-            var uia = CreateUiaLocatorIdentity(element, uiaXPath, flaUiXPath) with
+            var uia = CreateUiaLocatorIdentity(element, uiaXPath, flaUiXPath);
+            if (sourceUiaIdentityStatus is not null &&
+                sourceUiaIdentityStatus != UiaSourceIdentityStatus.Verified &&
+                currentUiaRuntimeId is { Length: > 0 })
+            {
+                mappedUiaElementId = _elementHandles.RegisterUia(
+                    window.Properties.NativeWindowHandle.Value.ToInt64(),
+                    uiaXPath,
+                    currentUiaRuntimeId,
+                    uia.ControlType,
+                    uia.AutomationId,
+                    uia.Name,
+                    uia.ClassName,
+                    uia.Bounds);
+            }
+
+            uia = uia with
             {
                 ElementId = mappedUiaElementId
             };
@@ -9699,7 +9725,9 @@ public sealed partial class AutomationController : IDisposable
             var flaui = CreateFlaUiSnippets(suggestions);
             var response = new GetUiaLocatorsResponse(wpf, uia, suggestions, flaui, uiaMapping)
             {
-                WindowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64()
+                WindowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64(),
+                SourceElementId = sourceUiaElementId,
+                SourceElementIdentityStatus = sourceUiaIdentityStatus
             };
             trace?.SetSummary($"{uia.ControlType} {uia.UiaXPath} recommended={suggestions.Recommended}");
             return response;

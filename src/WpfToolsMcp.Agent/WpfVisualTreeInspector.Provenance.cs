@@ -1900,7 +1900,11 @@ internal static partial class WpfVisualTreeInspector
                 continue;
             }
 
-            if (hasEffectiveValue && AreSafeResourceCandidateValuesEqual(storedValue, effectiveValue))
+            if (hasEffectiveValue &&
+                AreResourceCandidateValuesEqualBestEffort(
+                    storedValue,
+                    effectiveValue,
+                    ref scanIncompleteReason))
             {
                 AddResourceCandidate(
                     key,
@@ -2065,7 +2069,10 @@ internal static partial class WpfVisualTreeInspector
         }
     }
 
-    private static bool AreSafeResourceCandidateValuesEqual(object? candidate, object? effectiveValue)
+    internal static bool AreResourceCandidateValuesEqualBestEffort(
+        object? candidate,
+        object? effectiveValue,
+        ref string? scanIncompleteReason)
     {
         if (ReferenceEquals(candidate, effectiveValue))
         {
@@ -2077,13 +2084,17 @@ internal static partial class WpfVisualTreeInspector
             return false;
         }
 
-        var type = candidate.GetType();
-        if (!IsSafeScalarType(type))
+        try
         {
+            return candidate.Equals(effectiveValue);
+        }
+        catch (Exception ex)
+        {
+            scanIncompleteReason ??= TruncateProvenanceText(
+                $"resource_value_comparison_failed:{ex.GetType().FullName ?? ex.GetType().Name}",
+                512);
             return false;
         }
-
-        return candidate.Equals(effectiveValue);
     }
 
     private static bool AreResourceKeysEqualBestEffort(object candidate, object expected)
@@ -2107,27 +2118,6 @@ internal static partial class WpfVisualTreeInspector
             return false;
         }
     }
-
-    private static bool IsSafeScalarType(Type type) =>
-        type.IsEnum ||
-        type == typeof(string) ||
-        type == typeof(char) ||
-        type == typeof(bool) ||
-        type == typeof(byte) ||
-        type == typeof(sbyte) ||
-        type == typeof(short) ||
-        type == typeof(ushort) ||
-        type == typeof(int) ||
-        type == typeof(uint) ||
-        type == typeof(long) ||
-        type == typeof(ulong) ||
-        type == typeof(float) ||
-        type == typeof(double) ||
-        type == typeof(decimal) ||
-        type == typeof(Guid) ||
-        type == typeof(DateTime) ||
-        type == typeof(DateTimeOffset) ||
-        type == typeof(TimeSpan);
 
     private static InheritancePropertyProvenance BuildInheritanceProvenance(PropertyMetadata? metadata) =>
         new(

@@ -641,6 +641,17 @@ public sealed class ControllerStateRecoverySnapshots
                 Assert.That(ambiguity.Context.Candidates!.All(candidate => candidate.ProcessInstanceId?.Length > 0), Is.True);
                 Assert.That(ambiguity.Context.Candidates!.All(candidate => candidate.WindowHandle > 0), Is.True);
                 Assert.That(ambiguity.Context.Candidates!.All(candidate => candidate.ProcessName == processName), Is.True);
+                Assert.That(
+                    ambiguity.Context.Candidates!.All(candidate =>
+                        string.Equals(
+                            candidate.ExecutablePath,
+                            Path.GetFullPath(lifecycleProbeExe),
+                            StringComparison.OrdinalIgnoreCase)),
+                    Is.True);
+                Assert.That(
+                    ambiguity.Context.Candidates!.All(candidate =>
+                        candidate.ExecutablePathUnavailableReason is null),
+                    Is.True);
                 Assert.That(ambiguity.Cause?.Message, Does.Contain(processName));
             });
 

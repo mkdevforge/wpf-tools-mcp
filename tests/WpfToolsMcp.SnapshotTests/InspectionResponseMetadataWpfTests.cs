@@ -280,6 +280,67 @@ public sealed class InspectionResponseMetadataWpfTests
         }
     }
 
+    [TestCase(DataContextMode.Full)]
+    [TestCase(DataContextMode.Summary)]
+    public void Data_context_formatting_failures_return_bounded_type_fallbacks_and_warnings(
+        DataContextMode mode)
+    {
+        const int maxStringLength = 32;
+        var ownerId = $"data-context-formatting-{mode}-{Guid.NewGuid():N}";
+        var dataContext = new ThrowingDataContextDictionary
+        {
+            [new ThrowingDataContextKey()] = "payload"
+        };
+        var target = new Border
+        {
+            Name = "DataContextTarget",
+            Width = 100,
+            Height = 30,
+            DataContext = dataContext
+        };
+        AutomationProperties.SetAutomationId(target, "DataContextTarget");
+        var window = CreateWindow(target);
+
+        try
+        {
+            ShowAndLayout(window);
+            var response = InspectDataContext(
+                window,
+                ownerId,
+                maxDepth: 2,
+                maxPropertiesPerObject: 10,
+                maxStringLength: maxStringLength,
+                mode: mode);
+            var dictionaryEntry = response.Data!.AsObject().Single();
+            var dataContextType = typeof(ThrowingDataContextDictionary).FullName!;
+            var keyType = typeof(ThrowingDataContextKey).FullName!;
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(response.Summary, Has.Length.EqualTo(maxStringLength));
+                Assert.That(response.Summary, Does.EndWith("..."));
+                Assert.That(dataContextType, Does.StartWith(response.Summary![..^3]));
+                Assert.That(dictionaryEntry.Key, Has.Length.EqualTo(maxStringLength));
+                Assert.That(dictionaryEntry.Key, Does.EndWith("..."));
+                Assert.That(keyType, Does.StartWith(dictionaryEntry.Key[..^3]));
+                Assert.That(dictionaryEntry.Value!.GetValue<string>(), Is.EqualTo("payload"));
+                Assert.That(response.Truncated, Is.True);
+                Assert.That(response.TruncatedReasons, Is.EqualTo(new[] { "maxStringLength" }));
+                Assert.That(
+                    response.Warnings,
+                    Is.EqualTo(new[]
+                    {
+                        "DataContext.ToString: InvalidOperationException",
+                        "DataContext dictionary key ToString: InvalidOperationException"
+                    }));
+            });
+        }
+        finally
+        {
+            CloseAndRelease(window, ownerId);
+        }
+    }
+
     [Test]
     public void Style_and_template_nested_collections_report_one_item_lookahead()
     {
@@ -435,13 +496,14 @@ public sealed class InspectionResponseMetadataWpfTests
         string ownerId,
         int maxDepth,
         int maxPropertiesPerObject,
-        int maxStringLength) =>
+        int maxStringLength,
+        DataContextMode mode = DataContextMode.Full) =>
         WpfVisualTreeInspector.GetDataContext(
             ownerId,
             new GetDataContextRequest(
                 WindowHandle: GetWindowHandle(window),
                 Locator: new ElementLocator(AutomationId: "DataContextTarget"),
-                Mode: DataContextMode.Full,
+                Mode: mode,
                 MaxDepth: maxDepth,
                 MaxPropertiesPerObject: maxPropertiesPerObject,
                 MaxStringLength: maxStringLength),
@@ -564,6 +626,18 @@ public sealed class InspectionResponseMetadataWpfTests
     private sealed class DataContextChild
     {
         public string Value { get; set; } = string.Empty;
+    }
+
+    private sealed class ThrowingDataContextDictionary : Dictionary<object, string>
+    {
+        public override string ToString() =>
+            throw new InvalidOperationException("Synthetic DataContext formatting failure.");
+    }
+
+    private sealed class ThrowingDataContextKey
+    {
+        public override string ToString() =>
+            throw new InvalidOperationException("Synthetic dictionary key formatting failure.");
     }
 
     private sealed class ThrowingTemplateFrameworkElement : FrameworkElement
