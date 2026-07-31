@@ -9,12 +9,17 @@ public sealed class AgentRemoteException : InvalidOperationException
 {
     private const string DefaultMessage = "Agent call failed.";
 
-    internal AgentRemoteException(string method, string? remoteMessage, string? remoteDetails)
+    internal AgentRemoteException(
+        string method,
+        string? remoteMessage,
+        string? remoteDetails,
+        string? remoteCode = null)
         : base(GetMessage(remoteMessage))
     {
         Method = method;
         RemoteMessage = remoteMessage;
         RemoteDetails = remoteDetails;
+        RemoteCode = remoteCode;
     }
 
     public string Method { get; }
@@ -22,6 +27,8 @@ public sealed class AgentRemoteException : InvalidOperationException
     public string? RemoteMessage { get; }
 
     public string? RemoteDetails { get; }
+
+    public string? RemoteCode { get; }
 
     private static string GetMessage(string? remoteMessage) =>
         string.IsNullOrWhiteSpace(remoteMessage) ? DefaultMessage : remoteMessage;
@@ -174,7 +181,8 @@ internal sealed class AgentClient : IAsyncDisposable
                 throw new AgentRemoteException(
                     method,
                     response.Error?.Message,
-                    response.Error?.Details);
+                    response.Error?.Details,
+                    response.Error?.Code);
             }
 
             return response.Result;

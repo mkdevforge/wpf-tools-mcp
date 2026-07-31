@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -52,7 +51,9 @@ internal static partial class WpfVisualTreeInspector
 
         if (resolvedWindowHandle == 0)
         {
-            throw new InvalidOperationException("wpf_window_not_found: the target WPF window does not have a native handle.");
+            throw AgentToolError.InvalidOperation(
+                "wpf_window_not_found",
+                "wpf_window_not_found: the target WPF window does not have a native handle.");
         }
 
         using var treeService = new VisualTreeService();
@@ -96,6 +97,7 @@ internal static partial class WpfVisualTreeInspector
                     startedAtUtc,
                     captureStartTimestamp,
                     budget.MaxValueLength,
+                    targetAgentElementId,
                     ref remainingPayloadChars,
                     capture: () => GetVisualTree(
                         ownerId,
@@ -120,6 +122,7 @@ internal static partial class WpfVisualTreeInspector
                     startedAtUtc,
                     captureStartTimestamp,
                     budget.MaxValueLength,
+                    targetAgentElementId,
                     ref remainingPayloadChars,
                     capture: () =>
                     {
@@ -165,6 +168,7 @@ internal static partial class WpfVisualTreeInspector
                     startedAtUtc,
                     captureStartTimestamp,
                     budget.MaxValueLength,
+                    targetAgentElementId,
                     ref remainingPayloadChars,
                     capture: () => GetLayoutContext(
                         ownerId,
@@ -179,7 +183,7 @@ internal static partial class WpfVisualTreeInspector
                         maxResolutionNodes: budget.MaxNodes),
                     normalize: static response => response with
                     {
-                        Element = StripDiagnosticAgentIds(response.Element)
+                        Element = RemoveInternalAgentElementIds(response.Element)
                     },
                     isTruncated: static response => response.Truncated,
                     truncatedReason: static response => response.TruncatedReason),
@@ -190,6 +194,7 @@ internal static partial class WpfVisualTreeInspector
                     startedAtUtc,
                     captureStartTimestamp,
                     budget.MaxValueLength,
+                    targetAgentElementId,
                     ref remainingPayloadChars,
                     capture: () => GetBindingInfo(
                         ownerId,
@@ -215,6 +220,7 @@ internal static partial class WpfVisualTreeInspector
                     startedAtUtc,
                     captureStartTimestamp,
                     budget.MaxValueLength,
+                    targetAgentElementId,
                     ref remainingPayloadChars,
                     capture: () =>
                     {
@@ -256,6 +262,7 @@ internal static partial class WpfVisualTreeInspector
                     startedAtUtc,
                     captureStartTimestamp,
                     budget.MaxValueLength,
+                    targetAgentElementId,
                     ref remainingPayloadChars,
                     capture: () => GetBindingErrors(
                         ownerId,
@@ -294,7 +301,9 @@ internal static partial class WpfVisualTreeInspector
         var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
         if (hasLocator && hasElementId)
         {
-            throw new ArgumentException("invalid_request: provide at most one of locator or elementId.");
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: provide at most one of locator or elementId.");
         }
 
         if (!hasLocator && !hasElementId)
@@ -335,6 +344,7 @@ internal static partial class WpfVisualTreeInspector
         DateTimeOffset captureStartedAtUtc,
         long captureStartTimestamp,
         int maxEvidenceValueLength,
+        string internalAgentElementId,
         ref int remainingPayloadChars,
         Func<T> capture,
         Func<T, T> normalize,
@@ -412,7 +422,10 @@ internal static partial class WpfVisualTreeInspector
         {
             var completedOffsetMs = GetElapsedMilliseconds(captureStartTimestamp);
             var sectionCompletedAtUtc = captureStartedAtUtc.AddMilliseconds(completedOffsetMs);
-            var message = GetBoundedDiagnosticFailureMessage(ex, maxEvidenceValueLength);
+            var message = GetBoundedDiagnosticFailureMessage(
+                ex,
+                maxEvidenceValueLength,
+                internalAgentElementId);
             return new DiagnosticSectionResult(
                 Section: section,
                 Status: DiagnosticSectionStatus.Failed,
@@ -563,7 +576,7 @@ internal static partial class WpfVisualTreeInspector
 
         return response with
         {
-            Element = StripDiagnosticAgentIds(response.Element),
+            Element = RemoveInternalAgentElementIds(response.Element),
             Properties = properties,
             Truncated = response.Truncated || valueTruncated,
             TruncatedReason = response.TruncatedReason ?? (valueTruncated ? "maxValueLength" : null)
@@ -589,7 +602,7 @@ internal static partial class WpfVisualTreeInspector
 
         return response with
         {
-            Element = StripDiagnosticAgentIds(response.Element),
+            Element = RemoveInternalAgentElementIds(response.Element),
             Bindings = bindings,
             Truncated = response.Truncated || valueTruncated,
             TruncatedReason = response.TruncatedReason ?? (valueTruncated ? "maxValueLength" : null)
@@ -681,7 +694,7 @@ internal static partial class WpfVisualTreeInspector
         }
     }
 
-    private static ElementRef StripDiagnosticAgentIds(ElementRef element) =>
+    private static ElementRef RemoveInternalAgentElementIds(ElementRef element) =>
         element with
         {
             ElementId = null,
@@ -689,15 +702,50 @@ internal static partial class WpfVisualTreeInspector
             ElementIdWpf = null
         };
 
-    private static string GetBoundedDiagnosticFailureMessage(Exception exception, int requestedMaxLength)
+    internal static string GetBoundedDiagnosticFailureMessage(
+        Exception exception,
+        int requestedMaxLength,
+        string internalAgentElementId)
     {
-        var message = exception.GetBaseException().Message;
-        if (string.IsNullOrWhiteSpace(message))
+        Exception baseException;
+        try
         {
-            message = exception.GetBaseException().GetType().Name;
+            baseException = exception.GetBaseException() ?? exception;
+        }
+        catch (Exception baseExceptionFailure)
+        {
+            return BoundDiagnosticFailureMessage(
+                $"{exception.GetType().FullName ?? exception.GetType().Name}: " +
+                $"baseExceptionGetterFailed:{baseExceptionFailure.GetType().FullName ?? baseExceptionFailure.GetType().Name}",
+                requestedMaxLength,
+                internalAgentElementId);
         }
 
-        message = ScrubDiagnosticFailureMessage(message.Trim());
+        string? message;
+        try
+        {
+            message = baseException.Message;
+        }
+        catch (Exception messageFailure)
+        {
+            message = $"{baseException.GetType().FullName ?? baseException.GetType().Name}: " +
+                $"messageGetterFailed:{messageFailure.GetType().FullName ?? messageFailure.GetType().Name}";
+        }
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            message = baseException.GetType().Name;
+        }
+
+        return BoundDiagnosticFailureMessage(message, requestedMaxLength, internalAgentElementId);
+    }
+
+    private static string BoundDiagnosticFailureMessage(
+        string message,
+        int requestedMaxLength,
+        string internalAgentElementId)
+    {
+        message = ReplaceInternalAgentElementId(message.Trim(), internalAgentElementId);
         var maxLength = Math.Clamp(
             requestedMaxLength,
             DiagnosticSnapshotLimits.MinValueLength,
@@ -716,42 +764,15 @@ internal static partial class WpfVisualTreeInspector
         return message[..take] + "...";
     }
 
-    internal static string ScrubDiagnosticFailureMessage(string message)
+    internal static string ReplaceInternalAgentElementId(
+        string message,
+        string internalAgentElementId)
     {
-        const string privateIdPrefix = "wpfobj_";
-        const int privateIdValueLength = 16;
-        const string replacement = "[private-wpf-id]";
-
-        var matchStart = message.IndexOf(privateIdPrefix, StringComparison.Ordinal);
-        if (matchStart < 0)
-        {
-            return message;
-        }
-
-        var result = new StringBuilder(message.Length);
-        var copyStart = 0;
-        while (matchStart >= 0)
-        {
-            result.Append(message, copyStart, matchStart - copyStart);
-            result.Append(replacement);
-
-            var matchEnd = matchStart + privateIdPrefix.Length;
-            var maximumMatchEnd = Math.Min(message.Length, matchEnd + privateIdValueLength);
-            while (matchEnd < maximumMatchEnd && IsPrivateWpfElementIdCharacter(message[matchEnd]))
-            {
-                matchEnd++;
-            }
-
-            copyStart = matchEnd;
-            matchStart = message.IndexOf(privateIdPrefix, copyStart, StringComparison.Ordinal);
-        }
-
-        result.Append(message, copyStart, message.Length - copyStart);
-        return result.ToString();
+        const string replacement = "[internal-agent-element-id]";
+        return string.IsNullOrEmpty(internalAgentElementId)
+            ? message
+            : message.Replace(internalAgentElementId, replacement, StringComparison.Ordinal);
     }
-
-    private static bool IsPrivateWpfElementIdCharacter(char character) =>
-        char.IsAsciiLetterOrDigit(character) || character is '_' or '-';
 
     private static string GetDiagnosticFailureCode(string message)
     {

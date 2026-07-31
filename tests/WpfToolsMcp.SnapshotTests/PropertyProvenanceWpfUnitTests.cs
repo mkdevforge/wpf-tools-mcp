@@ -69,6 +69,45 @@ public sealed class PropertyProvenanceWpfUnitTests
         });
     }
 
+    [Test]
+    public void Resource_key_comparison_uses_same_type_custom_equality()
+    {
+        var candidate = new ResourceValue(42);
+        var expected = new ResourceValue(42);
+        string? scanIncompleteReason = null;
+
+        var matched = WpfVisualTreeInspector.AreResourceKeysEqualBestEffort(
+            candidate,
+            expected,
+            ref scanIncompleteReason);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(matched, Is.True);
+            Assert.That(candidate.EqualsCalls, Is.EqualTo(1));
+            Assert.That(scanIncompleteReason, Is.Null);
+        });
+    }
+
+    [Test]
+    public void Resource_key_comparison_marks_the_scan_incomplete_when_custom_equality_throws()
+    {
+        string? scanIncompleteReason = null;
+
+        var matched = WpfVisualTreeInspector.AreResourceKeysEqualBestEffort(
+            new ThrowingResourceValue(),
+            new ThrowingResourceValue(),
+            ref scanIncompleteReason);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(matched, Is.False);
+            Assert.That(
+                scanIncompleteReason,
+                Is.EqualTo("resource_key_comparison_failed:System.InvalidOperationException"));
+        });
+    }
+
     private static void AssertResourcesStayAbsent(object owner)
     {
         Assert.That(

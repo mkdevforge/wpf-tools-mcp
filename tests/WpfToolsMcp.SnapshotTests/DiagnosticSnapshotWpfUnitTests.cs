@@ -390,17 +390,34 @@ public sealed class DiagnosticSnapshotWpfUnitTests
     }
 
     [Test]
-    public void Diagnostic_failure_messages_scrub_private_wpf_ids()
+    public void Diagnostic_failure_messages_replace_only_the_known_internal_agent_element_id()
     {
-        var message = WpfVisualTreeInspector.ScrubDiagnosticFailureMessage(
-            "wpf_handle_stale:not_found: 'wpfobj_AbCdEf0123_-xYz9'; previous=wpfobj_1234567890ABCDEF.");
+        const string internalAgentElementId = "wpfobj_AbCdEf0123_-xYz9";
+        var message = WpfVisualTreeInspector.ReplaceInternalAgentElementId(
+            $"wpf_handle_stale:not_found: '{internalAgentElementId}'; applicationText=wpfobj_1234567890ABCDEF.",
+            internalAgentElementId);
 
         Assert.Multiple(() =>
         {
-            Assert.That(message, Does.Not.Contain("wpfobj_"));
-            Assert.That(message, Does.Contain("[private-wpf-id]"));
-            Assert.That(message.Split("[private-wpf-id]").Length - 1, Is.EqualTo(2));
+            Assert.That(message, Does.Contain("[internal-agent-element-id]"));
+            Assert.That(message.Split("[internal-agent-element-id]").Length - 1, Is.EqualTo(1));
+            Assert.That(message, Does.Contain("applicationText=wpfobj_1234567890ABCDEF"));
         });
+    }
+
+    [Test]
+    public void Diagnostic_failure_message_capture_survives_a_throwing_message_getter()
+    {
+        var message = WpfVisualTreeInspector.GetBoundedDiagnosticFailureMessage(
+            new ThrowingDiagnosticMessageException(),
+            512,
+            "wpfobj_unused");
+
+        Assert.That(
+            message,
+            Is.EqualTo(
+                $"{typeof(ThrowingDiagnosticMessageException).FullName}: " +
+                "messageGetterFailed:System.InvalidOperationException"));
     }
 
     private static void AssertCompleteGeneration(
@@ -534,4 +551,9 @@ public sealed class DiagnosticSnapshotWpfUnitTests
     }
 
     private sealed record GenerationTuple(int Generation, string Label);
+
+    private sealed class ThrowingDiagnosticMessageException : Exception
+    {
+        public override string Message => throw new InvalidOperationException("Message getter failed.");
+    }
 }

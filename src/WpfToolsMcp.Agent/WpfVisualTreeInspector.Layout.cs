@@ -182,7 +182,9 @@ internal static partial class WpfVisualTreeInspector
             cancellationToken);
         if (chain.Count == 0 || !ReferenceEquals(chain[^1].Element, resolved.Element))
         {
-            throw new InvalidOperationException("wpf_layout_context: target is detached from the selected window.");
+            throw AgentToolError.InvalidOperation(
+                "wpf_layout_context",
+                "wpf_layout_context: target is detached from the selected window.");
         }
 
         var evidence = new LayoutEvidenceCollector(MaxLayoutUnavailableEvidence);

@@ -179,6 +179,7 @@ public sealed class AgentClientLifecycleTests
         const string method = "wpf/diagnostic_operation";
         const string remoteMessage = @"Backend failed at C:\work\example-project with marker=message-evidence.";
         const string remoteDetails = @"stderr: marker=detail-evidence; source=C:\Users\operator\diagnostic.log";
+        const string remoteCode = "wpf_backend_unavailable";
         var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
         await using var server = new NamedPipeServerStream(
             pipeName,
@@ -204,7 +205,7 @@ public sealed class AgentClientLifecycleTests
                 new AgentResponse(
                     request.Id,
                     Ok: false,
-                    Error: new AgentError(remoteMessage, remoteDetails)),
+                    Error: new AgentError(remoteMessage, remoteDetails, remoteCode)),
                 timeout.Token);
 
             var exception = Assert.ThrowsAsync<AgentRemoteException>(async () =>
@@ -219,6 +220,7 @@ public sealed class AgentClientLifecycleTests
                 Assert.That(exception.Method, Is.EqualTo(method));
                 Assert.That(exception.RemoteMessage, Is.EqualTo(remoteMessage));
                 Assert.That(exception.RemoteDetails, Is.EqualTo(remoteDetails));
+                Assert.That(exception.RemoteCode, Is.EqualTo(remoteCode));
             });
         }
         finally

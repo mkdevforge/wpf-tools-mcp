@@ -427,14 +427,19 @@ for the full structured backend failure state.
 
 Every tool advertises a success-or-error `outputSchema`. Tool execution failures
 set `isError=true` and return `{ "error": { "code", "detail", ... } }` as
-structured content plus fixed `code: detail` compatibility text. The envelope
+structured content plus bounded `code: detail` compatibility text that retains
+the observed diagnostic cause. The envelope
 can add optional `stage`, `retryable`, `retryAfterMs`, `recoveryActions`, and
 validated session/window/element/backend or bounded candidate/count/truncation
 context. An optional bounded cause retains observed exception type/message and
 adapter details. Candidate context can include bounded process/window/element
-names, paths, times, and bounds. Embedded backend `FailureInfo` values retain the
-same retry semantics and cause evidence in capability and fallback state; a
-throwing message getter is represented by a bounded unavailable reason.
+names, exact paths, times, and bounds; oversized exact paths are omitted with
+explicit metadata rather than sliced. Embedded backend `FailureInfo` values
+retain the same retry semantics and cause evidence in capability and fallback
+state; a throwing message getter is represented by a bounded unavailable reason.
+Agent-returned tool codes have explicit protocol provenance; coincidental code-like
+application exception text remains cause evidence rather than changing the public
+error classification.
 Malformed JSON-RPC, unknown tools, request cancellation, and server lifecycle
 failures remain protocol errors. Bounded local paths, injector output, target
 exception messages, and adapter-provided remote details are diagnostic evidence.
@@ -522,11 +527,15 @@ identity is bounded, and overlong paths are omitted rather than truncated.
 Sequences do not define cross-stream or causal ordering. Subscription loss counters
 have explicit per-poll and cumulative forms, whole serialized events are subject to
 the negotiated payload budget, and completion is represented by exactly one typed
-terminal event while compatibility completion fields remain pollable during the
-retention window. Trace retention loss and inline response truncation are reported
-separately. The runtime envelope currently covers MCP-owned streams. Arbitrary
-application logs have no generic WPF source or ordering contract and therefore
-require explicit adapters that define capture, parsing, ordering, and bounds. An
+terminal event. Abnormal terminal events retain a bounded diagnostic cause and
+report when that cause had to be compacted, while compatibility completion fields
+remain pollable during the retention window. A cleanup failure does not replace
+an earlier observation failure; it is retained as bounded detail on the primary
+cause. Trace retention loss and inline response truncation are reported separately.
+The runtime envelope currently
+covers MCP-owned streams. Arbitrary application logs have no generic WPF source
+or ordering contract and therefore require explicit adapters that define capture,
+parsing, ordering, and bounds. An
 unhandled-exception adapter is permitted when it is explicitly enabled and
 bounded, observes only, and never marks an exception handled or otherwise alters
 the application's exception flow. This is a source-contract boundary rather than

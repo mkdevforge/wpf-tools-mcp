@@ -77,9 +77,13 @@ branches: the tool's typed success schema and the common tool-error schema.
 Successful calls return their typed result as an object in `structuredContent`
 and retain the same compact JSON in one text content block. Tool failures set
 `isError=true`, put `{ "error": { "code", "detail", ... } }` in
-`structuredContent`, and include concise `code: detail` compatibility text.
+`structuredContent`, and include bounded `code: detail` compatibility text with
+the same diagnostic cause when one was observed.
 Callers should branch on `error.code`; malformed JSON-RPC, unknown tools, and
 request cancellation remain protocol errors rather than tool-error envelopes.
+Agent-side tool failures carry an explicit tool-owned code. Application exception
+text that happens to begin with the same words remains diagnostic cause evidence
+instead of being reclassified as an MCP error code.
 
 Enable the full profile with a command argument:
 
@@ -286,10 +290,12 @@ semantics and whose `Cause` follows the same bounds.
 Error context can include validated session, window, element, and backend
 identity plus bounded process or element candidates. Candidate evidence may
 include observed process names, window titles, start times, control types,
-element names, AutomationIds, paths, and bounds. Bounded filesystem paths,
-injector output, and target exception messages are also useful local evidence
-and may appear in `Cause` or traces. Adapter `Details` can likewise carry bounded
-remote diagnostic text. Payload limits still apply to every field.
+element names, AutomationIds, exact paths, and bounds. An exact path that exceeds
+its field budget is omitted with explicit metadata rather than returned as an
+invalid prefix. Bounded filesystem paths, injector output, and target exception
+messages are also useful local evidence and may appear in compatibility text,
+`Cause`, or traces. Adapter `Details` can likewise carry bounded remote
+diagnostic text. Payload limits still apply to every field.
 
 ### Coherent Diagnostic Snapshots
 
@@ -397,7 +403,10 @@ retain exact static-resource origin, expose the winning style/template setter
 or trigger, identify the inheritance provider or animation clock, or expose a
 pre-coercion value. Dynamic-resource keys use an implementation detail and are
 best effort. Custom resource keys use bounded best-effort formatting; a failed
-formatter leaves type evidence and an explicit unavailable reason.
+formatter leaves type evidence and an explicit unavailable reason. Custom
+`Type` implementations likewise have their represented `FullName` or `Name`
+read best effort; a failing getter is caught and reported instead of being
+categorically skipped.
 
 Resource candidates cover bounded element, ancestor, application, and
 pre-existing merged-dictionary scopes. The agent reads only already-existing
@@ -405,8 +414,9 @@ owner backing fields and raw dictionary storage through guarded implementation
 access. It never calls lazy WPF `Resources` getters, creates a missing resource
 collection, copies a whole dictionary, or realizes a deferred resource.
 Same-type application resource values are compared through caught best-effort
-`Equals`; a throwing comparison marks the scan incomplete with explicit
-`resource_value_comparison_failed` evidence instead of silently omitting a
+`Equals`; a throwing value or key comparison marks the scan incomplete with
+explicit `resource_value_comparison_failed` or
+`resource_key_comparison_failed` evidence instead of silently omitting a
 candidate while claiming completeness.
 `ScanComplete` only describes that candidate scan; it does not upgrade a
 candidate into exact WPF lookup origin or claim complete precedence/shadowing
@@ -512,8 +522,12 @@ confidentiality prohibition for the same-user local tool.
 `coalescedSinceLastPoll`, and `truncatedSinceLastPoll` fields alongside the legacy
 `dropped`, `coalesced`, and `truncated` aliases; each pair has the same value.
 Cumulative totals remain available. Natural or source-failure completion appends
-exactly one `subscription_terminal` event with a typed `{ code, completedAtUtc }`
-payload. Keep polling while `hasMore=true` so the terminal event can be drained.
+exactly one `subscription_terminal` event with a typed `{ code, completedAtUtc,
+cause?, causeTruncated? }` payload. Abnormal completion retains its bounded local
+diagnostic cause; natural completion remains code-only. Keep polling while
+`hasMore=true` so the terminal event can be drained. If abnormal observation and
+resource cleanup both fail, the primary completion code and cause are retained
+and the cleanup failure is appended as bounded cause detail.
 The legacy `completed`, `completionReason`, and `completedAtUtc` fields remain
 available throughout the completed subscription's retention window.
 
@@ -773,8 +787,9 @@ the same name. Instead it returns an `ambiguous_process` error with bounded,
 deterministically ordered candidates containing their index, opaque
 `processInstanceId`, PID, positive main-window handle, and bounded observed
 process name, window title, start time, and executable path when available. If
-the public process API cannot read the executable path, the candidate carries a
-bounded `executablePathUnavailableReason` instead of silently hiding the field.
+the public process API cannot read the executable path, or the exact path exceeds
+the candidate field budget, the candidate omits it and carries a bounded
+`executablePathUnavailableReason` with the observed failure or omission detail.
 Retry with the opaque `processInstanceId` (preferred) or an explicit PID. Dotted
 process names are preserved; only a terminal `.exe` suffix is removed. Command
 line discovery is not currently included because `Process` has no equivalent

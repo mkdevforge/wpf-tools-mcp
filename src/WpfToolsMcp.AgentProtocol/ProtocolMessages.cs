@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 namespace WpfToolsMcp.AgentProtocol;
 
@@ -6,7 +7,10 @@ public sealed record AgentRequest(string Id, string Method, JsonNode? Params = n
 
 public sealed record AgentResponse(string Id, bool Ok, JsonNode? Result = null, AgentError? Error = null);
 
-public sealed record AgentError(string Message, string? Details = null);
+public sealed record AgentError(
+    string Message,
+    string? Details = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Code = null);
 
 public sealed record AgentCapabilitiesResponse(
     int ProtocolVersion,

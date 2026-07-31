@@ -209,6 +209,7 @@ internal static class McpToolOutputSchema
                 ["automationId"] = BoundedStringSchema(512),
                 ["name"] = BoundedStringSchema(512),
                 ["xpath"] = BoundedStringSchema(1024),
+                ["xpathOmitted"] = new JsonObject { ["type"] = "boolean" },
                 ["bounds"] = CreateRectSchema()
             }
         };

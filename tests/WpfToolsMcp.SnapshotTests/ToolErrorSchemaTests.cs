@@ -108,7 +108,8 @@ public sealed class ToolErrorSchemaTests
                         ElementType = "Button",
                         AutomationId = "Save",
                         Name = "Save document",
-                        XPath = "/Window/Button",
+                        XPath = null,
+                        XPathOmitted = true,
                         Bounds = new Rect(1, 2, 3, 4)
                     }
                 ]
@@ -177,6 +178,7 @@ public sealed class ToolErrorSchemaTests
                 Is.False,
                 "Command-line discovery is deferred because Process has no public in-process source contract, not because local diagnostics are private.");
             Assert.That(candidateProperties.GetProperty("xpath").GetProperty("maxLength").GetInt32(), Is.EqualTo(1_024));
+            Assert.That(candidateProperties.TryGetProperty("xpathOmitted", out _), Is.True);
             Assert.That(candidateProperties.TryGetProperty("bounds", out _), Is.True);
         });
     }

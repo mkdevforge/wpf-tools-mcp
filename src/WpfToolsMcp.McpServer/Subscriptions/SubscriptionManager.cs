@@ -266,7 +266,7 @@ public sealed class SubscriptionManager : IDisposable
             toSignal.TrySetResult(true);
         }
 
-        public bool Complete(string reason)
+        public bool Complete(string reason, DiagnosticCauseInfo? cause = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(reason);
 
@@ -280,14 +280,12 @@ public sealed class SubscriptionManager : IDisposable
 
                 var completedAtUtc = _utcNow().ToUniversalTime();
                 var sequence = ++_sequence;
-                var terminalPayload = JsonSerializer.SerializeToNode(
-                    new SubscriptionTerminalEvent(reason, completedAtUtc))!;
-                var terminalEvent = CreateEvent(
+                var terminalEvent = CreateTerminalEvent(
                     sequence,
-                    SubscriptionEventKinds.Terminal,
-                    terminalPayload,
-                    completedAtUtc);
-                var serializedChars = GetSerializedChars(terminalEvent);
+                    reason,
+                    completedAtUtc,
+                    cause,
+                    out var serializedChars);
                 if (serializedChars > MaxPayloadChars)
                 {
                     throw new InvalidOperationException(
@@ -311,6 +309,114 @@ public sealed class SubscriptionManager : IDisposable
 
             toSignal.TrySetResult(true);
             return true;
+        }
+
+        private SubscriptionEvent CreateTerminalEvent(
+            int sequence,
+            string reason,
+            DateTimeOffset completedAtUtc,
+            DiagnosticCauseInfo? cause,
+            out int serializedChars)
+        {
+            var terminalEvent = BuildTerminalEvent(
+                sequence,
+                reason,
+                completedAtUtc,
+                cause,
+                causeTruncated: false);
+            serializedChars = GetSerializedChars(terminalEvent);
+            if (serializedChars <= MaxPayloadChars || cause is null)
+            {
+                return terminalEvent;
+            }
+
+            var compactCause = new DiagnosticCauseInfo(
+                BoundTerminalText(cause.Type, 256) ?? nameof(Exception))
+            {
+                Message = BoundTerminalText(cause.Message, 512),
+                Details = cause.Message is null
+                    ? BoundTerminalText(cause.Details, 512)
+                    : null,
+                MessageUnavailableReason = cause.Message is null && cause.Details is null
+                    ? BoundTerminalText(cause.MessageUnavailableReason, 512)
+                    : null
+            };
+            terminalEvent = BuildTerminalEvent(
+                sequence,
+                reason,
+                completedAtUtc,
+                compactCause,
+                causeTruncated: true);
+            serializedChars = GetSerializedChars(terminalEvent);
+            if (serializedChars <= MaxPayloadChars)
+            {
+                return terminalEvent;
+            }
+
+            terminalEvent = BuildTerminalEvent(
+                sequence,
+                reason,
+                completedAtUtc,
+                new DiagnosticCauseInfo(BoundTerminalText(cause.Type, 128) ?? nameof(Exception)),
+                causeTruncated: true);
+            serializedChars = GetSerializedChars(terminalEvent);
+            if (serializedChars <= MaxPayloadChars)
+            {
+                return terminalEvent;
+            }
+
+            terminalEvent = BuildTerminalEvent(
+                sequence,
+                reason,
+                completedAtUtc,
+                cause: null,
+                causeTruncated: true);
+            serializedChars = GetSerializedChars(terminalEvent);
+            return terminalEvent;
+        }
+
+        private SubscriptionEvent BuildTerminalEvent(
+            int sequence,
+            string reason,
+            DateTimeOffset completedAtUtc,
+            DiagnosticCauseInfo? cause,
+            bool causeTruncated)
+        {
+            var payload = JsonSerializer.SerializeToNode(
+                new SubscriptionTerminalEvent(reason, completedAtUtc)
+                {
+                    Cause = cause,
+                    CauseTruncated = causeTruncated ? true : null
+                })!;
+            return CreateEvent(
+                sequence,
+                SubscriptionEventKinds.Terminal,
+                payload,
+                completedAtUtc);
+        }
+
+        internal static string? BoundTerminalText(string? value, int maximumLength)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            var trimmed = value.Trim();
+            if (trimmed.Length <= maximumLength)
+            {
+                return trimmed;
+            }
+
+            var length = maximumLength;
+            if (length > 0 &&
+                char.IsHighSurrogate(trimmed[length - 1]) &&
+                char.IsLowSurrogate(trimmed[length]))
+            {
+                length--;
+            }
+
+            return trimmed[..length];
         }
 
         public SubscriptionDrain Drain(int maxBatch)
@@ -691,7 +797,9 @@ public sealed class SubscriptionManager : IDisposable
         }
         catch (Exception ex)
         {
-            if (!state.IsStopping && state.Complete(classifyFailure(ex)))
+            if (!state.IsStopping && state.Complete(
+                    classifyFailure(ex),
+                    FailureDiagnostics.CreateDiagnosticCause(ex)))
             {
                 RetainCompletedSubscription(state);
             }
@@ -860,7 +968,8 @@ public sealed class SubscriptionManager : IDisposable
                     state,
                     automation.IsAttached
                         ? SubscriptionTerminalCodes.AgentConnectionLost
-                        : SubscriptionTerminalCodes.TargetExited).ConfigureAwait(false);
+                        : SubscriptionTerminalCodes.TargetExited,
+                    ex).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -869,28 +978,80 @@ public sealed class SubscriptionManager : IDisposable
             {
                 await CompletePropertySubscriptionAsync(
                     state,
-                    ClassifySubscriptionFailure(ex, automation)).ConfigureAwait(false);
+                    ClassifySubscriptionFailure(ex, automation),
+                    ex).ConfigureAwait(false);
             }
         }
     }
 
-    private async Task CompletePropertySubscriptionAsync(
+    internal async Task CompletePropertySubscriptionAsync(
         SubscriptionState state,
-        string reason)
+        string reason,
+        Exception? failure = null)
     {
+        Exception? releaseFailure = null;
         try
         {
             await state.ReleaseResourceAsync().ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex)
         {
-            reason = SubscriptionTerminalCodes.SourceReleaseFailed;
+            if (failure is null)
+            {
+                reason = SubscriptionTerminalCodes.SourceReleaseFailed;
+                failure = ex;
+            }
+            else
+            {
+                releaseFailure = ex;
+            }
         }
 
-        if (state.Complete(reason))
+        var cause = failure is null
+            ? null
+            : FailureDiagnostics.CreateDiagnosticCause(failure);
+        if (cause is not null && releaseFailure is not null)
+        {
+            cause = AppendResourceReleaseFailure(cause, releaseFailure);
+        }
+
+        if (state.Complete(reason, cause))
         {
             RetainCompletedSubscription(state);
         }
+    }
+
+    private static DiagnosticCauseInfo AppendResourceReleaseFailure(
+        DiagnosticCauseInfo primaryCause,
+        Exception releaseFailure)
+    {
+        var releaseCause = FailureDiagnostics.CreateDiagnosticCause(releaseFailure);
+        var releaseSummary = $"{SubscriptionTerminalCodes.SourceReleaseFailed}: {releaseCause.Type}";
+        if (!string.IsNullOrWhiteSpace(releaseCause.Message))
+        {
+            releaseSummary += $": {releaseCause.Message}";
+        }
+        else if (!string.IsNullOrWhiteSpace(releaseCause.MessageUnavailableReason))
+        {
+            releaseSummary += $" (message unavailable: {releaseCause.MessageUnavailableReason})";
+        }
+
+        if (!string.IsNullOrWhiteSpace(releaseCause.Details))
+        {
+            releaseSummary += $" Details: {releaseCause.Details}";
+        }
+
+        var boundedReleaseSummary = SubscriptionState.BoundTerminalText(releaseSummary, 1_024)!;
+        var boundedPrimaryDetails = SubscriptionState.BoundTerminalText(
+            primaryCause.Details,
+            4_096 - boundedReleaseSummary.Length - 1);
+        var combinedDetails = boundedPrimaryDetails is null
+            ? boundedReleaseSummary
+            : $"{boundedPrimaryDetails}\n{boundedReleaseSummary}";
+        return primaryCause with
+        {
+            Details = combinedDetails
+        };
     }
 
     private static async Task ReleasePropertyObservationAsync(

@@ -58,7 +58,8 @@ internal static partial class WpfVisualTreeInspector
 
         if (requestedDependencyProperties.Count + requestedDataContextPaths.Count is 0)
         {
-            throw new ArgumentException(
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
                 "invalid_request: provide at least one dependency property or DataContext path.");
         }
 
@@ -90,7 +91,9 @@ internal static partial class WpfVisualTreeInspector
             cancellationToken);
         if (definitions.Count is 0)
         {
-            throw new ArgumentException("invalid_request: all requested watches were duplicates.");
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: all requested watches were duplicates.");
         }
 
         var elementRef = BuildElementRefWpf(ownerId, element, resolved.XPath, FindReturnFields.Standard);
@@ -201,7 +204,8 @@ internal static partial class WpfVisualTreeInspector
             var value = requested[index];
             if (string.IsNullOrWhiteSpace(value))
             {
-                throw new ArgumentException(
+                throw AgentToolError.InvalidArgument(
+                    "invalid_request",
                     $"invalid_request: {parameterName} cannot contain blank values.",
                     parameterName);
             }
@@ -209,7 +213,8 @@ internal static partial class WpfVisualTreeInspector
             value = value.Trim();
             if (value.Length > MaxObservationPathLength)
             {
-                throw new ArgumentException(
+                throw AgentToolError.InvalidArgument(
+                    "invalid_request",
                     $"invalid_request: {parameterName} entries cannot exceed {MaxObservationPathLength} characters.",
                     parameterName);
             }
@@ -257,7 +262,8 @@ internal static partial class WpfVisualTreeInspector
             }
 
             var descriptor = DependencyPropertyDescriptor.FromProperty(property, element.GetType())
-                ?? throw new InvalidOperationException(
+                ?? throw AgentToolError.InvalidOperation(
+                    "observe_state_unsupported",
                     $"observe_state_unsupported: '{requestedName}' cannot raise change notifications on {element.GetType().Name}.");
             definitions.Add(new ObserveStateWatchDefinition(
                 new ObserveStateWatch(ObserveStateSource.DependencyProperty, requestedName),
@@ -267,13 +273,15 @@ internal static partial class WpfVisualTreeInspector
 
         if (missingProperties.Count > 0)
         {
-            throw new ArgumentException(
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
                 "invalid_request: unknown dependency properties: " + string.Join(", ", missingProperties));
         }
 
         if (dataContextPaths.Count > 0 && element is not FrameworkElement and not FrameworkContentElement)
         {
-            throw new InvalidOperationException(
+            throw AgentToolError.InvalidOperation(
+                "observe_state_unsupported",
                 $"observe_state_unsupported: {element.GetType().Name} does not expose DataContext.");
         }
 
@@ -283,7 +291,8 @@ internal static partial class WpfVisualTreeInspector
             cancellationToken.ThrowIfCancellationRequested();
             if (!IsDottedIdentifierPath(path))
             {
-                throw new ArgumentException(
+                throw AgentToolError.InvalidArgument(
+                    "invalid_request",
                     $"invalid_request: DataContext path '{path}' must contain dotted identifiers only.");
             }
 
@@ -330,7 +339,9 @@ internal static partial class WpfVisualTreeInspector
     {
         if (!dispatcher.CheckAccess())
         {
-            throw new InvalidOperationException("observe_state_dispatcher_required");
+            throw AgentToolError.InvalidOperation(
+                "observe_state_dispatcher_required",
+                "observe_state_dispatcher_required");
         }
     }
 
@@ -688,7 +699,9 @@ internal static partial class WpfVisualTreeInspector
         }
 
         private static InvalidOperationException ObservationNotFound() =>
-            new("observe_state_not_found");
+            AgentToolError.InvalidOperation(
+                "observe_state_not_found",
+                "observe_state_not_found");
     }
 
     private sealed class ObserveStateRecording
@@ -772,7 +785,9 @@ internal static partial class WpfVisualTreeInspector
         public void Activate()
         {
             VerifyDispatcherAccess();
-            var element = _element ?? throw new InvalidOperationException("observe_state_not_active");
+            var element = _element ?? throw AgentToolError.InvalidOperation(
+                "observe_state_not_active",
+                "observe_state_not_active");
 
             RoutedEventHandler unloaded = (_, _) => Complete(ObserveStateStopReason.ElementUnloaded);
             switch (element)
@@ -1118,7 +1133,9 @@ internal static partial class WpfVisualTreeInspector
 
         private ObserveStateEvent AttachDependencyProperty(ObserveStateWatchDefinition definition)
         {
-            var element = _element ?? throw new InvalidOperationException("observe_state_not_active");
+            var element = _element ?? throw AgentToolError.InvalidOperation(
+                "observe_state_not_active",
+                "observe_state_not_active");
             var property = definition.DependencyProperty
                 ?? throw new InvalidOperationException("Missing dependency property definition.");
             var descriptor = definition.Descriptor
@@ -1133,7 +1150,9 @@ internal static partial class WpfVisualTreeInspector
 
         private ObserveStateEvent AttachDataContextPath(ObserveStateWatchDefinition definition)
         {
-            var element = _element ?? throw new InvalidOperationException("observe_state_not_active");
+            var element = _element ?? throw AgentToolError.InvalidOperation(
+                "observe_state_not_active",
+                "observe_state_not_active");
             var sink = new ObserveStateBindingSink();
             var binding = new Binding
             {
@@ -1339,7 +1358,9 @@ internal static partial class WpfVisualTreeInspector
         {
             if (!_dispatcher.CheckAccess())
             {
-                throw new InvalidOperationException("observe_state_dispatcher_required");
+                throw AgentToolError.InvalidOperation(
+                    "observe_state_dispatcher_required",
+                    "observe_state_dispatcher_required");
             }
         }
     }

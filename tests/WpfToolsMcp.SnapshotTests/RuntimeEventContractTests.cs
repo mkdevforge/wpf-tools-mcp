@@ -87,7 +87,13 @@ public sealed class RuntimeEventContractTests
         var completedAtUtc = new DateTimeOffset(2026, 7, 30, 12, 35, 0, TimeSpan.Zero);
         var terminal = new SubscriptionTerminalEvent(
             SubscriptionTerminalCodes.TargetExited,
-            completedAtUtc);
+            completedAtUtc)
+        {
+            Cause = new DiagnosticCauseInfo("System.InvalidOperationException")
+            {
+                Message = "The observed source failed."
+            }
+        };
 
         var node = JsonSerializer.SerializeToNode(terminal)!;
         var roundTrip = node.Deserialize<SubscriptionTerminalEvent>();
@@ -97,6 +103,9 @@ public sealed class RuntimeEventContractTests
             Assert.That(roundTrip, Is.EqualTo(terminal));
             Assert.That(node["code"]!.GetValue<string>(), Is.EqualTo(SubscriptionTerminalCodes.TargetExited));
             Assert.That(node["completedAtUtc"]!.GetValue<DateTimeOffset>(), Is.EqualTo(completedAtUtc));
+            Assert.That(node["cause"]!["type"]!.GetValue<string>(), Is.EqualTo("System.InvalidOperationException"));
+            Assert.That(node["cause"]!["message"]!.GetValue<string>(), Is.EqualTo("The observed source failed."));
+            Assert.That(node["causeTruncated"], Is.Null);
         });
     }
 }

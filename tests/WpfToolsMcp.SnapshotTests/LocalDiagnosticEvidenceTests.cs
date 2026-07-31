@@ -39,7 +39,7 @@ public sealed class LocalDiagnosticEvidenceTests
             Assert.That(failure.Error.Cause.Details, Does.Contain(DiagnosticSentinel));
             Assert.That(text, Does.Contain("process_not_found"));
             Assert.That(text, Does.Contain(failure.Error.Detail));
-            Assert.That(text, Does.Not.Contain(DiagnosticSentinel));
+            Assert.That(text, Does.Contain(DiagnosticSentinel));
             Assert.That(result.StructuredContent!.Value.GetRawText(), Does.Contain("diagnostic=visible"));
         });
     }
@@ -66,7 +66,7 @@ public sealed class LocalDiagnosticEvidenceTests
             Assert.That(failure.Error.Stage, Is.EqualTo("process_discovery"));
             Assert.That(failure.Error.Retryable, Is.False);
             Assert.That(failure.Error.Cause!.Message, Does.Contain(missingExecutable));
-            Assert.That(result.Content.OfType<TextContentBlock>().Single().Text, Does.Not.Contain(missingExecutable));
+            Assert.That(result.Content.OfType<TextContentBlock>().Single().Text, Does.Contain(missingExecutable));
         });
     }
 

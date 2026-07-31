@@ -15,13 +15,13 @@ namespace WpfToolsMcp.Agent;
 
 internal static partial class WpfVisualTreeInspector
 {
+    private static readonly Type RuntimeTypeImplementation = typeof(object).GetType();
+
     private const string WinningStyleContributorUnavailable = "style_winner_not_exposed";
 
     private const string WinningTemplateContributorUnavailable = "template_winner_not_exposed";
 
     private const string StaticResourceOriginUnavailable = "static_resource_origin_not_retained";
-
-    private static readonly Type RuntimeTypeImplementation = typeof(object).GetType();
 
     // Public ResourceDictionary enumeration copies every key and realizes values.
     // Guarded raw storage lets one bucket consume exactly one provenance scan unit.
@@ -1885,7 +1885,10 @@ internal static partial class WpfVisualTreeInspector
             scannedEntries++;
             if (canMatchKnownKey)
             {
-                if (AreResourceKeysEqualBestEffort(key, knownKey!))
+                if (AreResourceKeysEqualBestEffort(
+                        key,
+                        knownKey!,
+                        ref scanIncompleteReason))
                 {
                     AddResourceCandidate(key, scope, candidates, ref discoveredCandidates, budget.Limit);
                 }
@@ -2097,7 +2100,10 @@ internal static partial class WpfVisualTreeInspector
         }
     }
 
-    private static bool AreResourceKeysEqualBestEffort(object candidate, object expected)
+    internal static bool AreResourceKeysEqualBestEffort(
+        object candidate,
+        object expected,
+        ref string? scanIncompleteReason)
     {
         if (ReferenceEquals(candidate, expected))
         {
@@ -2113,8 +2119,11 @@ internal static partial class WpfVisualTreeInspector
         {
             return candidate.Equals(expected);
         }
-        catch
+        catch (Exception ex)
         {
+            scanIncompleteReason ??= TruncateProvenanceText(
+                $"resource_key_comparison_failed:{ex.GetType().FullName ?? ex.GetType().Name}",
+                512);
             return false;
         }
     }
@@ -2260,24 +2269,22 @@ internal static partial class WpfVisualTreeInspector
         {
             try
             {
+                var formattedType = componentKey.TypeInTargetAssembly is { } targetType
+                    ? FormatRepresentedTypeNameBestEffort(targetType, 512)
+                    : new BestEffortProvenanceValueFormatting(
+                        Text: "unknown",
+                        RepresentsValue: false,
+                        Truncated: false,
+                        FormattingFailureReason: "type_name_unavailable");
                 if (componentKey.ResourceId is null)
                 {
-                    var targetType = GetTypeName(componentKey.TypeInTargetAssembly) ?? "unknown";
-                    return CreateProvenanceValueFormatting(
-                        $"ComponentResourceKey({targetType}, null)",
-                        representsValue: true,
-                        maxLength: 512);
+                    return FormatComponentResourceKey(
+                        formattedType,
+                        resourceId: null);
                 }
 
-                var type = GetTypeName(componentKey.TypeInTargetAssembly) ?? "unknown";
                 var id = FormatProvenanceValueBestEffortDetails(componentKey.ResourceId, "string", 200);
-                var rawText = $"ComponentResourceKey({type}, {id.Text})";
-                var text = TruncateProvenanceText(rawText, 512);
-                return id with
-                {
-                    Text = text,
-                    Truncated = id.Truncated || rawText.Length > 512
-                };
+                return FormatComponentResourceKey(formattedType, id);
             }
             catch (Exception formattingFailure)
             {
@@ -2288,12 +2295,35 @@ internal static partial class WpfVisualTreeInspector
         return FormatProvenanceValueBestEffortDetails(key, "string", 200);
     }
 
+    private static BestEffortProvenanceValueFormatting FormatComponentResourceKey(
+        BestEffortProvenanceValueFormatting formattedType,
+        BestEffortProvenanceValueFormatting? resourceId)
+    {
+        var rawText = $"ComponentResourceKey({formattedType.Text ?? "unknown"}, " +
+            $"{resourceId?.Text ?? "null"})";
+        var failedPart = !formattedType.RepresentsValue
+            ? formattedType
+            : resourceId is { RepresentsValue: false } failedResourceId
+                ? failedResourceId
+                : default(BestEffortProvenanceValueFormatting?);
+        return new BestEffortProvenanceValueFormatting(
+            Text: TruncateProvenanceText(rawText, 512),
+            RepresentsValue: failedPart is null,
+            Truncated: formattedType.Truncated ||
+                resourceId?.Truncated is true ||
+                rawText.Length > 512,
+            BestEffortReason: formattedType.BestEffortReason ?? resourceId?.BestEffortReason,
+            FormattingFailureType: failedPart?.FormattingFailureType,
+            FormattingFailureReason: failedPart?.FormattingFailureReason);
+    }
+
     internal readonly record struct BestEffortProvenanceValueFormatting(
         string? Text,
         bool RepresentsValue,
         bool Truncated,
         string? BestEffortReason = null,
-        string? FormattingFailureType = null);
+        string? FormattingFailureType = null,
+        string? FormattingFailureReason = null);
 
     internal static (string? Value, ProvenanceEvidence Evidence) FormatProvenanceValueWithEvidence(
         object? value,
@@ -2308,7 +2338,7 @@ internal static partial class WpfVisualTreeInspector
                 new ProvenanceEvidence(
                     ProvenanceEvidenceKind.Unavailable,
                     BuildFormattingFailureReason(
-                        "value_to_string_failed",
+                        formatted.FormattingFailureReason ?? "value_to_string_failed",
                         formatted.FormattingFailureType)));
         }
 
@@ -2348,6 +2378,11 @@ internal static partial class WpfVisualTreeInspector
             return CreateProvenanceValueFormatting("{UnsetValue}", representsValue: true, maxLength);
         }
 
+        if (value is Type representedType)
+        {
+            return FormatRepresentedTypeNameBestEffort(representedType, maxLength);
+        }
+
         var type = value.GetType();
         var typeName = type.FullName ?? type.Name;
         if (string.Equals(valueFormat, "type", StringComparison.OrdinalIgnoreCase))
@@ -2376,8 +2411,6 @@ internal static partial class WpfVisualTreeInspector
             DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
             DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
             TimeSpan timeSpan => timeSpan.ToString("c", CultureInfo.InvariantCulture),
-            Type reflectedType when IsRuntimeOwnedType(reflectedType) =>
-                reflectedType.FullName ?? reflectedType.Name,
             Thickness thickness => FormatThickness(thickness),
             CornerRadius cornerRadius => FormatCornerRadius(cornerRadius),
             GridLength gridLength => FormatGridLength(gridLength),
@@ -2468,9 +2501,10 @@ internal static partial class WpfVisualTreeInspector
             Truncated: false,
             FormattingFailureType: TruncateProvenanceText(
                 formattingFailure.GetType().FullName ?? formattingFailure.GetType().Name,
-                512));
+                512),
+            FormattingFailureReason: "value_to_string_failed");
 
-    private static ProvenanceEvidence BuildResourceKeyEvidence(
+    internal static ProvenanceEvidence BuildResourceKeyEvidence(
         BestEffortProvenanceValueFormatting formatting,
         string successReason)
     {
@@ -2481,7 +2515,7 @@ internal static partial class WpfVisualTreeInspector
                 formatting.Text is null && formatting.FormattingFailureType is null
                     ? "resource_key_unavailable"
                     : BuildFormattingFailureReason(
-                        "resource_key_to_string_failed",
+                        formatting.FormattingFailureReason ?? "resource_key_to_string_failed",
                         formatting.FormattingFailureType));
         }
 
@@ -2591,15 +2625,72 @@ internal static partial class WpfVisualTreeInspector
             return null;
         }
 
-        var type = value is Type representedType && IsRuntimeOwnedType(representedType)
-            ? representedType
-            : value.GetType();
-        var name = type.FullName ?? type.Name;
+        if (value is Type representedType)
+        {
+            var formatted = FormatRepresentedTypeNameBestEffort(representedType, 512);
+            textTruncated |= formatted.Truncated;
+            return formatted.RepresentsValue ? formatted.Text : null;
+        }
 
+        var type = value.GetType();
+        var name = type.FullName ?? type.Name;
         textTruncated |= name.Length > 512;
         return TruncateProvenanceText(name, 512);
     }
 
-    private static bool IsRuntimeOwnedType(Type type) =>
-        type.GetType() == RuntimeTypeImplementation;
+    private static BestEffortProvenanceValueFormatting FormatRepresentedTypeNameBestEffort(
+        Type representedType,
+        int maxLength)
+    {
+        var bestEffortReason = representedType.GetType() == RuntimeTypeImplementation
+            ? null
+            : "application_type_full_name";
+        Exception? formattingFailure = null;
+        try
+        {
+            if (representedType.FullName is { Length: > 0 } fullName)
+            {
+                return CreateProvenanceValueFormatting(
+                    fullName,
+                    representsValue: true,
+                    maxLength,
+                    bestEffortReason);
+            }
+        }
+        catch (Exception ex)
+        {
+            formattingFailure = ex;
+        }
+
+        try
+        {
+            if (representedType.Name is { Length: > 0 } name)
+            {
+                return CreateProvenanceValueFormatting(
+                    name,
+                    representsValue: true,
+                    maxLength,
+                    bestEffortReason: bestEffortReason is null ? null : "application_type_name");
+            }
+        }
+        catch (Exception ex)
+        {
+            formattingFailure ??= ex;
+        }
+
+        var implementationType = representedType.GetType();
+        var fallbackName = implementationType.FullName ?? implementationType.Name;
+        return new BestEffortProvenanceValueFormatting(
+            Text: TruncateProvenanceText(fallbackName, maxLength),
+            RepresentsValue: false,
+            Truncated: fallbackName.Length > Math.Max(0, maxLength),
+            FormattingFailureType: formattingFailure is null
+                ? null
+                : TruncateProvenanceText(
+                    formattingFailure.GetType().FullName ?? formattingFailure.GetType().Name,
+                    512),
+            FormattingFailureReason: formattingFailure is null
+                ? "type_name_unavailable"
+                : "type_name_getter_failed");
+    }
 }

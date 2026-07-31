@@ -1,9 +1,13 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
+using WpfToolsMcp.Agent;
 using WpfToolsMcp.Automation;
 using WpfToolsMcp.Contracts;
+using WpfToolsMcp.McpServer.Tools;
 
 namespace WpfToolsMcp.SnapshotTests;
 
@@ -13,6 +17,24 @@ public sealed class ToolErrorContractTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string DiagnosticSentinel = @"C:\Users\example\work\diagnostic=visible";
+
+    [Test]
+    public async Task Error_filter_preserves_prebuilt_tool_error_results_unchanged()
+    {
+        var expected = new CallToolResult
+        {
+            IsError = true,
+            Content = [new TextContentBlock { Text = "existing error content" }]
+        };
+        var filtered = McpToolErrorFilter.CreateCallToolFilter()(
+            (_, _) => ValueTask.FromResult(expected));
+        var context = (RequestContext<CallToolRequestParams>)RuntimeHelpers.GetUninitializedObject(
+            typeof(RequestContext<CallToolRequestParams>));
+
+        var actual = await filtered(context, CancellationToken.None);
+
+        Assert.That(actual, Is.SameAs(expected));
+    }
 
     [Test]
     public async Task Core_and_diagnostics_failures_use_the_common_envelope()
@@ -74,7 +96,7 @@ public sealed class ToolErrorContractTests
             Assert.That(
                 wire,
                 Does.Contain(DiagnosticSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
-            Assert.That(result.Content.OfType<TextContentBlock>().Single().Text, Does.Not.Contain(DiagnosticSentinel));
+            Assert.That(result.Content.OfType<TextContentBlock>().Single().Text, Does.Contain(DiagnosticSentinel));
         });
     }
 
@@ -234,7 +256,7 @@ public sealed class ToolErrorContractTests
     }
 
     [Test]
-    public void Process_candidate_executable_path_is_bounded_without_omitting_local_paths()
+    public void Oversized_process_candidate_executable_path_is_omitted_instead_of_sliced()
     {
         var observedPath = DiagnosticSentinel + new string('x', 600);
         var failure = new ProcessSelectionAmbiguityException(new ProcessSelectionAmbiguity(
@@ -259,13 +281,45 @@ public sealed class ToolErrorContractTests
             Recovery: "select"));
 
         var error = MapException(failure);
-        var executablePath = error.Context!.Candidates!.Single().ExecutablePath;
+        var candidate = error.Context!.Candidates!.Single();
 
         Assert.Multiple(() =>
         {
-            Assert.That(executablePath, Has.Length.EqualTo(512));
-            Assert.That(executablePath, Is.EqualTo(observedPath[..512]));
-            Assert.That(executablePath, Does.StartWith(DiagnosticSentinel));
+            Assert.That(candidate.ExecutablePath, Is.Null);
+            Assert.That(candidate.ExecutablePathUnavailableReason, Does.StartWith("executablePathOmitted:"));
+            Assert.That(candidate.ExecutablePathUnavailableReason, Does.Contain($"actualLength={observedPath.Length}"));
+        });
+    }
+
+    [Test]
+    public void Oversized_element_candidate_xpath_is_omitted_instead_of_sliced()
+    {
+        var observedXPath = "/Window/" + new string('x', 1_100);
+        var failure = new ElementResolutionAmbiguityException(new ResolveElementAmbiguity(
+            Code: "ambiguous_element",
+            BackendUsed: InspectionBackend.Uia,
+            WindowHandleUsed: 789,
+            ReturnedCandidates: 1,
+            DiscoveredCandidates: 1,
+            Truncated: false,
+            Candidates:
+            [
+                new ResolveElementCandidate(
+                    0,
+                    new ElementRef(
+                        Type: "Button",
+                        AutomationId: "Save",
+                        Name: "Save",
+                        XPath: observedXPath,
+                        ElementId: "uia_abcdefghijklmnop"))
+            ]));
+
+        var candidate = MapException(failure).Context!.Candidates!.Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(candidate.XPath, Is.Null);
+            Assert.That(candidate.XPathOmitted, Is.True);
         });
     }
 
@@ -385,6 +439,9 @@ public sealed class ToolErrorContractTests
         var subscription = MapException(new InvalidOperationException($"subscription_not_found: {DiagnosticSentinel}"));
         var missingWpfElement = MapException(new InvalidOperationException($"wpf_resolve:not_found: {DiagnosticSentinel}"));
         var oversized = MapException(new InvalidOperationException(new string('m', 1_200)));
+        var disabled = MapException(new InvalidOperationException("element_disabled: The target is disabled."));
+        var subscriptionLimit = MapException(new InvalidOperationException("subscription_limit_exceeded: Too many active subscriptions."));
+        var targetOwnedPrefix = MapException(new InvalidOperationException("application_specific_error: target-defined prose"));
 
         Assert.Multiple(() =>
         {
@@ -404,6 +461,10 @@ public sealed class ToolErrorContractTests
             Assert.That(performanceOwner.Code, Is.EqualTo("performance_run_not_owned"));
             Assert.That(subscription.Code, Is.EqualTo("subscription_not_found"));
             Assert.That(missingWpfElement.Code, Is.EqualTo("element_not_found"));
+            Assert.That(disabled.Code, Is.EqualTo("element_disabled"));
+            Assert.That(disabled.Detail, Is.EqualTo("The target is disabled."));
+            Assert.That(subscriptionLimit.Code, Is.EqualTo("subscription_limit_exceeded"));
+            Assert.That(targetOwnedPrefix.Code, Is.EqualTo("tool_failed"));
             Assert.That(oversized.Cause!.Message, Has.Length.EqualTo(1_024));
             Assert.That(
                 JsonSerializer.Serialize(
@@ -417,10 +478,76 @@ public sealed class ToolErrorContractTests
                         performanceOwner,
                         subscription,
                         missingWpfElement,
+                        disabled,
+                        subscriptionLimit,
+                        targetOwnedPrefix,
                         oversized
                     },
                     JsonOptions),
                 Does.Contain(DiagnosticSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
+        });
+    }
+
+    [TestCase("element_disabled")]
+    [TestCase("foreground_activation_failed")]
+    [TestCase("focused_element_unavailable")]
+    [TestCase("wait_backend_unsupported")]
+    [TestCase("subscription_limit_exceeded")]
+    [TestCase("window_state_change_failed")]
+    [TestCase("observe_state_unsupported")]
+    [TestCase("uia_action_failed")]
+    public void Stable_tool_owned_codes_are_not_collapsed_to_tool_failed(string code)
+    {
+        var error = MapException(new InvalidOperationException($"{code}: observed detail"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(error.Code, Is.EqualTo(code));
+            Assert.That(error.Detail, Is.EqualTo("observed detail"));
+        });
+    }
+
+    [Test]
+    public void Remote_target_prose_requires_agent_owned_code_provenance()
+    {
+        var targetCollision = MapException(new AgentRemoteException(
+            "wpf/get_computed_properties",
+            "element_disabled: application-defined failure",
+            "application stack"));
+        var typedAgentFailure = MapException(new AgentRemoteException(
+            "wpf/focus_element",
+            "element_disabled: focus target is disabled",
+            "agent stack",
+            "element_disabled"));
+        var newlyTypedAgentFailure = MapException(new AgentRemoteException(
+            "wpf/future_operation",
+            "future_agent_failure: local diagnostic detail",
+            "agent stack",
+            "future_agent_failure"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(targetCollision.Code, Is.EqualTo("tool_failed"));
+            Assert.That(targetCollision.Cause!.Message, Is.EqualTo("element_disabled: application-defined failure"));
+            Assert.That(targetCollision.Cause.Details, Is.EqualTo("application stack"));
+            Assert.That(typedAgentFailure.Code, Is.EqualTo("element_disabled"));
+            Assert.That(typedAgentFailure.Detail, Is.EqualTo("focus target is disabled"));
+            Assert.That(newlyTypedAgentFailure.Code, Is.EqualTo("future_agent_failure"));
+            Assert.That(newlyTypedAgentFailure.Detail, Is.EqualTo("local diagnostic detail"));
+        });
+    }
+
+    [Test]
+    public void Agent_tool_error_marker_preserves_exception_type_and_records_owned_code()
+    {
+        var exception = AgentToolError.InvalidOperation(
+            "observe_state_not_found",
+            "observe_state_not_found");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(exception, Is.TypeOf<InvalidOperationException>());
+            Assert.That(AgentToolError.GetCode(exception), Is.EqualTo("observe_state_not_found"));
         });
     }
 
@@ -552,7 +679,7 @@ public sealed class ToolErrorContractTests
         Assert.That(response.Error.Code, Is.EqualTo(expectedCode));
         Assert.That(
             result.Content.OfType<TextContentBlock>().Single().Text,
-            Is.EqualTo($"{response.Error.Code}: {response.Error.Detail}"));
+            Does.StartWith($"{response.Error.Code}: {response.Error.Detail}"));
     }
 
     private static ToolErrorResponse Deserialize(CallToolResult result) =>

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using WpfToolsMcp.Contracts;
@@ -345,14 +346,27 @@ internal static class ProcessTargetResolver
             : fileName;
     }
 
-    private static string Bound(string? value, int maximumLength)
+    internal static string Bound(string? value, int maximumLength)
     {
         if (string.IsNullOrEmpty(value))
         {
             return string.Empty;
         }
 
-        return value.Length <= maximumLength ? value : value[..maximumLength];
+        if (value.Length <= maximumLength)
+        {
+            return value;
+        }
+
+        var length = maximumLength;
+        if (length > 0 &&
+            char.IsHighSurrogate(value[length - 1]) &&
+            char.IsLowSurrogate(value[length]))
+        {
+            length--;
+        }
+
+        return value[..length];
     }
 
     internal static ProcessExecutablePathObservation GetExecutablePathBestEffort(Process process)
@@ -366,21 +380,55 @@ internal static class ProcessTargetResolver
         try
         {
             var executablePath = process.MainModule?.FileName;
-            return string.IsNullOrWhiteSpace(executablePath)
-                ? new ProcessExecutablePathObservation(
-                    ExecutablePath: null,
-                    UnavailableReason: "mainModuleFileNameUnavailable")
-                : new ProcessExecutablePathObservation(
-                    ExecutablePath: Bound(executablePath, MaximumExecutablePathLength),
-                    UnavailableReason: null);
+            return CreateExecutablePathObservation(executablePath);
         }
         catch (Exception ex)
         {
-            var exceptionType = ex.GetType().FullName ?? ex.GetType().Name;
             return new ProcessExecutablePathObservation(
                 ExecutablePath: null,
-                UnavailableReason: Bound($"mainModuleReadFailed:{exceptionType}", 256));
+                UnavailableReason: FormatExecutablePathFailure(ex));
         }
+    }
+
+    internal static ProcessExecutablePathObservation CreateExecutablePathObservation(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return new ProcessExecutablePathObservation(
+                ExecutablePath: null,
+                UnavailableReason: "mainModuleFileNameUnavailable");
+        }
+
+        return executablePath.Length <= MaximumExecutablePathLength
+            ? new ProcessExecutablePathObservation(
+                ExecutablePath: executablePath,
+                UnavailableReason: null)
+            : new ProcessExecutablePathObservation(
+                ExecutablePath: null,
+                UnavailableReason:
+                $"mainModuleFileNameOmitted:maxLength={MaximumExecutablePathLength};actualLength={executablePath.Length}");
+    }
+
+    internal static string FormatExecutablePathFailure(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        var exceptionType = exception.GetType().FullName ?? exception.GetType().Name;
+        string? message;
+        try
+        {
+            message = exception.Message;
+        }
+        catch (Exception messageFailure)
+        {
+            message = $"messageGetterFailed:{messageFailure.GetType().FullName ?? messageFailure.GetType().Name}";
+        }
+
+        var nativeError = exception is Win32Exception win32
+            ? $";nativeError={win32.NativeErrorCode}"
+            : string.Empty;
+        return Bound(
+            $"mainModuleReadFailed:{exceptionType};hresult=0x{exception.HResult:X8}{nativeError};message={message}",
+            256);
     }
 
     private static long SafeGetMainWindowHandle(Process process)

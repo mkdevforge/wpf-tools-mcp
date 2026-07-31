@@ -108,7 +108,9 @@ internal static partial class WpfVisualTreeInspector
                 if (!_byId.TryGetValue(id, out registration) ||
                     !string.Equals(registration.OwnerId, ownerId, StringComparison.Ordinal))
                 {
-                    throw new InvalidOperationException($"wpf_handle_stale:not_found: '{id}'.");
+                    throw AgentToolError.InvalidOperation(
+                        "wpf_handle_stale",
+                        $"wpf_handle_stale:not_found: '{id}'.");
                 }
 
                 Touch(id);
@@ -117,20 +119,25 @@ internal static partial class WpfVisualTreeInspector
             if (!registration.Reference.TryGetTarget(out var element))
             {
                 Release(ownerId, id);
-                throw new InvalidOperationException($"wpf_handle_stale:collected: '{id}'.");
+                throw AgentToolError.InvalidOperation(
+                    "wpf_handle_stale",
+                    $"wpf_handle_stale:collected: '{id}'.");
             }
 
             var window = GetContainingWindow(element);
             if (window is null)
             {
                 Release(ownerId, id);
-                throw new InvalidOperationException($"wpf_handle_stale:detached: '{id}'.");
+                throw AgentToolError.InvalidOperation(
+                    "wpf_handle_stale",
+                    $"wpf_handle_stale:detached: '{id}'.");
             }
 
             var actualHandle = new WindowInteropHelper(window).Handle;
             if (actualHandle == IntPtr.Zero || actualHandle.ToInt64() != windowHandle)
             {
-                throw new InvalidOperationException(
+                throw AgentToolError.InvalidOperation(
+                    "wpf_handle_stale",
                     $"wpf_handle_stale:window_mismatch: '{id}' expected={windowHandle} actual={actualHandle.ToInt64()}.");
             }
 
@@ -757,7 +764,8 @@ internal static partial class WpfVisualTreeInspector
     {
         var source = HwndSource.FromHwnd(new IntPtr(requestedHwnd));
         return source
-            ?? throw new InvalidOperationException(
+            ?? throw AgentToolError.InvalidOperation(
+                "wpf_window_not_found",
                 $"wpf_window_not_found: HWND {requestedHwnd} is not owned by a WPF HwndSource.");
     }
 
@@ -768,11 +776,14 @@ internal static partial class WpfVisualTreeInspector
             var source = ResolveHwndSource(requestedHwnd);
             if (!source.Dispatcher.CheckAccess())
             {
-                throw new InvalidOperationException("wpf_window_dispatcher_required");
+                throw AgentToolError.InvalidOperation(
+                    "wpf_window_dispatcher_required",
+                    "wpf_window_dispatcher_required");
             }
 
             return source.RootVisual as Window
-                ?? throw new InvalidOperationException(
+                ?? throw AgentToolError.InvalidOperation(
+                    "wpf_window_not_found",
                     $"wpf_window_not_found: HWND {requestedHwnd} does not have a WPF Window root.");
         }
 
@@ -1670,7 +1681,9 @@ internal static partial class WpfVisualTreeInspector
     {
         if (matches.Count == 0)
         {
-            throw new InvalidOperationException("wpf_resolve:not_found: Locator did not match any elements.");
+            throw AgentToolError.InvalidOperation(
+                "wpf_resolve:not_found",
+                "wpf_resolve:not_found: Locator did not match any elements.");
         }
 
         if (matches.Count == 1)
@@ -1689,7 +1702,8 @@ internal static partial class WpfVisualTreeInspector
 
             if (index >= ordered.Count)
             {
-                throw new InvalidOperationException(
+                throw AgentToolError.InvalidOperation(
+                    "wpf_resolve:not_found",
                     $"wpf_resolve:not_found: Locator index {index} is out of range (found {ordered.Count}).");
             }
 
@@ -1698,9 +1712,11 @@ internal static partial class WpfVisualTreeInspector
 
         if (locator.Strict)
         {
-            throw new WpfLocatorAmbiguousException(
-                $"Locator is ambiguous (found {matches.Count}). Provide 'index' to disambiguate.",
-                ordered);
+            throw AgentToolError.Mark(
+                new WpfLocatorAmbiguousException(
+                    $"Locator is ambiguous (found {matches.Count}). Provide 'index' to disambiguate.",
+                    ordered),
+                "wpf_resolve:ambiguous");
         }
 
         return ordered[0];
@@ -1837,10 +1853,14 @@ internal static partial class WpfVisualTreeInspector
             {
                 if (ex.Message.Contains("ambiguous", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException($"wpf_resolve:ambiguous: {ex.Message}");
+                    throw AgentToolError.InvalidOperation(
+                        "wpf_resolve:ambiguous",
+                        $"wpf_resolve:ambiguous: {ex.Message}");
                 }
 
-                throw new InvalidOperationException($"wpf_resolve:not_found: {ex.Message}");
+                throw AgentToolError.InvalidOperation(
+                    "wpf_resolve:not_found",
+                    $"wpf_resolve:not_found: {ex.Message}");
             }
         }
 
@@ -1860,7 +1880,9 @@ internal static partial class WpfVisualTreeInspector
 
             if (index >= descendants.Length)
             {
-                throw new InvalidOperationException($"wpf_resolve:not_found: Locator index {index} is out of range (found {descendants.Length}).");
+                throw AgentToolError.InvalidOperation(
+                    "wpf_resolve:not_found",
+                    $"wpf_resolve:not_found: Locator index {index} is out of range (found {descendants.Length}).");
             }
 
             return descendants[index];
@@ -1894,14 +1916,18 @@ internal static partial class WpfVisualTreeInspector
         var hasElementId = !string.IsNullOrWhiteSpace(elementId);
         if (hasLocator == hasElementId)
         {
-            throw new ArgumentException($"invalid_request: provide exactly one of {targetName}.");
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                $"invalid_request: provide exactly one of {targetName}.");
         }
 
         if (hasElementId)
         {
             if (windowHandle is not long hwnd || hwnd == 0)
             {
-                throw new ArgumentException("invalid_request: windowHandle is required with elementId.");
+                throw AgentToolError.InvalidArgument(
+                    "invalid_request",
+                    "invalid_request: windowHandle is required with elementId.");
             }
 
             var element = ElementHandles.Resolve(ownerId, hwnd, elementId!.Trim());
@@ -1915,11 +1941,15 @@ internal static partial class WpfVisualTreeInspector
 
             var resolved = chain.Count > 0 && ReferenceEquals(chain[^1].Element, element)
                 ? chain[^1]
-                : throw new InvalidOperationException($"wpf_handle_stale:detached: '{elementId!.Trim()}'.");
+                : throw AgentToolError.InvalidOperation(
+                    "wpf_handle_stale",
+                    $"wpf_handle_stale:detached: '{elementId!.Trim()}'.");
 
             if (visibleOnly && !ShouldIncludeWpfElement(resolved.Element, visibleOnly, includeOffViewport, TryGetClientBoundsScreen(window)))
             {
-                throw new InvalidOperationException("wpf_handle_stale:not_visible: element is not visible under the requested filters.");
+                throw AgentToolError.InvalidOperation(
+                    "wpf_handle_stale",
+                    "wpf_handle_stale:not_visible: element is not visible under the requested filters.");
             }
 
             return resolved;
@@ -2313,12 +2343,16 @@ internal static partial class WpfVisualTreeInspector
         var hasNumericValue = request.Value.HasValue;
         if (hasText == hasNumericValue)
         {
-            throw new ArgumentException("invalid_request: set_value requires exactly one of text OR value.");
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: set_value requires exactly one of text OR value.");
         }
 
         if (hasNumericValue && request.TextMode != TextEntryMode.Replace)
         {
-            throw new ArgumentException("invalid_request: set_value textMode is only valid with text input.");
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: set_value textMode is only valid with text input.");
         }
 
         var window = ResolveWindow(request.WindowHandle);
@@ -2343,7 +2377,9 @@ internal static partial class WpfVisualTreeInspector
         var element = resolved.Element;
         if (GetIsEnabledWpf(element) is false)
         {
-            throw new InvalidOperationException($"element_disabled: set_value target WPF type '{element.GetType().Name}' is disabled.");
+            throw AgentToolError.InvalidOperation(
+                "element_disabled",
+                $"element_disabled: set_value target WPF type '{element.GetType().Name}' is disabled.");
         }
 
         var textValue = hasText
@@ -2376,7 +2412,8 @@ internal static partial class WpfVisualTreeInspector
         var modeDescription = hasText && request.TextMode != TextEntryMode.Replace
             ? $" for text mode '{request.TextMode}'"
             : string.Empty;
-        throw new InvalidOperationException(
+        throw AgentToolError.InvalidOperation(
+            "set_value_unsupported_wpf_target",
             $"set_value_unsupported_wpf_target: WPF type '{element.GetType().Name}' does not expose a supported value target for this input{modeDescription}. Supported WPF targets: {supported}.");
     }
 
@@ -2510,7 +2547,9 @@ internal static partial class WpfVisualTreeInspector
         var element = resolved.Element;
         if (GetIsEnabledWpf(element) is false)
         {
-            throw new InvalidOperationException($"element_disabled: focus target WPF type '{element.GetType().Name}' is disabled.");
+            throw AgentToolError.InvalidOperation(
+                "element_disabled",
+                $"element_disabled: focus target WPF type '{element.GetType().Name}' is disabled.");
         }
 
         return FocusWpfElement(element);
@@ -2521,7 +2560,8 @@ internal static partial class WpfVisualTreeInspector
         ArgumentNullException.ThrowIfNull(element);
         if (element is not IInputElement inputElement || !IsKeyboardFocusableWpf(element))
         {
-            throw new InvalidOperationException(
+            throw AgentToolError.InvalidOperation(
+                "focus_unsupported_wpf_target",
                 $"focus_unsupported_wpf_target: WPF type '{element.GetType().Name}' is not keyboard focusable.");
         }
 
@@ -2532,7 +2572,8 @@ internal static partial class WpfVisualTreeInspector
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException(
+            throw AgentToolError.InvalidOperation(
+                "focus_failed_wpf_target",
                 $"focus_failed_wpf_target: WPF type '{element.GetType().Name}' rejected keyboard focus.",
                 ex);
         }
@@ -2540,7 +2581,8 @@ internal static partial class WpfVisualTreeInspector
         var focusedAfter = Keyboard.FocusedElement;
         if (!ReferenceEquals(focusedAfter, inputElement) && !HasKeyboardFocusWithinWpf(element))
         {
-            throw new InvalidOperationException(
+            throw AgentToolError.InvalidOperation(
+                "focus_failed_wpf_target",
                 $"focus_failed_wpf_target: WPF type '{element.GetType().Name}' did not receive keyboard focus.");
         }
 
@@ -2594,7 +2636,9 @@ internal static partial class WpfVisualTreeInspector
         var element = resolved.Element;
         if (GetIsEnabledWpf(element) is false)
         {
-            throw new InvalidOperationException($"element_disabled: invoke target WPF type '{element.GetType().Name}' is disabled.");
+            throw AgentToolError.InvalidOperation(
+                "element_disabled",
+                $"element_disabled: invoke target WPF type '{element.GetType().Name}' is disabled.");
         }
 
         var peer = TryCreateAutomationPeer(element);
@@ -2616,7 +2660,8 @@ internal static partial class WpfVisualTreeInspector
             return new InvokeResponse(Invoked: true, MethodUsed: "wpf_selectionItem");
         }
 
-        throw new InvalidOperationException(
+        throw AgentToolError.InvalidOperation(
+            "invoke_unsupported_wpf_target",
             $"invoke_unsupported_wpf_target: WPF type '{element.GetType().Name}' does not expose Invoke, Toggle, or SelectionItem automation patterns.");
     }
 
@@ -2634,7 +2679,9 @@ internal static partial class WpfVisualTreeInspector
         var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
         if (hasXPath == hasElementId)
         {
-            throw new ArgumentException("invalid_request: provide exactly one of elementId|xpath.");
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: provide exactly one of elementId|xpath.");
         }
 
         var window = ResolveWindow(request.WindowHandle);
@@ -2900,7 +2947,9 @@ internal static partial class WpfVisualTreeInspector
         hit = PromotePickedWpfElement(hit, window);
         if (ReferenceEquals(hit, window) && !request.ReturnRootOnMiss)
         {
-            throw new InvalidOperationException($"no_hit_at_point: x={request.X} y={request.Y}.");
+            throw AgentToolError.InvalidOperation(
+                "no_hit_at_point",
+                $"no_hit_at_point: x={request.X} y={request.Y}.");
         }
 
         var chain = BuildXPathChainForElement(treeService, window, hit, visibleOnly: true, maxNodes: 200_000, cancellationToken);

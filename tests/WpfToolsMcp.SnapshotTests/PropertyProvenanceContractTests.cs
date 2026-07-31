@@ -247,20 +247,15 @@ public sealed class PropertyProvenanceContractTests
     }
 
     [Test]
-    public void Safe_type_formatting_does_not_call_virtual_type_name_members()
+    public void Type_formatting_calls_application_type_name_members_best_effort()
     {
-        var applicationType = new ThrowingTypeValue();
-        WpfVisualTreeInspector.BestEffortProvenanceValueFormatting formatted = default;
-        string? typeName = null;
-
-        Assert.DoesNotThrow(() =>
-        {
-            formatted = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
-                applicationType,
-                "string",
-                2000);
-            typeName = WpfVisualTreeInspector.GetTypeName(applicationType);
-        });
+        var formattedType = new RecordingTypeValue();
+        var namedType = new RecordingTypeValue();
+        var formatted = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
+            formattedType,
+            "string",
+            2000);
+        var typeName = WpfVisualTreeInspector.GetTypeName(namedType);
 
         var runtimeType = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
             typeof(string),
@@ -268,11 +263,53 @@ public sealed class PropertyProvenanceContractTests
             2000);
         Assert.Multiple(() =>
         {
-            Assert.That(formatted.Text, Does.EndWith("ThrowingTypeValue"));
-            Assert.That(formatted.RepresentsValue, Is.False);
-            Assert.That(typeName, Does.EndWith("ThrowingTypeValue"));
+            Assert.That(formatted.Text, Is.EqualTo(RecordingTypeValue.RepresentedFullName));
+            Assert.That(formatted.RepresentsValue, Is.True);
+            Assert.That(formatted.BestEffortReason, Is.EqualTo("application_type_full_name"));
+            Assert.That(formattedType.FullNameCalls, Is.EqualTo(1));
+            Assert.That(formattedType.NameCalls, Is.Zero);
+            Assert.That(typeName, Is.EqualTo(RecordingTypeValue.RepresentedFullName));
+            Assert.That(namedType.FullNameCalls, Is.EqualTo(1));
+            Assert.That(namedType.NameCalls, Is.Zero);
             Assert.That(runtimeType.Text, Is.EqualTo("System.String"));
             Assert.That(runtimeType.RepresentsValue, Is.True);
+            Assert.That(runtimeType.BestEffortReason, Is.Null);
+        });
+    }
+
+    [Test]
+    public void Type_formatting_falls_back_when_application_type_name_members_throw()
+    {
+        var formattedType = new ThrowingTypeValue();
+        var namedType = new ThrowingTypeValue();
+        var evidencedType = new ThrowingTypeValue();
+
+        var formatted = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
+            formattedType,
+            "string",
+            2000);
+        var typeName = WpfVisualTreeInspector.GetTypeName(namedType);
+        var evidenced = WpfVisualTreeInspector.FormatProvenanceValueWithEvidence(
+            evidencedType,
+            "string",
+            2000);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(formatted.Text, Does.EndWith(nameof(ThrowingTypeValue)));
+            Assert.That(formatted.RepresentsValue, Is.False);
+            Assert.That(formatted.FormattingFailureType, Is.EqualTo(typeof(InvalidOperationException).FullName));
+            Assert.That(formattedType.FullNameCalls, Is.EqualTo(1));
+            Assert.That(formattedType.NameCalls, Is.EqualTo(1));
+            Assert.That(typeName, Is.Null);
+            Assert.That(namedType.FullNameCalls, Is.EqualTo(1));
+            Assert.That(namedType.NameCalls, Is.EqualTo(1));
+            Assert.That(evidenced.Evidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.Unavailable));
+            Assert.That(
+                evidenced.Evidence.Reason,
+                Is.EqualTo("type_name_getter_failed:System.InvalidOperationException"));
+            Assert.That(evidencedType.FullNameCalls, Is.EqualTo(1));
+            Assert.That(evidencedType.NameCalls, Is.EqualTo(1));
         });
     }
 
@@ -327,7 +364,7 @@ public sealed class PropertyProvenanceContractTests
     }
 
     [Test]
-    public void Truncated_safe_values_are_not_labeled_exact()
+    public void Truncated_values_are_not_labeled_exact()
     {
         var formatted = WpfVisualTreeInspector.FormatProvenanceValueWithEvidence(
             "abcdefgh",
@@ -363,6 +400,11 @@ public sealed class PropertyProvenanceContractTests
             new ThrowingDisplayValue());
         var boundedKey = WpfVisualTreeInspector.FormatResourceKeyDetails(
             new DisplayValue(new string('k', 300)));
+        var componentKeyWithFailedType = WpfVisualTreeInspector.FormatResourceKeyDetails(
+            new ComponentResourceKey(new ThrowingTypeValue(), "AccentBrush"));
+        var componentKeyEvidence = WpfVisualTreeInspector.BuildResourceKeyEvidence(
+            componentKeyWithFailedType,
+            "resource_reference_candidate");
 
         Assert.Multiple(() =>
         {
@@ -388,6 +430,18 @@ public sealed class PropertyProvenanceContractTests
                 Is.EqualTo(typeof(InvalidOperationException).FullName));
             Assert.That(boundedKey.Text, Has.Length.EqualTo(200));
             Assert.That(boundedKey.Truncated, Is.True);
+            Assert.That(componentKeyWithFailedType.Text, Does.Contain("AccentBrush"));
+            Assert.That(componentKeyWithFailedType.RepresentsValue, Is.False);
+            Assert.That(
+                componentKeyWithFailedType.FormattingFailureReason,
+                Is.EqualTo("type_name_getter_failed"));
+            Assert.That(
+                componentKeyWithFailedType.FormattingFailureType,
+                Is.EqualTo(typeof(InvalidOperationException).FullName));
+            Assert.That(componentKeyEvidence.Kind, Is.EqualTo(ProvenanceEvidenceKind.Unavailable));
+            Assert.That(
+                componentKeyEvidence.Reason,
+                Is.EqualTo("type_name_getter_failed:System.InvalidOperationException"));
         });
     }
 
@@ -534,6 +588,37 @@ public sealed class PropertyProvenanceContractTests
         }
     }
 
+    private sealed class RecordingTypeValue : TypeDelegator
+    {
+        public const string RepresentedFullName = "Application.Models.Customer";
+
+        public RecordingTypeValue()
+            : base(typeof(string))
+        {
+        }
+
+        public int FullNameCalls { get; private set; }
+        public int NameCalls { get; private set; }
+
+        public override string? FullName
+        {
+            get
+            {
+                FullNameCalls++;
+                return RepresentedFullName;
+            }
+        }
+
+        public override string Name
+        {
+            get
+            {
+                NameCalls++;
+                return "Customer";
+            }
+        }
+    }
+
     private sealed class ThrowingTypeValue : TypeDelegator
     {
         public ThrowingTypeValue()
@@ -541,11 +626,26 @@ public sealed class PropertyProvenanceContractTests
         {
         }
 
-        public override string? FullName =>
-            throw new InvalidOperationException("The safe formatter must not call application Type.FullName.");
+        public int FullNameCalls { get; private set; }
+        public int NameCalls { get; private set; }
 
-        public override string Name =>
-            throw new InvalidOperationException("The safe formatter must not call application Type.Name.");
+        public override string? FullName
+        {
+            get
+            {
+                FullNameCalls++;
+                throw new InvalidOperationException("Application Type.FullName failed.");
+            }
+        }
+
+        public override string Name
+        {
+            get
+            {
+                NameCalls++;
+                throw new InvalidOperationException("Application Type.Name failed.");
+            }
+        }
     }
 
     private sealed class NonEnumerablePropertyNames(int count) : IReadOnlyList<string>

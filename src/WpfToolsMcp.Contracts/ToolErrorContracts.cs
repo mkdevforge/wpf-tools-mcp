@@ -25,15 +25,16 @@ public sealed record ToolErrorInfo(string Code, string Detail)
     public DiagnosticCauseInfo? Cause { get; init; }
 }
 
-public sealed record DiagnosticCauseInfo(string Type)
+public sealed record DiagnosticCauseInfo(
+    [property: JsonPropertyName("type")] string Type)
 {
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("message"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Message { get; init; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("details"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Details { get; init; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("messageUnavailableReason"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MessageUnavailableReason { get; init; }
 }
 
@@ -114,6 +115,9 @@ public sealed record ToolErrorCandidate(ToolErrorCandidateKind Kind, int Index)
 
     [JsonPropertyName("xpath"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? XPath { get; init; }
+
+    [JsonPropertyName("xpathOmitted"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? XPathOmitted { get; init; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Rect? Bounds { get; init; }

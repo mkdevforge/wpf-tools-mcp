@@ -25,19 +25,62 @@ internal static partial class McpToolErrorFilter
     private const int MaxCandidateXPathLength = 1024;
     private const int MaxRecoveryActions = 8;
     private const int MaxTruncatedReasonLength = 64;
+    private const int MaxCompatibilityTextLength = 6_144;
+
+    private static readonly HashSet<string> StableToolCodes = new(StringComparer.Ordinal)
+    {
+        "client_origin_unavailable",
+        "element_disabled",
+        "element_enabled_unknown",
+        "focus_failed_uia_target",
+        "focus_failed_wpf_target",
+        "focus_unsupported_wpf_target",
+        "focused_element_outside_session",
+        "focused_element_unavailable",
+        "foreground_activation_failed",
+        "invoke_unsupported_wpf_target",
+        "observe_state_connection_lost",
+        "observe_state_dispatcher_required",
+        "observe_state_not_active",
+        "observe_state_not_found",
+        "observe_state_released",
+        "observe_state_unsupported",
+        "operation_timeout",
+        "performance_already_running",
+        "performance_not_running",
+        "performance_run_id_mismatch",
+        "performance_stop_failed",
+        "pick_point_in_different_window",
+        "set_value_unsupported_wpf_target",
+        "screenshot_correlation_missing_viewport_context",
+        "subscription_limit_exceeded",
+        "uia_action_failed",
+        "uia_provider_operation_failed",
+        "wait_backend_unsupported",
+        "wait_window_framework_probe_limit",
+        "wait_window_scan_failed",
+        "wait_window_scan_limit",
+        "window_selector_mismatch",
+        "window_state_change_failed",
+        "window_uia_unavailable",
+        "wpf_backend_unavailable",
+        "wpf_command_info",
+        "wpf_element_has_no_bounds",
+        "wpf_element_has_no_bounds_after_bring_into_view",
+        "wpf_enabled_check_failed",
+        "wpf_focus_capability_unavailable",
+        "wpf_layout_context",
+        "wpf_window_dispatcher_required",
+        "wpf_window_not_found",
+        "xpath_resolved_but_filters_mismatch"
+    };
 
     public static McpRequestFilter<CallToolRequestParams, CallToolResult> CreateCallToolFilter() =>
         next => async (context, cancellationToken) =>
         {
             try
             {
-                var result = await next(context, cancellationToken).ConfigureAwait(false);
-                if (result.IsError is true)
-                {
-                    return CreateResult(CreateUnknownError(CreateRequestContext(context.Params?.Arguments)));
-                }
-
-                return result;
+                return await next(context, cancellationToken).ConfigureAwait(false);
             }
             catch (McpProtocolException)
             {
@@ -97,8 +140,23 @@ internal static partial class McpToolErrorFilter
 
         foreach (var candidate in exceptions)
         {
+            if (candidate is AgentRemoteException remote)
+            {
+                if (!string.IsNullOrWhiteSpace(remote.RemoteCode) &&
+                    TryMapStableCode(
+                        remote.RemoteMessage,
+                        requestContext,
+                        out var remoteMapped,
+                        remote.RemoteCode))
+                {
+                    return WithCause(remoteMapped, remote, messages);
+                }
+
+                continue;
+            }
+
             if (TryGetExceptionMessage(candidate, messages, out var message) &&
-                TryMapKnownCode(message, requestContext, out var mapped))
+                TryMapStableCode(message, requestContext, out var mapped))
             {
                 return WithCause(mapped, SelectDeepestCause(candidate), messages);
             }
@@ -158,19 +216,7 @@ internal static partial class McpToolErrorFilter
     {
         var candidates = ambiguity.Candidates
             .Take(MaxCandidates)
-            .Select(candidate => new ToolErrorCandidate(ToolErrorCandidateKind.Process, candidate.Index)
-            {
-                ProcessInstanceId = NormalizeProcessInstanceId(candidate.ProcessInstanceId),
-                Pid = candidate.Pid > 0 ? candidate.Pid : null,
-                WindowHandle = candidate.MainWindowHandle > 0 ? candidate.MainWindowHandle : null,
-                ProcessName = BoundOptional(candidate.ProcessName, MaxCandidateTextLength),
-                StartTimeUtc = BoundOptional(candidate.StartTimeUtc, MaxCandidateTextLength),
-                MainWindowTitle = BoundOptional(candidate.MainWindowTitle, MaxCandidateTextLength),
-                ExecutablePath = BoundOptional(candidate.ExecutablePath, MaxCandidateExecutablePathLength),
-                ExecutablePathUnavailableReason = BoundOptional(
-                    candidate.ExecutablePathUnavailableReason,
-                    MaxCandidateExecutablePathUnavailableReasonLength)
-            })
+            .Select(CreateProcessCandidate)
             .ToArray();
         var filterCapped = ambiguity.Candidates.Count > candidates.Length;
         var context = MergeContext(requestContext, new ToolErrorContext
@@ -197,15 +243,7 @@ internal static partial class McpToolErrorFilter
     {
         var candidates = ambiguity.Candidates
             .Take(MaxCandidates)
-            .Select(candidate => new ToolErrorCandidate(ToolErrorCandidateKind.Element, candidate.Index)
-            {
-                ElementId = NormalizeElementId(candidate.Element.ElementId),
-                ElementType = BoundOptional(candidate.Element.Type, MaxCandidateTextLength),
-                AutomationId = BoundOptional(candidate.Element.AutomationId, MaxCandidateTextLength),
-                Name = BoundOptional(candidate.Element.Name, MaxCandidateTextLength),
-                XPath = BoundOptional(candidate.Element.XPath, MaxCandidateXPathLength),
-                Bounds = NormalizeBounds(candidate.Element.Bounds)
-            })
+            .Select(CreateElementCandidate)
             .ToArray();
         var filterCapped = ambiguity.Candidates.Count > candidates.Length;
         var context = MergeContext(requestContext, new ToolErrorContext
@@ -228,13 +266,59 @@ internal static partial class McpToolErrorFilter
             context);
     }
 
-    private static bool TryMapKnownCode(
+    private static ToolErrorCandidate CreateProcessCandidate(ProcessCandidateInfo candidate)
+    {
+        var executablePath = NormalizeExactCandidateText(
+            candidate.ExecutablePath,
+            MaxCandidateExecutablePathLength,
+            out var executablePathOmitted);
+        var unavailableReason = executablePathOmitted
+            ? $"executablePathOmitted:maxLength={MaxCandidateExecutablePathLength};actualLength={candidate.ExecutablePath!.Length}"
+            : candidate.ExecutablePathUnavailableReason;
+
+        return new ToolErrorCandidate(ToolErrorCandidateKind.Process, candidate.Index)
+        {
+            ProcessInstanceId = NormalizeProcessInstanceId(candidate.ProcessInstanceId),
+            Pid = candidate.Pid > 0 ? candidate.Pid : null,
+            WindowHandle = candidate.MainWindowHandle > 0 ? candidate.MainWindowHandle : null,
+            ProcessName = BoundOptional(candidate.ProcessName, MaxCandidateTextLength),
+            StartTimeUtc = BoundOptional(candidate.StartTimeUtc, MaxCandidateTextLength),
+            MainWindowTitle = BoundOptional(candidate.MainWindowTitle, MaxCandidateTextLength),
+            ExecutablePath = executablePath,
+            ExecutablePathUnavailableReason = BoundOptional(
+                unavailableReason,
+                MaxCandidateExecutablePathUnavailableReasonLength)
+        };
+    }
+
+    private static ToolErrorCandidate CreateElementCandidate(ResolveElementCandidate candidate)
+    {
+        var xpath = NormalizeExactCandidateText(
+            candidate.Element.XPath,
+            MaxCandidateXPathLength,
+            out var xpathOmitted);
+        return new ToolErrorCandidate(ToolErrorCandidateKind.Element, candidate.Index)
+        {
+            ElementId = NormalizeElementId(candidate.Element.ElementId),
+            ElementType = BoundOptional(candidate.Element.Type, MaxCandidateTextLength),
+            AutomationId = BoundOptional(candidate.Element.AutomationId, MaxCandidateTextLength),
+            Name = BoundOptional(candidate.Element.Name, MaxCandidateTextLength),
+            XPath = xpath,
+            XPathOmitted = xpathOmitted ? true : null,
+            Bounds = NormalizeBounds(candidate.Element.Bounds)
+        };
+    }
+
+    private static bool TryMapStableCode(
         string? message,
         ToolErrorContext? context,
-        out ToolErrorInfo error)
+        out ToolErrorInfo error,
+        string? trustedCode = null)
     {
         error = null!;
-        if (message?.StartsWith("wpf_resolve:not_found", StringComparison.Ordinal) is true)
+        if (string.Equals(trustedCode, "wpf_resolve:not_found", StringComparison.Ordinal) ||
+            (trustedCode is null &&
+             message?.StartsWith("wpf_resolve:not_found", StringComparison.Ordinal) is true))
         {
             error = CreateKnownError(
                 "element_not_found",
@@ -245,7 +329,18 @@ internal static partial class McpToolErrorFilter
             return true;
         }
 
-        var code = ReadLeadingCode(message);
+        if (string.Equals(trustedCode, "wpf_resolve:ambiguous", StringComparison.Ordinal))
+        {
+            error = CreateKnownError(
+                "ambiguous_element",
+                "The locator matched multiple elements.",
+                true,
+                ["refine_locator"],
+                context);
+            return true;
+        }
+
+        var code = trustedCode ?? ReadLeadingCode(message);
         if (code is null)
         {
             return false;
@@ -316,7 +411,9 @@ internal static partial class McpToolErrorFilter
                     false,
                     ["restart_and_reattach"],
                     context),
-            _ => null!
+            _ => trustedCode is not null || StableToolCodes.Contains(code)
+                ? CreateForwardedCodeError(code, message ?? code, context)
+                : null!
         };
         return error is not null;
     }
@@ -336,6 +433,29 @@ internal static partial class McpToolErrorFilter
             Context = context
         };
 
+    private static ToolErrorInfo CreateForwardedCodeError(
+        string code,
+        string message,
+        ToolErrorContext? context)
+    {
+        var detail = message.Length > code.Length &&
+            message.StartsWith(code, StringComparison.Ordinal) &&
+            message[code.Length] == ':'
+                ? message[(code.Length + 1)..].Trim()
+                : string.Equals(message, code, StringComparison.Ordinal)
+                    ? string.Empty
+                    : message.Trim();
+        return new ToolErrorInfo(
+            code,
+            Bound(
+                detail,
+                MaxDetailLength,
+                $"The tool reported '{code}'."))
+        {
+            Context = context
+        };
+    }
+
     private static ToolErrorInfo CreateUnknownError(ToolErrorContext? context) =>
         new("tool_failed", "The tool operation failed.")
         {
@@ -351,9 +471,38 @@ internal static partial class McpToolErrorFilter
         return new CallToolResult
         {
             IsError = true,
-            Content = [new TextContentBlock { Text = $"{error.Code}: {error.Detail}" }],
+            Content = [new TextContentBlock { Text = FormatCompatibilityText(error) }],
             StructuredContent = structuredContent
         };
+    }
+
+    private static string FormatCompatibilityText(ToolErrorInfo error)
+    {
+        var text = $"{error.Code}: {error.Detail}";
+        if (error.Cause is not { } cause)
+        {
+            return text;
+        }
+
+        var causeSummary = cause.Type;
+        if (!string.IsNullOrWhiteSpace(cause.Message))
+        {
+            causeSummary += $": {cause.Message}";
+        }
+        else if (!string.IsNullOrWhiteSpace(cause.MessageUnavailableReason))
+        {
+            causeSummary += $" (message unavailable: {cause.MessageUnavailableReason})";
+        }
+
+        if (!string.IsNullOrWhiteSpace(cause.Details))
+        {
+            causeSummary += $" Details: {cause.Details}";
+        }
+
+        return Bound(
+            $"{text} Cause: {causeSummary}",
+            MaxCompatibilityTextLength,
+            text);
     }
 
     private static ToolErrorContext? CreateRequestContext(IDictionary<string, JsonElement>? arguments)
@@ -492,6 +641,15 @@ internal static partial class McpToolErrorFilter
 
         var trimmed = value.Trim();
         return TruncateUtf16(trimmed, maxLength);
+    }
+
+    private static string? NormalizeExactCandidateText(
+        string? value,
+        int maxLength,
+        out bool omitted)
+    {
+        omitted = value is not null && value.Length > maxLength;
+        return string.IsNullOrWhiteSpace(value) || omitted ? null : value;
     }
 
     private static string TruncateUtf16(string value, int maxLength)

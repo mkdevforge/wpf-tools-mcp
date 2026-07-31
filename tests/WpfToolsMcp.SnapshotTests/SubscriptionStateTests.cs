@@ -144,13 +144,106 @@ public sealed class SubscriptionStateTests
             exception => SubscriptionManager.ClassifySubscriptionFailure(exception, controller));
 
         var drain = state.Drain(10);
+        var terminal = drain.Events.Single();
+        var terminalPayload = terminal.Payload.Deserialize<SubscriptionTerminalEvent>();
 
         Assert.Multiple(() =>
         {
             Assert.That(scanCount, Is.EqualTo(1));
             Assert.That(drain.Completed, Is.True);
             Assert.That(drain.CompletionReason, Is.EqualTo(SubscriptionTerminalCodes.TargetExited));
-            Assert.That(drain.Events.Single().Kind, Is.EqualTo(SubscriptionEventKinds.Terminal));
+            Assert.That(terminal.Kind, Is.EqualTo(SubscriptionEventKinds.Terminal));
+            Assert.That(terminalPayload!.Cause, Is.Not.Null);
+            Assert.That(terminalPayload.Cause!.Type, Is.EqualTo(typeof(ActionableFailureException).FullName));
+            Assert.That(terminalPayload.Cause.Message, Is.EqualTo("target_exited: The target process exited."));
+            Assert.That(terminalPayload.CauseTruncated, Is.Null);
+        });
+    }
+
+    [Test]
+    public void Terminal_failure_cause_compaction_retains_a_useful_message_prefix()
+    {
+        using var state = CreateState(maxQueue: 2, maxPayloadChars: 1_600);
+        var cause = new DiagnosticCauseInfo(new string('t', 256))
+        {
+            Message = new string('m', 1_024),
+            Details = new string('d', 4_096)
+        };
+
+        _ = state.Complete(SubscriptionTerminalCodes.SourceError, cause);
+        var terminal = state.Drain(10).Events.Single();
+        var payload = terminal.Payload.Deserialize<SubscriptionTerminalEvent>();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(JsonSerializer.Serialize(terminal), Has.Length.LessThanOrEqualTo(1_600));
+            Assert.That(payload!.Cause, Is.Not.Null);
+            Assert.That(payload.Cause!.Message, Is.EqualTo(new string('m', 512)));
+            Assert.That(payload.Cause.Details, Is.Null);
+            Assert.That(payload.CauseTruncated, Is.True);
+        });
+    }
+
+    [Test]
+    public void Terminal_failure_cause_falls_back_to_type_when_compacted_text_does_not_fit()
+    {
+        using var state = CreateState(maxQueue: 2, maxPayloadChars: 1_024);
+        var cause = new DiagnosticCauseInfo(new string('t', 256))
+        {
+            Message = new string('m', 1_024),
+            Details = new string('d', 4_096)
+        };
+
+        _ = state.Complete(SubscriptionTerminalCodes.SourceError, cause);
+        var terminal = state.Drain(10).Events.Single();
+        var payload = terminal.Payload.Deserialize<SubscriptionTerminalEvent>();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(JsonSerializer.Serialize(terminal), Has.Length.LessThanOrEqualTo(1_024));
+            Assert.That(payload!.Cause, Is.Not.Null);
+            Assert.That(payload.Cause!.Type, Has.Length.LessThanOrEqualTo(128));
+            Assert.That(payload.Cause.Message, Is.Null);
+            Assert.That(payload.Cause.Details, Is.Null);
+            Assert.That(payload.CauseTruncated, Is.True);
+        });
+    }
+
+    [Test]
+    public async Task Property_completion_preserves_primary_failure_when_resource_release_also_fails()
+    {
+        using var manager = new SubscriptionManager();
+        var releaseAttempts = 0;
+        using var state = CreateState(
+            maxQueue: 2,
+            maxPayloadChars: 8_192,
+            releaseResource: () =>
+            {
+                if (Interlocked.Increment(ref releaseAttempts) == 1)
+                {
+                    throw new InvalidOperationException("release failed");
+                }
+
+                return Task.CompletedTask;
+            });
+
+        await manager.CompletePropertySubscriptionAsync(
+            state,
+            SubscriptionTerminalCodes.SourceError,
+            new AgentRemoteException(
+                "wpf/observe_state_poll",
+                "observation failed",
+                new string('p', 4_096)));
+        var drain = state.Drain(10);
+        var payload = drain.Events.Single().Payload.Deserialize<SubscriptionTerminalEvent>();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(drain.CompletionReason, Is.EqualTo(SubscriptionTerminalCodes.SourceError));
+            Assert.That(payload!.Cause!.Message, Is.EqualTo("observation failed"));
+            Assert.That(payload.Cause.Details, Does.StartWith("pppp"));
+            Assert.That(payload.Cause.Details, Does.Contain(SubscriptionTerminalCodes.SourceReleaseFailed));
+            Assert.That(payload.Cause.Details, Does.Contain("release failed"));
         });
     }
 

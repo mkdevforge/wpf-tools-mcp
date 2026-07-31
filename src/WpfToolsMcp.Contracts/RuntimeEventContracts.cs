@@ -48,4 +48,11 @@ public sealed record RuntimeEventEnvelope(
 
 public sealed record SubscriptionTerminalEvent(
     [property: JsonPropertyName("code")] string Code,
-    [property: JsonPropertyName("completedAtUtc")] DateTimeOffset CompletedAtUtc);
+    [property: JsonPropertyName("completedAtUtc")] DateTimeOffset CompletedAtUtc)
+{
+    [JsonPropertyName("cause"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DiagnosticCauseInfo? Cause { get; init; }
+
+    [JsonPropertyName("causeTruncated"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CauseTruncated { get; init; }
+}

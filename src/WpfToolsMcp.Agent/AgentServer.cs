@@ -619,7 +619,10 @@ internal static class AgentServer
             return new AgentResponse(
                 request.Id,
                 Ok: false,
-                Error: new AgentError(ex.Message, ex.ToString()));
+                Error: new AgentError(
+                    ex.Message,
+                    ex.ToString(),
+                    AgentToolError.GetCode(ex)));
         }
     }
 

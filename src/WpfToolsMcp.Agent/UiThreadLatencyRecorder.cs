@@ -244,12 +244,16 @@ internal sealed class UiThreadLatencyRecorder
             {
                 if (!string.Equals(running.OwnerId, ownerId, StringComparison.Ordinal))
                 {
-                    throw new InvalidOperationException($"performance_already_running: runId={running.RunId}");
+                    throw AgentToolError.InvalidOperation(
+                        "performance_already_running",
+                        $"performance_already_running: runId={running.RunId}");
                 }
 
                 if (!request.ResetIfRunning)
                 {
-                    throw new InvalidOperationException($"performance_already_running: runId={running.RunId}");
+                    throw AgentToolError.InvalidOperation(
+                        "performance_already_running",
+                        $"performance_already_running: runId={running.RunId}");
                 }
 
                 _ = running.TryStop(out _);
@@ -279,24 +283,32 @@ internal sealed class UiThreadLatencyRecorder
         {
             if (_active is null)
             {
-                throw new InvalidOperationException("performance_not_running");
+                throw AgentToolError.InvalidOperation(
+                    "performance_not_running",
+                    "performance_not_running");
             }
 
             if (!string.Equals(_active.OwnerId, ownerId, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("performance_run_not_owned");
+                throw AgentToolError.InvalidOperation(
+                    "performance_run_not_owned",
+                    "performance_run_not_owned");
             }
 
             if (!string.Equals(_active.RunId, runId, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException($"performance_run_id_mismatch: activeRunId={_active.RunId}");
+                throw AgentToolError.InvalidOperation(
+                    "performance_run_id_mismatch",
+                    $"performance_run_id_mismatch: activeRunId={_active.RunId}");
             }
 
             _ = _active.TryStop(out var summary);
             summary ??= _active.Summary;
             if (summary is null)
             {
-                throw new InvalidOperationException("performance_stop_failed");
+                throw AgentToolError.InvalidOperation(
+                    "performance_stop_failed",
+                    "performance_stop_failed");
             }
 
             return new PerformanceStopResponse(summary);
