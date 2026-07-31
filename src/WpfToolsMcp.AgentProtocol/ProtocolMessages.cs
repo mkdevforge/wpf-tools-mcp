@@ -28,6 +28,7 @@ public static class AgentProtocolCapabilities
     public const string GetValidationErrors = "wpf/get_validation_errors:v1";
     public const string GetCommandInfo = "wpf/get_command_info:v1";
     public const string InspectionResponseMetadata = "wpf/inspection-response-metadata:v1";
+    public const string MapUiaToWpf = "wpf/map_uia_to_wpf:v1";
 
     public static IReadOnlyList<string> Current { get; } = Array.AsReadOnly<string>(
     [
@@ -42,6 +43,7 @@ public static class AgentProtocolCapabilities
         ObserveState,
         GetValidationErrors,
         GetCommandInfo,
-        InspectionResponseMetadata
+        InspectionResponseMetadata,
+        MapUiaToWpf
     ]);
 }

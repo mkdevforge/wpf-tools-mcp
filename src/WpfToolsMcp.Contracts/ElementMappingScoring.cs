@@ -1,6 +1,4 @@
-using WpfToolsMcp.Contracts;
-
-namespace WpfToolsMcp.Automation;
+namespace WpfToolsMcp.Contracts;
 
 internal static class ElementMappingScoring
 {
@@ -139,7 +137,8 @@ internal static class ElementMappingScoring
                 SelectedIndex: 0,
                 Score: top.Score,
                 ScoreLead: scoreLead,
-                Evidence: [
+                Evidence:
+                [
                     "scan_complete",
                     "unique_top_score",
                     "unique_exact_automation_id_and_control_type",
@@ -206,6 +205,45 @@ internal static class ElementMappingScoring
             Score: top.Score,
             ScoreLead: scoreLead,
             Evidence: decisionEvidence);
+    }
+
+    internal static bool AreWpfAndUiaTypesCompatible(
+        string? wpfType,
+        string? uiaControlType)
+    {
+        var expected = GetSimpleTypeName(wpfType);
+        if (expected is null || string.IsNullOrWhiteSpace(uiaControlType))
+        {
+            return false;
+        }
+
+        if (string.Equals(expected, uiaControlType, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var compatibleControlType = expected.ToUpperInvariant() switch
+        {
+            "TEXTBLOCK" or "LABEL" => "Text",
+            "TEXTBOX" or "PASSWORDBOX" or "RICHTEXTBOX" => "Edit",
+            "TOGGLEBUTTON" or "REPEATBUTTON" => "Button",
+            "LISTBOX" or "LISTVIEW" => "List",
+            "LISTBOXITEM" or "LISTVIEWITEM" => "ListItem",
+            "TREEVIEW" => "Tree",
+            "TREEVIEWITEM" => "TreeItem",
+            "TABCONTROL" => "Tab",
+            "TABITEM" => "TabItem",
+            "MENU" or "CONTEXTMENU" => "Menu",
+            "MENUITEM" => "MenuItem",
+            "DATAGRID" => "DataGrid",
+            "DATAGRIDROW" => "DataItem",
+            "DATAGRIDCELL" => "Custom",
+            "SCROLLVIEWER" or "GRID" or "STACKPANEL" or "DOCKPANEL" or "WRAPPANEL" or "BORDER" => "Pane",
+            _ => null
+        };
+
+        return compatibleControlType is not null &&
+               string.Equals(compatibleControlType, uiaControlType, StringComparison.OrdinalIgnoreCase);
     }
 
     private static int ScoreBounds(Rect candidate, Rect expected)
@@ -277,4 +315,18 @@ internal static class ElementMappingScoring
 
     private static bool HasUsableBounds(Rect bounds) =>
         bounds.Width > 0 && bounds.Height > 0;
+
+    private static string? GetSimpleTypeName(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return null;
+        }
+
+        var trimmed = typeName.Trim();
+        var separator = Math.Max(trimmed.LastIndexOf('.'), trimmed.LastIndexOf('+'));
+        return separator >= 0 && separator < trimmed.Length - 1
+            ? trimmed[(separator + 1)..]
+            : trimmed;
+    }
 }

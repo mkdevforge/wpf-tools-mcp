@@ -9522,6 +9522,8 @@ public sealed partial class AutomationController : IDisposable
             IReadOnlyList<AutomationElement>? scannedElements = null;
             WpfLocatorIdentity? wpf = null;
             UiaMappingDiagnostics? uiaMapping = null;
+            WpfMappingDiagnostics? wpfMapping = null;
+            var sourceIsUia = false;
 
             if (hasElementId)
             {
@@ -9582,6 +9584,7 @@ public sealed partial class AutomationController : IDisposable
                 }
                 else
                 {
+                    sourceIsUia = true;
                     element = ResolveUiaElementById(
                         window,
                         rawWalker,
@@ -9652,38 +9655,9 @@ public sealed partial class AutomationController : IDisposable
                 }
                 else
                 {
+                    sourceIsUia = true;
                     element = ResolveElement(window, locator!, controlWalker, rawWalker);
                     uiaXPath = ComputeXPath(window, element, rawWalker);
-
-                    if (HasStableWpfLocator(locator!))
-                    {
-                        try
-                        {
-                            var wpfTarget = await TryResolveWpfLocatorTargetForAutoAsync(
-                                window,
-                                locator!,
-                                timeoutMs: 0,
-                                pollIntervalMs: 100,
-                                stableMs: 0,
-                                visibleOnly: false,
-                                includeOffViewport: true,
-                                interactiveOnly: false,
-                                interactiveMode: InteractiveMode.Heuristic,
-                                cancellationToken).ConfigureAwait(false);
-
-                            if (wpfTarget is not null)
-                            {
-                                wpf = CreateWpfLocatorIdentity(wpfTarget.Handle, wpfTarget.ElementId);
-                            }
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            throw;
-                        }
-                        catch
-                        {
-                        }
-                    }
                 }
             }
 
@@ -9716,18 +9690,42 @@ public sealed partial class AutomationController : IDisposable
                     uia.ClassName,
                     uia.Bounds);
             }
+            else if (sourceIsUia && mappedUiaElementId is null &&
+                     TryGetRuntimeId(element) is { Length: > 0 } resolvedRuntimeId)
+            {
+                mappedUiaElementId = _elementHandles.RegisterUia(
+                    window.Properties.NativeWindowHandle.Value.ToInt64(),
+                    uiaXPath,
+                    resolvedRuntimeId,
+                    uia.ControlType,
+                    uia.AutomationId,
+                    uia.Name,
+                    uia.ClassName,
+                    uia.Bounds);
+            }
 
             uia = uia with
             {
                 ElementId = mappedUiaElementId
             };
+            if (sourceIsUia)
+            {
+                var mapping = await MapUiaOriginToWpfAsync(
+                    window,
+                    uia,
+                    maxNodes,
+                    cancellationToken).ConfigureAwait(false);
+                wpf = mapping.Wpf;
+                wpfMapping = mapping.Diagnostics;
+            }
             var suggestions = CreateUiaLocatorSuggestions(element, uiaXPath, flaUiXPath, allElements);
             var flaui = CreateFlaUiSnippets(suggestions);
             var response = new GetUiaLocatorsResponse(wpf, uia, suggestions, flaui, uiaMapping)
             {
                 WindowHandleUsed = window.Properties.NativeWindowHandle.Value.ToInt64(),
                 SourceElementId = sourceUiaElementId,
-                SourceElementIdentityStatus = sourceUiaIdentityStatus
+                SourceElementIdentityStatus = sourceUiaIdentityStatus,
+                WpfMapping = wpfMapping
             };
             trace?.SetSummary($"{uia.ControlType} {uia.UiaXPath} recommended={suggestions.Recommended}");
             return response;

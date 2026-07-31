@@ -48,6 +48,28 @@ public sealed class UiaLocatorSnapshots
                 }
             });
 
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Uia?.ElementId, Does.StartWith("uia_"));
+                Assert.That(result.Wpf?.ElementId, Does.StartWith("wpf_"));
+                Assert.That(result.WpfMapping?.Available, Is.True);
+                Assert.That(result.WpfMapping?.Status, Is.EqualTo(ElementMappingStatus.Exact));
+                Assert.That(result.WpfMapping?.SelectedElementId, Is.EqualTo(result.Wpf?.ElementId));
+                Assert.That(result.WpfMapping?.Candidates.Count, Is.LessThanOrEqualTo(10));
+            });
+
+            var roundTrip = await _mcp.CallToolAsync<GetUiaLocatorsResponse>("get_uia_locators", new Dictionary<string, object?>
+            {
+                ["sessionId"] = _sessionId,
+                ["elementId"] = result.Wpf!.ElementId
+            });
+            Assert.Multiple(() =>
+            {
+                Assert.That(roundTrip.UiaMapping?.Status, Is.EqualTo(ElementMappingStatus.Exact));
+                Assert.That(roundTrip.Uia?.AutomationId, Is.EqualTo(result.Uia?.AutomationId));
+                Assert.That(roundTrip.Uia?.ElementId, Does.StartWith("uia_"));
+            });
+
             AssertFlaUiXPathResolves(result);
             await Verifier.Verify(Scrub(result));
         }
@@ -70,6 +92,14 @@ public sealed class UiaLocatorSnapshots
                 {
                     ["name"] = "TextBox:"
                 }
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Uia?.ElementId, Does.StartWith("uia_"));
+                Assert.That(result.WpfMapping?.Available, Is.True);
+                Assert.That(result.WpfMapping?.Status, Is.EqualTo(ElementMappingStatus.Heuristic));
+                Assert.That(result.Wpf?.ElementId, Does.StartWith("wpf_"));
             });
 
             AssertFlaUiXPathResolves(result);
@@ -359,7 +389,7 @@ public sealed class UiaLocatorSnapshots
         response with
         {
             WindowHandleUsed = 0,
-            Wpf = response.Wpf is null
+            Wpf = response.Uia?.AutomationId is null || response.Wpf is null
                 ? null
                 : response.Wpf with
                 {
@@ -370,11 +400,12 @@ public sealed class UiaLocatorSnapshots
                 ? null
                 : response.Uia with
                 {
-                    ElementId = response.Uia.ElementId is null ? null : "<element>",
+                    ElementId = null,
                     Bounds = new Rect(0, 0, 0, 0),
                     ClassName = string.IsNullOrWhiteSpace(response.Uia.ClassName) ? null : response.Uia.ClassName
                 },
-            UiaMapping = ScrubUiaMapping(response.UiaMapping)
+            UiaMapping = ScrubUiaMapping(response.UiaMapping),
+            WpfMapping = null
         };
 
     private static UiaMappingDiagnostics? ScrubUiaMapping(UiaMappingDiagnostics? mapping) =>

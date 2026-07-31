@@ -163,13 +163,13 @@ Key and mouse bindings expose their typed gestures, while custom gestures are
 reported as unsupported without calling `InputGesture.Matches`. Getter,
 `CanExecute`, and value-formatting failures remain structured in the response.
 
-### Explained WPF-to-UIA Mapping
+### Explained Bidirectional WPF/UIA Mapping
 
-`get_uia_locators` keeps its existing UIA-origin behavior when `backend` is
-omitted or set to `Uia`. A locator that begins in the WPF tree must explicitly
-set `backend=Wpf` and must be strict with an exact `automationId` or `xpath`.
-An `elementId` keeps its registered backend; supplying a conflicting backend or
-window handle is rejected.
+`get_uia_locators` accepts UIA-origin input when `backend` is omitted or set to
+`Uia`. A locator that begins in the WPF tree must explicitly set `backend=Wpf`
+and must be strict with an exact `automationId` or `xpath`. An `elementId` keeps
+its registered backend; supplying a conflicting backend or window handle is
+rejected.
 
 WPF-origin calls scan only the selected window's in-process UIA control tree.
 `maxNodes` defaults to 5,000 and accepts 1 through 50,000. It is one shared
@@ -206,6 +206,26 @@ chooses that mode deliberately. When `get_uia_locators` observes a replacement,
 it returns `SourceElementIdentityStatus=Changed` and registers a fresh UIA ID for
 that occupant rather than attaching the stale source ID to new evidence. WPF
 XPath is never evaluated against the different UIA tree.
+
+UIA-origin calls return the normal UIA locator recommendations and also attempt
+an explained mapping into the same window's WPF visual tree. The injected agent
+projects each WPF element through its `AutomationPeer`, applies the same
+deterministic scorer used by WPF-to-UIA mapping, and returns `WpfMapping` with
+scan counts, status, integer score, symbolic evidence, and at most ten ranked
+candidates. Only an `Exact` or sufficiently separated `Heuristic` winner is
+registered as a reusable public `wpf_...` handle. The source UIA element also
+gets a reusable `uia_...` handle when its runtime identity is available.
+
+This reverse mapping is supplementary: valid UIA locator output still succeeds
+when the WPF agent is missing, outdated, or fails. In that case
+`WpfMapping.Available=false` includes a structured `Failure`. A window known to
+be native or another non-WPF framework completes without injection as
+`Available=true`, `Status=Unmapped`, and method `frameworkClassification`.
+Read-only UIA-handle observation keeps the existing current-XPath-occupant
+semantics. If the registered source was replaced, the result reports
+`SourceElementIdentityStatus=Changed`, registers fresh UIA and WPF handles for
+the observed replacement when possible, and never treats the stale source ID
+as the replacement's identity.
 
 ### Backend Status and Failures
 

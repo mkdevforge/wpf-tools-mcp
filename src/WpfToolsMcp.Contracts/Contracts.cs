@@ -424,6 +424,9 @@ public sealed record GetUiaLocatorsResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] FlaUiLocatorSnippets? FlaUi = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UiaMappingDiagnostics? UiaMapping = null)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WpfMappingDiagnostics? WpfMapping { get; init; }
+
     public long WindowHandleUsed { get; init; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -242,6 +242,21 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case AgentProtocolCapabilities.MapUiaToWpf:
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<MapUiaToWpfAgentRequest>(JsonOptions)
+                            ?? throw new InvalidOperationException("Missing request params.");
+
+                        var response = WpfVisualTreeInspector.MapUiaToWpf(
+                            ownerId,
+                            typedRequest,
+                            cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
                 case "wpf/get_path":
                     return await RunOnUiAsync(() =>
                     {

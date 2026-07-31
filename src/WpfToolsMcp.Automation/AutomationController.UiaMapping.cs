@@ -1,5 +1,6 @@
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
+using WpfToolsMcp.AgentProtocol;
 using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
@@ -9,6 +10,8 @@ public sealed partial class AutomationController
     public const int DefaultUiaMappingMaxNodes = 5_000;
     internal const int MaximumUiaMappingNodes = 50_000;
     private const string WpfUiaMappingMethod = "scoredWindowScan";
+    private const string UiaWpfMappingMethod = "automationPeerScoredWindowScan";
+    private const string FrameworkClassificationMappingMethod = "frameworkClassification";
 
     private sealed record RankedWpfUiaCandidate(
         AutomationElement Element,
@@ -43,6 +46,10 @@ public sealed partial class AutomationController
         string? SelectedElementId,
         IReadOnlyList<AutomationElement> ScannedElements,
         UiaMappingDiagnostics Diagnostics);
+
+    private sealed record UiaWpfMappingResult(
+        WpfLocatorIdentity? Wpf,
+        WpfMappingDiagnostics Diagnostics);
 
     private sealed record CandidateRegistrationAttempt(
         RegisteredUiaCandidate? Registration,
@@ -981,54 +988,170 @@ public sealed partial class AutomationController
 
     internal static bool AreWpfAndUiaTypesCompatible(
         string? wpfType,
-        string? uiaControlType)
+        string? uiaControlType) =>
+        ElementMappingScoring.AreWpfAndUiaTypesCompatible(wpfType, uiaControlType);
+
+    private async Task<UiaWpfMappingResult> MapUiaOriginToWpfAsync(
+        Window window,
+        UiaLocatorIdentity source,
+        int maxNodes,
+        CancellationToken cancellationToken)
     {
-        var expected = GetSimpleTypeName(wpfType);
-        if (expected is null || string.IsNullOrWhiteSpace(uiaControlType))
+        if (GetAutoBackendRoute(window) == AutoBackendRoute.Uia)
         {
-            return false;
+            return new UiaWpfMappingResult(
+                Wpf: null,
+                CreateNonWpfWindowMappingDiagnostics("window_framework_not_wpf"));
         }
 
-        if (string.Equals(expected, uiaControlType, StringComparison.OrdinalIgnoreCase))
+        AgentClient? client;
+        try
         {
-            return true;
+            client = await EnsureAgentConnectedForAutoAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var failure = PreferTargetStateFailure(CreateAutoWpfFallbackFailure(ex));
+            return new UiaWpfMappingResult(null, CreateUnavailableWpfMappingDiagnostics(failure));
         }
 
-        var compatibleControlType = expected.ToUpperInvariant() switch
+        if (client is null)
         {
-            "TEXTBLOCK" or "LABEL" => "Text",
-            "TEXTBOX" or "PASSWORDBOX" or "RICHTEXTBOX" => "Edit",
-            "TOGGLEBUTTON" or "REPEATBUTTON" => "Button",
-            "LISTBOX" or "LISTVIEW" => "List",
-            "LISTBOXITEM" or "LISTVIEWITEM" => "ListItem",
-            "TREEVIEW" => "Tree",
-            "TREEVIEWITEM" => "TreeItem",
-            "TABCONTROL" => "Tab",
-            "TABITEM" => "TabItem",
-            "MENU" or "CONTEXTMENU" => "Menu",
-            "MENUITEM" => "MenuItem",
-            "DATAGRID" => "DataGrid",
-            "DATAGRIDROW" => "DataItem",
-            "DATAGRIDCELL" => "Custom",
-            "SCROLLVIEWER" or "GRID" or "STACKPANEL" or "DOCKPANEL" or "WRAPPANEL" or "BORDER" => "Pane",
-            _ => null
+            var failure = GetWpfBackendFailure() ?? new FailureInfo(
+                Code: FailureDiagnostics.Codes.AgentConnectionFailed,
+                Stage: FailureDiagnostics.Stages.PipeConnection,
+                Detail: "The WPF mapping backend is unavailable.")
+            {
+                Retryable = true,
+                RecoveryActions = [FailureDiagnostics.Recovery.Retry]
+            };
+            return new UiaWpfMappingResult(null, CreateUnavailableWpfMappingDiagnostics(failure));
+        }
+
+        if (!AgentSupportsCapability(client, AgentProtocolCapabilities.MapUiaToWpf))
+        {
+            var failure = new FailureInfo(
+                Code: "agent_capability_unavailable",
+                Stage: FailureDiagnostics.Stages.Protocol,
+                Detail: "UIA-to-WPF mapping requires the current WPF agent.")
+            {
+                Retryable = false,
+                RecoveryActions =
+                [
+                    FailureDiagnostics.Recovery.RestartTarget,
+                    FailureDiagnostics.Recovery.Reattach
+                ]
+            };
+            return new UiaWpfMappingResult(null, CreateUnavailableWpfMappingDiagnostics(failure));
+        }
+
+        try
+        {
+            var hwnd = window.Properties.NativeWindowHandle.Value.ToInt64();
+            var response = await client.CallAsync<MapUiaToWpfAgentResponse>(
+                AgentProtocolCapabilities.MapUiaToWpf,
+                new MapUiaToWpfAgentRequest(
+                    hwnd,
+                    new UiaMappingSource(
+                        source.ControlType,
+                        source.AutomationId,
+                        source.Name,
+                        source.ClassName,
+                        source.Bounds),
+                    maxNodes),
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.SelectedElement is not { } selected)
+            {
+                return new UiaWpfMappingResult(null, response.Mapping);
+            }
+
+            if (string.IsNullOrWhiteSpace(selected.ElementIdWpf))
+            {
+                var failure = FailureDiagnostics.ProtocolFailure();
+                return new UiaWpfMappingResult(null, CreateUnavailableWpfMappingDiagnostics(failure));
+            }
+
+            var publicElementId = _elementHandles.RegisterWpf(
+                hwnd,
+                selected.XPath,
+                selected.ElementIdWpf,
+                selected.Type,
+                selected.AutomationId,
+                selected.Name,
+                selected.ClassName,
+                selected.Bounds);
+            var identity = new WpfLocatorIdentity(
+                selected.Type,
+                selected.AutomationId,
+                selected.Name,
+                selected.ClassName,
+                selected.XPath,
+                publicElementId)
+            {
+                Bounds = selected.Bounds
+            };
+            return new UiaWpfMappingResult(
+                identity,
+                response.Mapping with
+                {
+                    SelectedElementId = publicElementId,
+                    SelectedXPath = selected.XPath
+                });
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsPerWindowAutoWpfMiss(ex))
+        {
+            return new UiaWpfMappingResult(
+                Wpf: null,
+                CreateNonWpfWindowMappingDiagnostics("wpf_window_not_found"));
+        }
+        catch (Exception ex)
+        {
+            var failure = PreferTargetStateFailure(CreateAutoWpfFallbackFailure(ex));
+            if (ShouldRecordAutoAgentFailure(ex, client.IsConnected))
+            {
+                SetAutoAgentFailure(failure);
+            }
+
+            return new UiaWpfMappingResult(null, CreateUnavailableWpfMappingDiagnostics(failure));
+        }
+    }
+
+    internal static WpfMappingDiagnostics CreateNonWpfWindowMappingDiagnostics(string evidence) =>
+        new(
+            Available: true,
+            Method: FrameworkClassificationMappingMethod,
+            Candidates: [],
+            ReturnedCandidates: 0,
+            TotalCandidates: 0,
+            ScannedNodes: 0,
+            ScanComplete: true,
+            Truncated: false)
+        {
+            Status = ElementMappingStatus.Unmapped,
+            Evidence = ["scan_complete", evidence]
         };
 
-        return compatibleControlType is not null &&
-               string.Equals(compatibleControlType, uiaControlType, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string? GetSimpleTypeName(string? typeName)
-    {
-        if (string.IsNullOrWhiteSpace(typeName))
+    internal static WpfMappingDiagnostics CreateUnavailableWpfMappingDiagnostics(FailureInfo failure) =>
+        new(
+            Available: false,
+            Method: UiaWpfMappingMethod,
+            Candidates: [],
+            ReturnedCandidates: 0,
+            TotalCandidates: 0,
+            ScannedNodes: 0,
+            ScanComplete: false,
+            Truncated: false)
         {
-            return null;
-        }
-
-        var trimmed = typeName.Trim();
-        var separator = Math.Max(trimmed.LastIndexOf('.'), trimmed.LastIndexOf('+'));
-        return separator >= 0 && separator < trimmed.Length - 1
-            ? trimmed[(separator + 1)..]
-            : trimmed;
-    }
+            Evidence = ["mapping_backend_unavailable"],
+            Failure = failure
+        };
 }

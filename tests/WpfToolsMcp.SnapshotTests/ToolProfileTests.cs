@@ -419,7 +419,8 @@ public sealed class ToolProfileTests
                 "uia",
                 "uiaMapping",
                 "windowHandleUsed",
-                "wpf"
+                "wpf",
+                "wpfMapping"
             }));
         Assert.That(
             GetOutputRequiredPropertyNames(tools["get_uia_locators"]),

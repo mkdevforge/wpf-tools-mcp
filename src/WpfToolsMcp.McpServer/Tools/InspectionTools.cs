@@ -70,7 +70,7 @@ public static class InspectionTools
                 cancellationToken);
         });
 
-    [McpServerTool(Name = "get_uia_locators", UseStructuredContent = true), Description("Return UIA locator suggestions and FlaUI snippets for a WPF or UIA element.")]
+    [McpServerTool(Name = "get_uia_locators", UseStructuredContent = true), Description("Return UIA locator suggestions, FlaUI snippets, and explained WPF/UIA mapping.")]
     public static Task<GetUiaLocatorsResponse> GetUiaLocators(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
@@ -78,7 +78,7 @@ public static class InspectionTools
         [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Locator backend; omit for UIA or specify Wpf for a WPF locator")] InspectionBackend? backend = null,
-        [Description("Maximum UIA nodes scanned for WPF mapping (1-50000)")] int maxNodes = AutomationController.DefaultUiaMappingMaxNodes,
+        [Description("Maximum nodes scanned when mapping between UIA and WPF (1-50000)")] int maxNodes = AutomationController.DefaultUiaMappingMaxNodes,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
