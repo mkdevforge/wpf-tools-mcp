@@ -69,8 +69,8 @@ agent workflows:
 
 | Profile | Tools | Purpose |
 |---|---:|---|
-| `core` (default) | 34 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 57 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `core` (default) | 35 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
+| `diagnostics` | 58 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Every advertised tool includes an MCP `outputSchema` with exactly two `oneOf`
 branches: the tool's typed success schema and the common tool-error schema.
@@ -105,9 +105,10 @@ The `core` profile exposes:
 - **Sessions and windows:** `launch_app`, `attach_to_app`, `detach_session`,
   `close_app`, `terminate_app`, `list_sessions`, `list_windows`,
   `set_active_window`. `close_session` remains as a compatibility path.
-- **Inspection:** `take_screenshot`, `get_visual_tree`, `find_elements`,
-  `resolve_element`, `get_element_properties`, `get_uia_locators`,
-  `get_uia_tree`, `capture_diagnostic_snapshot`.
+- **Inspection:** `take_screenshot`, `take_screenshot_sequence`,
+  `get_visual_tree`, `find_elements`, `resolve_element`,
+  `get_element_properties`, `get_uia_locators`, `get_uia_tree`,
+  `capture_diagnostic_snapshot`.
 - **Interaction and synchronization:** `click_element`, `invoke`, `type_text`,
   `send_keys`, `set_value`, `select_item`, `realize_item`, `scroll_to_element`,
   `drag`, `wait_for`.
@@ -126,8 +127,9 @@ The `diagnostics` profile additionally exposes:
   `poll_subscription`, and `unsubscribe`.
 - `trace_start`, `trace_stop`, `performance_start`, and `performance_stop`.
 
-Its expanded `take_screenshot` schema also exposes capture controls and the
-opt-in screenshot-correlation workflow described below.
+Its expanded screenshot schemas also expose capture mode, area, and clipping
+controls. `take_screenshot` additionally exposes the opt-in
+screenshot-correlation workflow described below.
 
 `get_validation_errors` is a bounded, read-only snapshot of the current
 `Validation.Errors` attached state in one WPF visual-tree scope. It does not
@@ -803,6 +805,32 @@ to the client size, DPI, monitor, and state under which it was captured. The
 viewport is sampled immediately before and after capture; unstable captures
 are retried and fail with `screenshot_viewport_unstable` rather than returning
 mislabeled evidence.
+
+### Screenshot Sequences
+
+`take_screenshot_sequence` captures an ordered PNG sequence for an
+already-running animation, a change scheduled before capture, or a change
+triggered manually or by another external actor. It captures the first frame
+immediately, then waits at least `intervalMs` after each completed capture. The
+manifest records actual UTC observation time, monotonic elapsed time, and
+capture duration rather than claiming an exact frame rate.
+
+The tool accepts 2-300 frames, and the requested inter-frame delays may total at
+most 30 seconds. It resolves and optionally scrolls an element only for the
+first frame, then pins the HWND, captured screen rectangle, and actual capture
+mode. Later frames neither re-resolve the target nor silently switch modes. A
+GUID-named child of `outputDirectory` contains `frame-0000.png` and subsequent
+frames plus an atomically published `manifest.json`. Later capture failures
+return `complete=false` while preserving completed frames; first-frame failures
+remain normal tool errors. The compact response retains the pinned window,
+bounds, capture mode, and clipping state beside the artifact paths.
+
+Sequence capture is synchronous and holds the session's normal operation lock.
+Another MCP action on the same session waits until the sequence finishes, so
+this version does not coordinate a click or key action after capture starts.
+The `diagnostics` profile additionally exposes `captureMode`, `area`, and `clip`;
+base64, JPEG, annotations, correlation, embedded actions, video encoding, and
+background recording are intentionally outside this workflow.
 
 ### Screenshot Correlation
 

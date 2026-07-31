@@ -45,6 +45,7 @@ public sealed class ToolProfileTests
         "set_active_window",
         "set_value",
         "take_screenshot",
+        "take_screenshot_sequence",
         "terminate_app",
         "type_text",
         "wait_for"
@@ -142,6 +143,16 @@ public sealed class ToolProfileTests
         var tools = (await mcp.ListToolsAsync()).ToDictionary(tool => tool.Name, StringComparer.Ordinal);
 
         AssertOutputContains(tools["take_screenshot"], "backendUsed", "fallback", "windowHandleUsed");
+        AssertOutputContains(
+            tools["take_screenshot_sequence"],
+            "capturedBounds",
+            "capturedFrameCount",
+            "captureModeUsed",
+            "complete",
+            "firstFramePath",
+            "lastFramePath",
+            "manifestPath",
+            "windowHandleUsed");
         AssertOutputContains(tools["get_visual_tree"], "backendUsed", "fallback", "windowHandleUsed");
         AssertOutputContains(tools["find_elements"], "backendUsed", "fallback", "windowHandleUsed");
         AssertOutputContains(tools["get_uia_tree"], "windowHandleUsed");
@@ -351,6 +362,8 @@ public sealed class ToolProfileTests
 
         Assert.That(GetInputPropertyNames(tools["take_screenshot"]), Is.EqualTo(
             new[] { "elementId", "includeViewport", "locator", "outputPath", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["take_screenshot_sequence"]), Is.EqualTo(
+            new[] { "elementId", "frameCount", "intervalMs", "locator", "outputDirectory", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_visual_tree"]), Is.EqualTo(
             new[] { "depth", "maxNodes", "root", "sessionId", "visibleOnly", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["find_elements"]), Is.EqualTo(
@@ -415,6 +428,7 @@ public sealed class ToolProfileTests
         foreach (var toolName in new[]
                  {
                      "take_screenshot",
+                     "take_screenshot_sequence",
                      "get_visual_tree",
                      "find_elements",
                      "get_uia_tree",
@@ -494,6 +508,46 @@ public sealed class ToolProfileTests
             Assert.That(
                 GetInputObjectEnumValues(diagnosticTools["take_screenshot"], "correlation", "backend"),
                 Is.EqualTo(new[] { "Auto", "Both", "Uia", "Wpf" }));
+        });
+    }
+
+    [Test]
+    public async Task Screenshot_sequence_capture_controls_are_diagnostics_only()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var core = await McpTestContext.StartAsync(serverExe, toolProfile: "core");
+        await using var diagnostics = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+
+        var coreTools = (await core.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var diagnosticTools = (await diagnostics.ListToolsAsync()).ToDictionary(t => t.Name, StringComparer.Ordinal);
+        var coreInputs = GetInputPropertyNames(coreTools["take_screenshot_sequence"]);
+        var diagnosticInputs = GetInputPropertyNames(diagnosticTools["take_screenshot_sequence"]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(coreInputs, Is.EqualTo(new[]
+            {
+                "elementId",
+                "frameCount",
+                "intervalMs",
+                "locator",
+                "outputDirectory",
+                "sessionId",
+                "windowHandle"
+            }));
+            Assert.That(diagnosticInputs, Is.EqualTo(new[]
+            {
+                "area",
+                "captureMode",
+                "clip",
+                "elementId",
+                "frameCount",
+                "intervalMs",
+                "locator",
+                "outputDirectory",
+                "sessionId",
+                "windowHandle"
+            }));
         });
     }
 

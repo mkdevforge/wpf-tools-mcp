@@ -242,6 +242,35 @@ public static class CoreInspectionTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "take_screenshot_sequence", UseStructuredContent = true), Description("Capture ordered PNG frames of an already-running, scheduled, or externally triggered visual change. Calls on the same session wait until capture completes.")]
+    public static Task<TakeScreenshotSequenceResponse> TakeScreenshotSequence(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Optional target locator")] CoreElementLocator? locator = null,
+        [Description("Optional target elementId")] string? elementId = null,
+        [Description("Number of frames to capture (2-300)")] int frameCount = 12,
+        [Description("Delay after each completed frame; total requested delay must not exceed 30000 ms")] int intervalMs = 100,
+        [Description("Optional parent directory for the generated sequence directory")] string? outputDirectory = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.TakeScreenshotSequenceAsync(
+                    new TakeScreenshotSequenceRequest(
+                        WindowHandle: hasElementId ? windowHandle : effectiveWindowHandle,
+                        Locator: locator?.ToElementLocator(),
+                        ElementId: elementId,
+                        FrameCount: frameCount,
+                        IntervalMs: intervalMs,
+                        OutputDirectory: outputDirectory),
+                    cancellationToken,
+                    autoInject: true),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "get_visual_tree", UseStructuredContent = true), Description("Return a compact UI tree. Uses WPF inspection when available, otherwise UIA.")]
     public static Task<GetVisualTreeResponse> GetVisualTree(
         SessionManager sessions,

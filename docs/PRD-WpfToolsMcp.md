@@ -121,7 +121,7 @@ The MCP server manages both channels in Phase 2. Backend-neutral inspection tool
 ## MCP Tools
 
 The tables below describe the full `diagnostics` profile. The default `core`
-profile intentionally exposes a smaller 34-tool surface with compact schemas;
+profile intentionally exposes a smaller 35-tool surface with compact schemas;
 see `README.md` for the current profile split and configuration.
 
 ### Phase 1 — Inspection (FlaUI / UIA)
@@ -131,6 +131,7 @@ see `README.md` for the current profile split and configuration.
 | `list_windows` | Enumerate all windows of the target process | Native window captions (UI Automation name fallback), handles, dimensions, process info, owner HWND, nullable modal state, and UIA framework identity |
 | `list_displays` | List connected displays and virtual screen bounds (multi-monitor diagnostics) | Virtual screen bounds + per-display bounds |
 | `take_screenshot` | Capture the target window or a specific element (defaults: `captureMode=auto`, `autoScroll=true`, `includeOverlay=false`). Supports optional annotation (`annotate` + `annotation*`), viewport evidence (`includeViewport=true`), and diagnostics-only point/region correlation (`correlation`). | File path + image metadata (`width`, `height`, `format`), optional Base64 payload, `ViewportConditions`, and bounded WPF/UIA correlation evidence |
+| `take_screenshot_sequence` | Synchronously capture 2-300 ordered PNG frames for an already-running, previously scheduled, or externally triggered visual change. Resolves and scrolls once, then pins the HWND, captured rectangle, and actual capture mode. | Compact completion and pinned-context summary plus first/last frame and manifest paths; the manifest contains actual timing, frame metadata, and any later failure |
 | `get_visual_tree` | Return an inspection tree (UIA or WPF) for the main window or a subtree | Structured JSON. Configurable depth. `visibleOnly=true` means **in-viewport**; use `includeOffViewport=true` to include offscreen elements. |
 | `find_elements` | Find elements without dumping the full tree; minimal or standard result context | Deterministically ordered matches, returned/discovered/scanned counts, truncation metadata, and optional `elementId`s |
 | `resolve_element` | Resolve one element and return an `elementId` handle for re-use | ElementRef on success; non-XPath ambiguity returns an `ambiguous_element` tool error with up to five index-addressable candidates containing reusable identity and bounded observed type/name/AutomationId/path/bounds evidence; ambiguous XPath segments return a path-specific indexing error |
@@ -383,6 +384,21 @@ the actual client size and DPI conditions instead of an approximate outer
 window size. Capture conditions are sampled immediately before and after the
 bitmap operation and must match; unstable attempts are discarded and retried,
 then reported as `screenshot_viewport_unstable` if stability cannot be reached.
+
+`take_screenshot_sequence` captures its first frame immediately and waits at
+least the requested interval after each completed frame, without catch-up
+bursts or an exact-frame-rate claim. The requested delays may total at most 30
+seconds. Frames are written as PNG files in a generated sequence directory and
+an ordered JSON manifest is atomically published at completion. A failure after
+the first frame preserves the captured evidence and returns `complete=false`;
+the first capture retains ordinary tool-failure semantics.
+
+The sequence call is synchronous and uses the same per-session operation lock
+as inspection and interaction tools. It can observe animations already in
+progress, changes scheduled before capture, and external/manual triggers, but a
+second action through the same MCP session waits until capture completes. The
+diagnostics profile adds capture-mode, area, and clipping controls without
+adding embedded actions or a background recording lifecycle.
 
 In the diagnostics profile, the optional `correlation` object maps a
 capture-local physical-pixel point or region to bounded WPF/UIA candidates.
