@@ -24,6 +24,7 @@ public sealed class ToolProfileTests
         "find_elements",
         "get_binding_errors",
         "get_binding_info",
+        "get_command_info",
         "get_computed_properties",
         "get_data_context",
         "get_element_properties",
@@ -154,6 +155,18 @@ public sealed class ToolProfileTests
             "scanComplete",
             "truncatedReasons");
         AssertOutputContains(
+            tools["get_command_info"],
+            "element",
+            "source",
+            "controlIsEnabled",
+            "canExecute",
+            "contextChain",
+            "counts",
+            "parentChainStatus",
+            "truncated",
+            "truncatedReasons",
+            "windowHandleUsed");
+        AssertOutputContains(
             tools["get_binding_errors"],
             "windowHandleUsed",
             "returnedErrors",
@@ -210,6 +223,51 @@ public sealed class ToolProfileTests
                 "namedElementsTruncated",
                 "maxNamedElements"
             }));
+    }
+
+    [TestCase(null)]
+    [TestCase("diagnostics")]
+    public async Task Command_info_exposes_bounded_non_executing_inspection_schema(string? toolProfile)
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: toolProfile);
+        var tool = (await mcp.ListToolsAsync()).Single(item => item.Name == "get_command_info");
+
+        Assert.Multiple(() =>
+        {
+            var expectedInputProperties = string.Equals(toolProfile, "diagnostics", StringComparison.Ordinal)
+                ? new[]
+                {
+                    "elementId",
+                    "locator",
+                    "maxAncestors",
+                    "maxBindings",
+                    "maxValueLength",
+                    "sessionId",
+                    "windowHandle"
+                }
+                : new[] { "elementId", "locator", "sessionId", "windowHandle" };
+            Assert.That(GetInputPropertyNames(tool), Is.EqualTo(expectedInputProperties));
+            Assert.That(
+                GetNestedOutputPropertyNames(tool, "source"),
+                Is.SupersetOf(new[] { "status", "sourceType", "commandProperty", "command", "parameter", "target" }));
+            Assert.That(
+                GetNestedOutputPropertyNames(tool, "canExecute"),
+                Is.SupersetOf(new[] { "status", "canExecute", "mode", "effectiveTarget", "usedCommandSourceFallback", "unavailableReason", "failure" }));
+            Assert.That(
+                GetArrayItemOutputPropertyNames(tool, "contextChain"),
+                Is.SupersetOf(new[] { "depth", "element", "commandBindings", "inputBindings" }));
+            Assert.That(
+                GetNestedOutputPropertyNames(tool, "counts"),
+                Is.SupersetOf(new[]
+                {
+                    "returnedContexts",
+                    "discoveredCommandBindings",
+                    "returnedCommandBindings",
+                    "discoveredInputBindings",
+                    "returnedInputBindings"
+                }));
+        });
     }
 
     [Test]

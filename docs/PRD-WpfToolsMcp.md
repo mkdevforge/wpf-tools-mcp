@@ -105,6 +105,7 @@ The injected agent (`WpfToolsMcp.Agent`) is a thin assembly that:
                           │     │  - Visual tree         │ │
                           │     │  - UIA coverage        │ │
                           │     │  - Binding status      │ │
+                          │     │  - Command status      │ │
                           │     │  - DataContext          │ │
                           │     │  - Dependency props     │ │
                           │     │  - Layout context       │ │
@@ -120,7 +121,7 @@ The MCP server manages both channels in Phase 2. Backend-neutral inspection tool
 ## MCP Tools
 
 The tables below describe the full `diagnostics` profile. The default `core`
-profile intentionally exposes a smaller 32-tool surface with compact schemas;
+profile intentionally exposes a smaller 33-tool surface with compact schemas;
 see `README.md` for the current profile split and configuration.
 
 ### Phase 1 — Inspection (FlaUI / UIA)
@@ -414,6 +415,7 @@ discovered totals are lower bounds rather than invented exhaustive counts.
 | Response | Required bounded metadata semantics |
 |---|---|
 | `get_binding_info` | `returnedBindings` equals `bindings.Count`; `discoveredBindings` counts bindings observed; `scannedProperties` counts dependency properties inspected; `scanComplete` distinguishes a complete property scan. `truncatedReasons` reports all omitted evidence while singular `truncatedReason` remains the first-reason compatibility field. |
+| `get_command_info` | `returnedContexts` counts the effective routed-command target (or source fallback) plus returned nearest-first public WPF parents. Discovered and returned command/input binding counts remain separate; `truncatedReasons` identifies parent or shared binding-budget omissions. Getter, formatting, gesture, and `CanExecute` failures use structured states rather than guessed values. |
 | `get_binding_errors` | `returnedErrors` equals `errors.Count`; `discoveredErrors` includes errors omitted from the payload; `scannedNodes` is traversal work; `scanComplete` and ordered `truncatedReasons` distinguish node-scan and returned-error limits. |
 | `uia_coverage_report` | `summary.returnedFindings` equals `findings.Count`; `summary.discoveredFindings` includes omitted findings; `summary.discoveredIssueCounts` counts all discovered findings rather than only the returned subset; `summary.scannedNodes`, `summary.scanComplete`, and ordered `summary.truncatedReasons` describe traversal completeness. Existing `summary.findingsCount` and `summary.issueCounts` describe the returned subset. |
 | `get_computed_properties` | `returnedProperties` equals `properties.Count`; `discoveredProperties` counts values matching the request before the response cap; `scannedProperties` is actual property work; `scanComplete` and ordered `truncatedReasons` remain separate from nested provenance limits. |
@@ -440,6 +442,7 @@ discovered totals are lower bounds rather than invented exhaustive counts.
 | `agent_ping` | Ping the injected agent | Ping result |
 | `release_element` | Explicitly release a reusable element handle | Release result |
 | `get_binding_info` | Inspect bindings on an element | Per-binding path, source, mode, converter, value, status, and error detail plus truthful returned/discovered/property-scan metadata |
+| `get_command_info` | Inspect a WPF command source without executing it | Source command/parameter/target, separate `IsEnabled` and `CanExecute`, and bounded nearest-first instance `CommandBinding`/`InputBinding` context starting at the effective routed target (or source) with typed key/mouse gestures and structured unavailable states |
 | `get_binding_errors` | List broken or non-active bindings in the current visual tree | Binding path, target element/property, status, validation detail, and returned/discovered/scan-completeness metadata with ordered truncation reasons |
 | `get_validation_errors` | Read the current `Validation.Errors` attached state in a bounded visual-tree scope without invoking validators | Deterministic element/error order; exact, best-effort, or unavailable source evidence; bounded binding, content, exception, and adorner evidence; returned/discovered/scan counts and ordered truncation reasons |
 | `subscribe_binding_errors` | Subscribe to binding errors (poll-based) | Subscription ID and effective poll, queue, and whole-event bounds |
@@ -703,6 +706,10 @@ The MCP tool surface is extended — new tools are added and existing inspection
   capability-gated diagnostics extension with bounded scan work and explicit
   exact/best-effort/unavailable evidence)
 - New tool: `get_binding_info` — per-element binding details (path, source, mode, converter, status, error)
+- New tool: `get_command_info` — read-only `ICommandSource` metadata,
+  non-executing `CanExecute`, and bounded existing instance command/input
+  bindings on the effective routed target (or source) and nearest public WPF
+  parent chain
 - New tool: `get_binding_errors` — broken and non-active bindings across the tree
 - New tool: `get_validation_errors` — capability-gated, read-only current WPF
   validation state. Core fixes depth/error/node/value budgets at 6/100/2,000/500;

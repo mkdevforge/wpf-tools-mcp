@@ -69,8 +69,8 @@ agent workflows:
 
 | Profile | Tools | Purpose |
 |---|---:|---|
-| `core` (default) | 32 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 55 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `core` (default) | 33 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
+| `diagnostics` | 56 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Every advertised tool includes an MCP `outputSchema` with exactly two `oneOf`
 branches: the tool's typed success schema and the common tool-error schema.
@@ -111,7 +111,7 @@ The `core` profile exposes:
 - **Interaction and synchronization:** `click_element`, `invoke`, `type_text`,
   `send_keys`, `set_value`, `select_item`, `scroll_to_element`, `drag`,
   `wait_for`.
-- **WPF diagnostics:** `get_binding_info`, `get_binding_errors`,
+- **WPF diagnostics:** `get_binding_info`, `get_command_info`, `get_binding_errors`,
   `get_validation_errors`, `get_data_context`, `get_computed_properties`,
   `get_layout_context`.
 
@@ -139,6 +139,27 @@ not observed, or unavailable. Custom `ToString()` and `Exception.Message`
 failures are caught and reported with a stable unavailable reason and failure
 type. Source classification marks public WPF rule evidence as exact and the
 internal conversion-rule name match as best effort.
+
+`get_command_info` is a read-only snapshot of one WPF command source and its
+nearby instance bindings. It accepts a locator or registered WPF element ID and
+returns a reusable public `wpf_...` element reference. The tool reads the
+ordinary `ICommandSource` members and calls `ICommand.CanExecute(parameter)`;
+for a `RoutedCommand`, it mirrors WPF command-source targeting with
+`CommandTarget ?? source as IInputElement`. Getters and `CanExecute` may run
+application code, as they do during normal WPF commanding. The tool never calls
+`Execute`.
+
+The command source's `IsEnabled` state is reported separately from
+`CanExecute`, since either can disable the UI independently. Routed-command
+context starts at the explicit `CommandTarget` when present and otherwise at
+the source (`Depth=0`), then walks the nearest public WPF parents. It reports
+only the existing per-instance `CommandBindings` and `InputBindings`
+collections; empty collections are not allocated just to inspect them. This is
+useful route context, not a claim about the exact route a later input event will
+take.
+Key and mouse bindings expose their typed gestures, while custom gestures are
+reported as unsupported without calling `InputGesture.Matches`. Getter,
+`CanExecute`, and value-formatting failures remain structured in the response.
 
 ### Explained WPF-to-UIA Mapping
 
@@ -832,6 +853,7 @@ complete controls live in the `diagnostics` profile when exposing them in
 | `find_elements` | At most 25 matches while scanning at most 5,000 nodes; minimal fields | Set `maxResults` or `returnFields`; `diagnostics` also exposes backend, root, scan limit, and ID controls | `ReturnedMatches`, `DiscoveredMatches`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_element_properties` | Summary preset, at most 25 selected UIA properties; values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, with one shared 20,000-character serialized-value budget. XPaths over 2,000 characters are omitted rather than returned incomplete. | Select the `full` preset and an explicit `maxProperties` in `diagnostics` | `ReturnedProperties`, `SelectedProperties`, `ScannedProperties`, `Truncated`, `TruncatedReason`, `TruncatedReasons` |
 | `get_binding_info` | Return at most 2,000 bindings after inspecting the target's dependency properties | In `diagnostics`, set `includeUnbound`, `maxProperties`, or `valueFormat` | `returnedBindings`, `discoveredBindings`, `scannedProperties`, `scanComplete`, `truncated`, compatibility `truncatedReason`, and ordered `truncatedReasons` |
+| `get_command_info` | Effective context start plus 8 nearest public WPF parent levels, at most 128 command/input binding entries total, and 500 characters per formatted value | In `diagnostics`, set `maxAncestors`, `maxBindings`, or `maxValueLength`; hard caps are 32, 512, and 2,000 respectively | Separate source, `ControlIsEnabled`, and `CanExecute` states; returned context and discovered/returned binding counts; ordered truncation reasons; structured getter, formatter, gesture, and evaluation failures |
 | `get_binding_errors` | Depth 6, at most 200 errors while scanning at most 2,000 nodes | Set the error, depth, and scan limits in `diagnostics` | `returnedErrors`, `discoveredErrors`, `scannedNodes`, `scanComplete`, `truncated`, compatibility `truncatedReason`, and ordered `truncatedReasons` |
 | `get_validation_errors` | Current state at depth 6; at most 100 errors while scanning 2,000 nodes; best-effort content is capped at 500 characters; hidden visual-tree elements are included | In `diagnostics`, set `visibleOnly`, `depth`, `maxErrors`, `maxNodes`, and `maxValueLength`. Hard caps are depth 100, 1,000 returned errors, 200,000 scanned nodes, and 2,000 characters per value | `ReturnedErrors`, `DiscoveredErrors`, `ScannedNodes`, `ScanComplete`, `TruncatedReasons`; response root XPath is capped at 2,000 characters, binding metadata is bounded with a per-error `Truncated` flag, formatting failures retain type/reason evidence, and warnings report returned/discovered counts with a fixed 20-entry cap |
 | `uia_coverage_report` | At most 200 findings while scanning at most 5,000 WPF nodes | Set the finding, node, visibility, interaction, or root controls in `diagnostics` | `summary.returnedFindings`, `summary.discoveredFindings`, `summary.scannedNodes`, `summary.scanComplete`, `summary.discoveredIssueCounts`, and `summary.truncatedReasons`; `summary.findingsCount` and `summary.issueCounts` remain returned-subset compatibility fields |

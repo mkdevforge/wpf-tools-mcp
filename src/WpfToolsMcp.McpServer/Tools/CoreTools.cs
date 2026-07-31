@@ -464,6 +464,30 @@ public static class CoreWpfDiagnosticsTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "get_command_info", UseStructuredContent = true), Description("Inspect a WPF command source, CanExecute result, and instance command/input bindings without executing the command.")]
+    public static Task<GetCommandInfoResponse> GetCommandInfo(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator")] CoreElementLocator? locator = null,
+        [Description("Element ID")] string? elementId = null,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.GetCommandInfoAsync(
+                    locator?.ToElementLocator(),
+                    elementId,
+                    hasElementId ? windowHandle : effectiveWindowHandle,
+                    maxAncestors: 8,
+                    maxBindings: 128,
+                    maxValueLength: 500,
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "get_data_context", UseStructuredContent = true), Description("Serialize the DataContext of a WPF element.")]
     public static Task<GetDataContextResponse> GetDataContext(
         SessionManager sessions,

@@ -26,6 +26,7 @@ public static class AgentProtocolCapabilities
     public const string FocusElement = "wpf/focus_element:v1";
     public const string ObserveState = "wpf/observe_state:v1";
     public const string GetValidationErrors = "wpf/get_validation_errors:v1";
+    public const string GetCommandInfo = "wpf/get_command_info:v1";
     public const string InspectionResponseMetadata = "wpf/inspection-response-metadata:v1";
 
     public static IReadOnlyList<string> Current { get; } = Array.AsReadOnly<string>(
@@ -40,6 +41,7 @@ public static class AgentProtocolCapabilities
         FocusElement,
         ObserveState,
         GetValidationErrors,
+        GetCommandInfo,
         InspectionResponseMetadata
     ]);
 }

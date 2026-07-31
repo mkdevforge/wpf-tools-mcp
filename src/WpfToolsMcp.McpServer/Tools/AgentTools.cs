@@ -50,6 +50,33 @@ public static class AgentTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "get_command_info", UseStructuredContent = true), Description("Inspect a WPF command source, CanExecute result, and existing instance command/input bindings without executing the command.")]
+    public static Task<GetCommandInfoResponse> GetCommandInfo(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("Element locator (WPF XPath recommended)")] ElementLocator? locator = null,
+        [Description("Element ID (from resolve_element / find_elements)")] string? elementId = null,
+        [Description("Native window handle")] long? windowHandle = null,
+        [Description("Maximum public WPF parent levels returned (hard limit 32)")] int maxAncestors = 8,
+        [Description("Maximum command and input binding entries returned globally (hard limit 512)")] int maxBindings = 128,
+        [Description("Maximum characters returned for formatted values (hard limit 2000)")] int maxValueLength = 500,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasElementId = !string.IsNullOrWhiteSpace(elementId);
+            return automation.RunExclusiveAsync(
+                () => automation.GetCommandInfoAsync(
+                    locator,
+                    elementId,
+                    hasElementId ? windowHandle : effectiveWindowHandle,
+                    maxAncestors,
+                    maxBindings,
+                    maxValueLength,
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "get_binding_errors", UseStructuredContent = true), Description("List binding errors in the WPF visual tree via the injected agent.")]
     public static Task<GetBindingErrorsResponse> GetBindingErrors(
         SessionManager sessions,
