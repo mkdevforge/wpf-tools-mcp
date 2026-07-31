@@ -176,9 +176,9 @@ public sealed class AgentClientLifecycleTests
     [Test]
     public async Task Remote_error_preserves_diagnostics_for_local_callers()
     {
-        const string method = "wpf/private_operation";
-        const string remoteMessage = @"Backend failed at C:\work\secret-project with api-key=message-secret.";
-        const string remoteDetails = @"stderr: token=details-secret; source=C:\Users\operator\private.log";
+        const string method = "wpf/diagnostic_operation";
+        const string remoteMessage = @"Backend failed at C:\work\example-project with marker=message-evidence.";
+        const string remoteDetails = @"stderr: marker=detail-evidence; source=C:\Users\operator\diagnostic.log";
         var pipeName = $"wpf-tools-mcp-agent-client-test-{Guid.NewGuid():N}";
         await using var server = new NamedPipeServerStream(
             pipeName,
@@ -213,9 +213,9 @@ public sealed class AgentClientLifecycleTests
             Assert.Multiple(() =>
             {
                 Assert.That(exception!.Message, Is.EqualTo(remoteMessage));
-                Assert.That(exception.Message, Does.Contain("message-secret"));
-                Assert.That(exception.Message, Does.Not.Contain("details-secret"));
-                Assert.That(exception.Message, Does.Contain(@"C:\work\secret-project"));
+                Assert.That(exception.Message, Does.Contain("message-evidence"));
+                Assert.That(exception.Message, Does.Not.Contain("detail-evidence"));
+                Assert.That(exception.Message, Does.Contain(@"C:\work\example-project"));
                 Assert.That(exception.Method, Is.EqualTo(method));
                 Assert.That(exception.RemoteMessage, Is.EqualTo(remoteMessage));
                 Assert.That(exception.RemoteDetails, Is.EqualTo(remoteDetails));
@@ -230,24 +230,24 @@ public sealed class AgentClientLifecycleTests
         }
     }
 
-    [TestCase("performance_already_running: runId=private-run", "performance_already_running")]
+    [TestCase("performance_already_running: runId=observed-run", "performance_already_running")]
     [TestCase("performance_not_running", "performance_not_running")]
     [TestCase("performance_run_not_owned", "performance_run_not_owned")]
-    [TestCase("performance_run_id_mismatch: activeRunId=private-run", "performance_run_id_mismatch")]
+    [TestCase("performance_run_id_mismatch: activeRunId=observed-run", "performance_run_id_mismatch")]
     [TestCase("performance_stop_failed", "performance_stop_failed")]
     public async Task Performance_agent_errors_keep_stable_codes_and_preserve_remote_causes(
         string remoteMessage,
         string expectedCode)
     {
-        const string remoteDetails = @"stderr: token=details-secret; source=C:\Users\operator\private.log";
+        const string remoteDetails = @"stderr: marker=detail-evidence; source=C:\Users\operator\diagnostic.log";
 
         var exception = await CapturePerformanceAgentErrorAsync(remoteMessage, remoteDetails);
 
         Assert.Multiple(() =>
         {
             Assert.That(exception.Message, Is.EqualTo(expectedCode));
-            Assert.That(exception.Message, Does.Not.Contain("private-run"));
-            Assert.That(exception.Message, Does.Not.Contain("details-secret"));
+            Assert.That(exception.Message, Does.Not.Contain("observed-run"));
+            Assert.That(exception.Message, Does.Not.Contain("detail-evidence"));
             Assert.That(exception.InnerException, Is.TypeOf<AgentRemoteException>());
             Assert.That(exception.InnerException!.Message, Is.EqualTo(remoteMessage));
             Assert.That(((AgentRemoteException)exception.InnerException).RemoteDetails, Is.EqualTo(remoteDetails));
@@ -257,17 +257,17 @@ public sealed class AgentClientLifecycleTests
     [Test]
     public async Task Performance_agent_errors_preserve_unrecognized_remote_content()
     {
-        const string remoteMessage = @"performance_private_failure: C:\work\secret-project api-key=message-secret";
-        const string remoteDetails = @"stderr: token=details-secret; source=C:\Users\operator\private.log";
+        const string remoteMessage = @"performance_custom_failure: C:\work\example-project marker=message-evidence";
+        const string remoteDetails = @"stderr: marker=detail-evidence; source=C:\Users\operator\diagnostic.log";
 
         var exception = await CapturePerformanceAgentErrorAsync(remoteMessage, remoteDetails);
 
         Assert.Multiple(() =>
         {
             Assert.That(exception.Message, Is.EqualTo(remoteMessage));
-            Assert.That(exception.Message, Does.Contain("message-secret"));
-            Assert.That(exception.Message, Does.Not.Contain("details-secret"));
-            Assert.That(exception.Message, Does.Contain(@"C:\work\secret-project"));
+            Assert.That(exception.Message, Does.Contain("message-evidence"));
+            Assert.That(exception.Message, Does.Not.Contain("detail-evidence"));
+            Assert.That(exception.Message, Does.Contain(@"C:\work\example-project"));
         });
     }
 
@@ -608,7 +608,7 @@ public sealed class AgentClientLifecycleTests
                     Ok: false,
                     Error: new AgentError(
                         "The requested operation failed.",
-                        "private target stack")),
+                        "target diagnostic stack")),
                 testTimeout.Token);
 
             var failedAttempt = await failedCall.WaitAsync(TimeSpan.FromSeconds(2));
@@ -833,8 +833,8 @@ public sealed class AgentClientLifecycleTests
                     request.Id,
                     Ok: false,
                     Error: new AgentError(
-                        @"wpf_resolve:ambiguous: Locator is ambiguous (found 4). Secret C:\work\customer",
-                        "private target stack")),
+                        @"wpf_resolve:ambiguous: Locator is ambiguous (found 4). Source C:\work\customer",
+                        "target diagnostic stack")),
                 timeout.Token);
 
             var exception = Assert.ThrowsAsync<ElementResolutionAmbiguityException>(async () =>
@@ -850,10 +850,10 @@ public sealed class AgentClientLifecycleTests
                 Assert.That(exception.Ambiguity.Truncated, Is.True);
                 Assert.That(exception.Ambiguity.TruncatedReason, Is.EqualTo("legacyAgent"));
                 Assert.That(exception.Message, Does.Not.Contain("customer"));
-                Assert.That(exception.Message, Does.Not.Contain("private target stack"));
+                Assert.That(exception.Message, Does.Not.Contain("target diagnostic stack"));
                 Assert.That(exception.InnerException, Is.TypeOf<AgentRemoteException>());
                 Assert.That(exception.InnerException!.Message, Does.Contain(@"C:\work\customer"));
-                Assert.That(((AgentRemoteException)exception.InnerException).RemoteDetails, Is.EqualTo("private target stack"));
+                Assert.That(((AgentRemoteException)exception.InnerException).RemoteDetails, Is.EqualTo("target diagnostic stack"));
             });
         }
         finally

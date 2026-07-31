@@ -191,37 +191,37 @@ public sealed class PropertyProvenanceContractTests
     [Test]
     public void Value_formatter_preserves_common_wpf_values_and_calls_application_to_string_best_effort()
     {
-        var thickness = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+        var thickness = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
             new Thickness(1, 2, 3, 4),
             "string",
             2000);
-        var cornerRadius = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+        var cornerRadius = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
             new CornerRadius(1, 2, 3, 4),
             "string",
             2000);
-        var gridLength = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+        var gridLength = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
             new GridLength(2, GridUnitType.Star),
             "string",
             2000);
-        var color = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+        var color = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
             Colors.CornflowerBlue,
             "string",
             2000);
-        var fontWeight = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+        var fontWeight = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
             FontWeights.Bold,
             "string",
             2000);
-        var fontFamily = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+        var fontFamily = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
             new FontFamily("Segoe UI"),
             "string",
             2000);
         var displayValue = new DisplayValue("application display");
-        var applicationValue = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+        var applicationValue = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
             displayValue,
             "string",
             2000);
         var throwingValue = new ThrowingDisplayValue();
-        var failedApplicationValue = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+        var failedApplicationValue = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
             throwingValue,
             "string",
             2000);
@@ -250,19 +250,19 @@ public sealed class PropertyProvenanceContractTests
     public void Safe_type_formatting_does_not_call_virtual_type_name_members()
     {
         var applicationType = new ThrowingTypeValue();
-        WpfVisualTreeInspector.SafeProvenanceValueFormatting formatted = default;
+        WpfVisualTreeInspector.BestEffortProvenanceValueFormatting formatted = default;
         string? typeName = null;
 
         Assert.DoesNotThrow(() =>
         {
-            formatted = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+            formatted = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
                 applicationType,
                 "string",
                 2000);
             typeName = WpfVisualTreeInspector.GetTypeName(applicationType);
         });
 
-        var runtimeType = WpfVisualTreeInspector.FormatSafeProvenanceValueDetails(
+        var runtimeType = WpfVisualTreeInspector.FormatProvenanceValueBestEffortDetails(
             typeof(string),
             "string",
             2000);

@@ -35,9 +35,9 @@ public partial class MainWindow : Window
         MergedResourceProbe.Resources.MergedDictionaries.Add(mergedDictionary);
         MergedResourceProbe.Background = mergedBrush;
 
-        var unsafeResourceKey = new UnsafeResourceKey();
-        Resources.Add(unsafeResourceKey, System.Windows.Media.Brushes.MediumPurple);
-        UnsafeDynamicResourceProbe.SetResourceReference(Border.BackgroundProperty, unsafeResourceKey);
+        var throwingStringResourceKey = new ThrowingStringResourceKey();
+        Resources.Add(throwingStringResourceKey, System.Windows.Media.Brushes.MediumPurple);
+        ThrowingFormatterDynamicResourceProbe.SetResourceReference(Border.BackgroundProperty, throwingStringResourceKey);
         ThrowingValueProbe.Payload = new ThrowingDisplayValue();
         for (var i = 0; i < 512; i++)
         {
@@ -176,7 +176,7 @@ public sealed class ThrowingDisplayValue
     public override int GetHashCode() => 1;
 }
 
-public sealed class UnsafeResourceKey
+public sealed class ThrowingStringResourceKey
 {
     public override string ToString() =>
         throw new InvalidOperationException("Application resource-key formatting failed.");

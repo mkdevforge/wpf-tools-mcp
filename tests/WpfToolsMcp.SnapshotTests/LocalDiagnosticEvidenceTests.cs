@@ -6,9 +6,9 @@ using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.SnapshotTests;
 
-public sealed class ActionableFailurePrivacyTests
+public sealed class LocalDiagnosticEvidenceTests
 {
-    private const string PrivateSentinel = @"C:\Users\private\project\token=super-secret";
+    private const string DiagnosticSentinel = @"C:\Users\example\project\diagnostic=visible";
     private const string TestSessionId = "11111111111111111111111111111111";
 
     [Test]
@@ -19,7 +19,7 @@ public sealed class ActionableFailurePrivacyTests
 
         var result = await mcp.CallToolResultAsync("launch_app", new Dictionary<string, object?>
         {
-            ["exePath"] = Path.Combine(PrivateSentinel, "missing.exe")
+            ["exePath"] = Path.Combine(DiagnosticSentinel, "missing.exe")
         });
 
         var failure = JsonSerializer.Deserialize<ToolErrorResponse>(
@@ -36,11 +36,11 @@ public sealed class ActionableFailurePrivacyTests
             Assert.That(failure.Error.Cause, Is.Not.Null);
             Assert.That(failure.Error.Cause!.Type, Is.EqualTo(typeof(FileNotFoundException).FullName));
             Assert.That(failure.Error.Cause.Message, Is.EqualTo("The requested executable was not found."));
-            Assert.That(failure.Error.Cause.Details, Does.Contain(PrivateSentinel));
+            Assert.That(failure.Error.Cause.Details, Does.Contain(DiagnosticSentinel));
             Assert.That(text, Does.Contain("process_not_found"));
             Assert.That(text, Does.Contain(failure.Error.Detail));
-            Assert.That(text, Does.Not.Contain(PrivateSentinel));
-            Assert.That(result.StructuredContent!.Value.GetRawText(), Does.Contain("token=super-secret"));
+            Assert.That(text, Does.Not.Contain(DiagnosticSentinel));
+            Assert.That(result.StructuredContent!.Value.GetRawText(), Does.Contain("diagnostic=visible"));
         });
     }
 
@@ -85,7 +85,7 @@ public sealed class ActionableFailurePrivacyTests
             BindingFlags.NonPublic | BindingFlags.Static)!;
         var mapped = (ToolErrorInfo)mapException.Invoke(
             null,
-            [new InvalidOperationException(PrivateSentinel), null])!;
+            [new InvalidOperationException(DiagnosticSentinel), null])!;
         var json = JsonSerializer.Serialize(mapped, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         Assert.Multiple(() =>
@@ -94,9 +94,9 @@ public sealed class ActionableFailurePrivacyTests
             Assert.That(mapped.Detail, Is.EqualTo("The tool operation failed."));
             Assert.That(mapped.Cause, Is.EqualTo(new DiagnosticCauseInfo(typeof(InvalidOperationException).FullName!)
             {
-                Message = PrivateSentinel
+                Message = DiagnosticSentinel
             }));
-            Assert.That(json, Does.Contain("token=super-secret"));
+            Assert.That(json, Does.Contain("diagnostic=visible"));
         });
     }
 
@@ -114,7 +114,7 @@ public sealed class ActionableFailurePrivacyTests
             "The WPF backend could not be initialized in the target process.",
             retryable: false,
             recoveryActions: [FailureDiagnostics.Recovery.UseUia],
-            inner: new InvalidOperationException(PrivateSentinel));
+            inner: new InvalidOperationException(DiagnosticSentinel));
 
         try
         {
@@ -137,9 +137,9 @@ public sealed class ActionableFailurePrivacyTests
                     Does.StartWith("injection_failed: The WPF backend could not be initialized in the target process."));
                 Assert.That(
                     traceError,
-                    Does.Contain($"Cause: System.InvalidOperationException: {PrivateSentinel}"));
+                    Does.Contain($"Cause: System.InvalidOperationException: {DiagnosticSentinel}"));
                 Assert.That(traceError, Has.Length.LessThanOrEqualTo(1_000));
-                Assert.That(artifact, Does.Contain("token=super-secret"));
+                Assert.That(artifact, Does.Contain("diagnostic=visible"));
             });
         }
         finally
@@ -155,13 +155,13 @@ public sealed class ActionableFailurePrivacyTests
         var traceStart = await controller.TraceStartAsync(TestSessionId, resetIfRunning: false);
         var outputPath = Path.Combine(
             Path.GetTempPath(),
-            $"wpf-tools-mcp-private-trace-test-{Guid.NewGuid():N}.json");
+            $"wpf-tools-mcp-diagnostic-trace-test-{Guid.NewGuid():N}.json");
 
         try
         {
             using (var trace = controller.BeginToolTrace("unknown_failure"))
             {
-                trace!.SetError(new InvalidOperationException(PrivateSentinel));
+                trace!.SetError(new InvalidOperationException(DiagnosticSentinel));
             }
 
             var response = await controller.TraceStopAsync(
@@ -176,8 +176,8 @@ public sealed class ActionableFailurePrivacyTests
                 Assert.That(
                     traceError,
                     Is.EqualTo(
-                        $"tool_failed: The tool operation failed. Cause: System.InvalidOperationException: {PrivateSentinel}"));
-                Assert.That(artifact, Does.Contain("token=super-secret"));
+                        $"tool_failed: The tool operation failed. Cause: System.InvalidOperationException: {DiagnosticSentinel}"));
+                Assert.That(artifact, Does.Contain("diagnostic=visible"));
             });
         }
         finally
@@ -194,13 +194,13 @@ public sealed class ActionableFailurePrivacyTests
         var outputPath = Path.Combine(
             Path.GetTempPath(),
             $"wpf-tools-mcp-throwing-message-trace-test-{Guid.NewGuid():N}.json");
-        var hostile = new HostileMessageException();
+        var throwingMessage = new ThrowingMessageException();
 
         try
         {
             using (var trace = controller.BeginToolTrace("throwing_message"))
             {
-                trace!.SetError(hostile);
+                trace!.SetError(throwingMessage);
             }
 
             var response = await controller.TraceStopAsync(
@@ -212,10 +212,10 @@ public sealed class ActionableFailurePrivacyTests
             Assert.Multiple(() =>
             {
                 Assert.That(traceError, Does.StartWith("tool_failed: The tool operation failed. Cause: "));
-                Assert.That(traceError, Does.Contain(nameof(HostileMessageException)));
+                Assert.That(traceError, Does.Contain(nameof(ThrowingMessageException)));
                 Assert.That(traceError, Does.Contain("message unavailable: InvalidOperationException"));
                 Assert.That(traceError, Has.Length.LessThanOrEqualTo(1_000));
-                Assert.That(hostile.GetterCalls, Is.EqualTo(1));
+                Assert.That(throwingMessage.GetterCalls, Is.EqualTo(1));
             });
         }
         finally
@@ -267,7 +267,7 @@ public sealed class ActionableFailurePrivacyTests
         }
     }
 
-    private sealed class HostileMessageException : Exception
+    private sealed class ThrowingMessageException : Exception
     {
         public int GetterCalls { get; private set; }
 

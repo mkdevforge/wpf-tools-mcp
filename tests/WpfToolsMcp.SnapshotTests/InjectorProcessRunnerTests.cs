@@ -11,7 +11,7 @@ namespace WpfToolsMcp.SnapshotTests;
 public sealed class InjectorProcessRunnerTests
 {
     [Test]
-    public async Task Isolated_workspace_overrides_hostile_profile_and_suppresses_child_error_dialogs()
+    public async Task Isolated_workspace_overrides_unusable_profile_and_suppresses_child_error_dialogs()
     {
         var parentErrorMode = InjectorProcessRunner.GetCurrentErrorMode();
         string workspaceRoot;
@@ -21,11 +21,11 @@ public sealed class InjectorProcessRunnerTests
             workspaceRoot = workspace.RootPath;
             var markerPath = Path.Combine(workspace.RoamingAppDataPath, "Snoop", "fixture.marker");
             var startInfo = CreateFixtureStartInfo("report", "--marker-path", markerPath);
-            startInfo.Environment["USERPROFILE"] = @"Z:\hostile-profile";
-            startInfo.Environment["APPDATA"] = @"Z:\hostile-profile\roaming";
-            startInfo.Environment["LOCALAPPDATA"] = @"Z:\hostile-profile\local";
-            startInfo.Environment["TEMP"] = @"Z:\hostile-temp";
-            startInfo.Environment["TMP"] = @"Z:\hostile-tmp";
+            startInfo.Environment["USERPROFILE"] = @"Z:\unusable-profile";
+            startInfo.Environment["APPDATA"] = @"Z:\unusable-profile\roaming";
+            startInfo.Environment["LOCALAPPDATA"] = @"Z:\unusable-profile\local";
+            startInfo.Environment["TEMP"] = @"Z:\unusable-temp";
+            startInfo.Environment["TMP"] = @"Z:\unusable-tmp";
             workspace.ApplyTo(startInfo);
 
             var result = await InjectorProcessRunner.RunAsync(

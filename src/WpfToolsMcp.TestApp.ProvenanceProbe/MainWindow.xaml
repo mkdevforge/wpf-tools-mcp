@@ -128,8 +128,8 @@
                 </Border.Resources>
             </Border>
 
-            <Border x:Name="UnsafeDynamicResourceProbe"
-                    AutomationProperties.AutomationId="Provenance_UnsafeDynamicResource"
+            <Border x:Name="ThrowingFormatterDynamicResourceProbe"
+                    AutomationProperties.AutomationId="Provenance_ThrowingFormatterDynamicResource"
                     Height="24" />
 
             <Border x:Name="AnimatedProbe"

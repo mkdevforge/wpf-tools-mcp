@@ -65,7 +65,7 @@ public sealed class AutoBackendRoutingTests
         var exception = new AgentRemoteException(
             "wpf/resolve_element",
             message,
-            "private target stack");
+            "target diagnostic stack");
 
         Assert.Multiple(() =>
         {
@@ -114,15 +114,15 @@ public sealed class AutoBackendRoutingTests
         var xpathMiss = new AgentRemoteException(
             "wpf/get_visual_tree",
             "XPath segment not found for '/Window/Grid[2]'.",
-            "private target stack");
+            "target diagnostic stack");
         var locatorMiss = new AgentRemoteException(
             "wpf/resolve_element",
             "wpf_resolve:not_found: Locator did not match any elements.",
-            "private target stack");
+            "target diagnostic stack");
         var ambiguity = new AgentRemoteException(
             "wpf/resolve_element",
             "wpf_resolve:ambiguous: Locator matched multiple elements.",
-            "private target stack");
+            "target diagnostic stack");
 
         Assert.Multiple(() =>
         {
@@ -183,13 +183,13 @@ public sealed class AutoBackendRoutingTests
     [Test]
     public void Internal_failure_message_tolerates_a_throwing_message_getter()
     {
-        var hostile = new HostileMessageException();
+        var throwingMessage = new ThrowingMessageException();
 
         Assert.Multiple(() =>
         {
-            Assert.That(AutomationController.GetInternalFailureMessage(hostile), Is.Empty);
-            Assert.That(AutomationController.IsAutoWpfScopeMiss(hostile), Is.False);
-            Assert.That(hostile.GetterCalls, Is.EqualTo(2));
+            Assert.That(AutomationController.GetInternalFailureMessage(throwingMessage), Is.Empty);
+            Assert.That(AutomationController.IsAutoWpfScopeMiss(throwingMessage), Is.False);
+            Assert.That(throwingMessage.GetterCalls, Is.EqualTo(2));
         });
     }
 
@@ -199,15 +199,15 @@ public sealed class AutoBackendRoutingTests
         var requestFailure = new AgentRemoteException(
             "wpf/resolve_element",
             "The backend rejected this operation.",
-            "private target stack");
+            "target diagnostic stack");
         var locatorMiss = new AgentRemoteException(
             "wpf/resolve_element",
             "wpf_resolve:not_found: Locator did not match any elements.",
-            "private target stack");
+            "target diagnostic stack");
         var ambiguity = new AgentRemoteException(
             "wpf/resolve_element",
             "wpf_resolve:ambiguous: Locator matched multiple elements.",
-            "private target stack");
+            "target diagnostic stack");
 
         Assert.Multiple(() =>
         {
@@ -243,11 +243,11 @@ public sealed class AutoBackendRoutingTests
     public void Auto_WPF_ambiguity_keeps_structured_metadata_and_remote_diagnostics()
     {
         const long windowHandle = 42;
-        const string privatePath = @"C:\Users\customer\private-workspace\MainWindow.xaml";
+        const string diagnosticPath = @"C:\Users\example\workspace\MainWindow.xaml";
         var remoteFailure = new AgentRemoteException(
             "wpf/resolve_element",
-            $"wpf_resolve:ambiguous: Locator is ambiguous (found 4). Source: {privatePath}",
-            $"at CustomerApp.Resolve() in {privatePath}:line 87");
+            $"wpf_resolve:ambiguous: Locator is ambiguous (found 4). Source: {diagnosticPath}",
+            $"at CustomerApp.Resolve() in {diagnosticPath}:line 87");
 
         var exception = AutomationController.CreateLegacyWpfAmbiguityException(
             remoteFailure,
@@ -261,16 +261,16 @@ public sealed class AutoBackendRoutingTests
             Assert.That(exception.Ambiguity.DiscoveredCandidates, Is.EqualTo(4));
             Assert.That(exception.Ambiguity.Candidates, Is.Empty);
             Assert.That(exception.Ambiguity.TruncatedReason, Is.EqualTo("legacyAgent"));
-            Assert.That(exception.Message, Does.Not.Contain(privatePath));
+            Assert.That(exception.Message, Does.Not.Contain(diagnosticPath));
             Assert.That(exception.Message, Does.Not.Contain("CustomerApp.Resolve"));
             Assert.That(exception.Message, Does.Contain("Retry with a stricter locator"));
             Assert.That(exception.InnerException, Is.SameAs(remoteFailure));
-            Assert.That(exception.InnerException!.Message, Does.Contain(privatePath));
+            Assert.That(exception.InnerException!.Message, Does.Contain(diagnosticPath));
             Assert.That(((AgentRemoteException)exception.InnerException).RemoteDetails, Does.Contain("CustomerApp.Resolve"));
         });
     }
 
-    private sealed class HostileMessageException : Exception
+    private sealed class ThrowingMessageException : Exception
     {
         public int GetterCalls { get; private set; }
 

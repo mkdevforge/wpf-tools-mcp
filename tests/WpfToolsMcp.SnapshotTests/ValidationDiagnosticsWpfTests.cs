@@ -20,13 +20,13 @@ public sealed class ValidationDiagnosticsWpfTests
     [Test]
     public void Current_state_catches_application_error_content_and_message_failures()
     {
-        const string targetName = "ValidationSafeContentTarget";
-        var ownerId = $"validation-safe-content-{Guid.NewGuid():N}";
+        const string targetName = "ValidationThrowingContentTarget";
+        var ownerId = $"validation-throwing-content-{Guid.NewGuid():N}";
         var target = CreateBoundTextBox(targetName, nameof(ValidationModel.First));
         var window = CreateWindow(target);
-        var unsafeContent = new ThrowingStringifier();
-        var unsafeException = new ThrowingMessageException();
-        var wrapperException = new AggregateException(unsafeException);
+        var throwingContent = new ThrowingStringifier();
+        var throwingMessage = new ThrowingMessageException();
+        var wrapperException = new AggregateException(throwingMessage);
 
         try
         {
@@ -34,7 +34,7 @@ public sealed class ValidationDiagnosticsWpfTests
             var expression = RequireTextBinding(target);
             Validation.MarkInvalid(
                 expression,
-                new ValidationError(new FixtureValidationRule(), expression, unsafeContent, wrapperException));
+                new ValidationError(new FixtureValidationRule(), expression, throwingContent, wrapperException));
             PumpValidation(window.Dispatcher);
 
             var response = Inspect(window, ownerId, maxValueLength: 80);
@@ -80,8 +80,8 @@ public sealed class ValidationDiagnosticsWpfTests
                 Assert.That(
                     bindingInfo.Bindings.Single(binding => binding.TargetProperty == "Text").ErrorMessage,
                     Does.EndWith(nameof(ThrowingStringifier)));
-                Assert.That(unsafeContent.ToStringCalls, Is.EqualTo(2));
-                Assert.That(unsafeException.MessageCalls, Is.EqualTo(1));
+                Assert.That(throwingContent.ToStringCalls, Is.EqualTo(2));
+                Assert.That(throwingMessage.MessageCalls, Is.EqualTo(1));
             });
         }
         finally

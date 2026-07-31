@@ -569,7 +569,7 @@ large app with scenario pages:
   bound, explicit/implicit/theme-styled, static/dynamic/ambiguous-resource,
   template-triggered, animated, and coerced dependency-property origins, plus
   bounded priority/multi-binding, element/ancestor/application/merged resource
-  scopes, deferred BAML, unsafe resource-key, and truncated-value evidence
+  scopes, deferred BAML, formatter-failing resource-key, and truncated-value evidence
   cases.
 - `WpfToolsMcp.TestApp.BindingErrors`: binding and DataContext diagnostics.
 - `WpfToolsMcp.TestApp.BrokenAutomation`: controls with missing UIA peers.

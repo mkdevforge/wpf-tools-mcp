@@ -355,7 +355,7 @@ internal static partial class WpfVisualTreeInspector
         int maxValueLength)
     {
         var content = error.ErrorContent;
-        var formatted = FormatSafeProvenanceValueDetails(content, "string", maxValueLength);
+        var formatted = FormatProvenanceValueBestEffortDetails(content, "string", maxValueLength);
         var type = content is null
             ? null
             : TruncateProvenanceText(content.GetType().FullName ?? content.GetType().Name, 512);
@@ -470,7 +470,7 @@ internal static partial class WpfVisualTreeInspector
         var content = error.ErrorContent;
         if (content is not null)
         {
-            var formatted = FormatSafeProvenanceValueDetails(content, "string", maxValueLength);
+            var formatted = FormatProvenanceValueBestEffortDetails(content, "string", maxValueLength);
             return formatted.Text ?? TruncateProvenanceText(
                 content.GetType().FullName ?? content.GetType().Name,
                 maxValueLength);

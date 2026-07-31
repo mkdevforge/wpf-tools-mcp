@@ -12,7 +12,7 @@ namespace WpfToolsMcp.SnapshotTests;
 public sealed class ToolErrorContractTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private const string PrivateSentinel = @"C:\Users\private\work\token=super-secret";
+    private const string DiagnosticSentinel = @"C:\Users\example\work\diagnostic=visible";
 
     [Test]
     public async Task Core_and_diagnostics_failures_use_the_common_envelope()
@@ -23,7 +23,7 @@ public sealed class ToolErrorContractTests
 
         var actionableResult = await core.CallToolResultAsync("launch_app", new Dictionary<string, object?>
         {
-            ["exePath"] = Path.Combine(PrivateSentinel, "missing.exe")
+            ["exePath"] = Path.Combine(DiagnosticSentinel, "missing.exe")
         });
         var argumentResult = await diagnostics.CallToolResultAsync(
             "subscribe_property_changes",
@@ -42,10 +42,10 @@ public sealed class ToolErrorContractTests
             Assert.That(actionable.Error.Stage, Is.EqualTo("process_discovery"));
             Assert.That(actionable.Error.Retryable, Is.False);
             Assert.That(actionable.Error.Cause!.Type, Is.EqualTo(typeof(FileNotFoundException).FullName));
-            Assert.That(actionable.Error.Cause.Details, Does.Contain(PrivateSentinel));
+            Assert.That(actionable.Error.Cause.Details, Does.Contain(DiagnosticSentinel));
             Assert.That(
                 actionableResult.StructuredContent!.Value.GetRawText(),
-                Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
+                Does.Contain(DiagnosticSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
             AssertCommonResult(argumentResult, invalidArguments, "invalid_request");
             Assert.That(invalidArguments.Error.RecoveryActions, Is.EqualTo(new[] { "correct_arguments" }));
             AssertCommonResult(bindingResult, invalidBinding, "invalid_request");
@@ -61,7 +61,7 @@ public sealed class ToolErrorContractTests
 
         var result = await mcp.CallToolResultAsync("get_active_window", new Dictionary<string, object?>
         {
-            ["sessionId"] = PrivateSentinel
+            ["sessionId"] = DiagnosticSentinel
         });
         var envelope = Deserialize(result);
         var wire = result.StructuredContent!.Value.GetRawText();
@@ -70,11 +70,11 @@ public sealed class ToolErrorContractTests
         {
             AssertCommonResult(result, envelope, "stale_session");
             Assert.That(envelope.Error.Context, Is.Null);
-            Assert.That(envelope.Error.Cause!.Message, Does.Contain(PrivateSentinel));
+            Assert.That(envelope.Error.Cause!.Message, Does.Contain(DiagnosticSentinel));
             Assert.That(
                 wire,
-                Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
-            Assert.That(result.Content.OfType<TextContentBlock>().Single().Text, Does.Not.Contain(PrivateSentinel));
+                Does.Contain(DiagnosticSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
+            Assert.That(result.Content.OfType<TextContentBlock>().Single().Text, Does.Not.Contain(DiagnosticSentinel));
         });
     }
 
@@ -147,7 +147,7 @@ public sealed class ToolErrorContractTests
     {
         var processFailure = new ProcessSelectionAmbiguityException(new ProcessSelectionAmbiguity(
             Code: "ambiguous_process",
-            RequestedProcessName: PrivateSentinel,
+            RequestedProcessName: DiagnosticSentinel,
             DiscoveredCandidates: 1,
             ReturnedCandidates: 1,
             Truncated: true,
@@ -158,13 +158,13 @@ public sealed class ToolErrorContractTests
                     Index: 0,
                     ProcessInstanceId: "123:456",
                     Pid: 123,
-                    ProcessName: PrivateSentinel,
+                    ProcessName: DiagnosticSentinel,
                     StartTimeUtc: "2026-01-01T00:00:00Z",
                     MainWindowHandle: 789,
-                    MainWindowTitle: PrivateSentinel,
-                    ExecutablePath: PrivateSentinel)
+                    MainWindowTitle: DiagnosticSentinel,
+                    ExecutablePath: DiagnosticSentinel)
             ],
-            Recovery: PrivateSentinel));
+            Recovery: DiagnosticSentinel));
         var elementFailure = new ElementResolutionAmbiguityException(new ResolveElementAmbiguity(
             Code: "ambiguous_element",
             BackendUsed: InspectionBackend.Uia,
@@ -177,10 +177,10 @@ public sealed class ToolErrorContractTests
                 new ResolveElementCandidate(
                     0,
                     new ElementRef(
-                        Type: PrivateSentinel,
-                        AutomationId: PrivateSentinel,
-                        Name: PrivateSentinel,
-                        XPath: PrivateSentinel,
+                        Type: DiagnosticSentinel,
+                        AutomationId: DiagnosticSentinel,
+                        Name: DiagnosticSentinel,
+                        XPath: DiagnosticSentinel,
                         Bounds: new Rect(1, 2, 3, 4),
                         ElementId: "uia_abcdefghijklmnop"))
             ],
@@ -189,7 +189,7 @@ public sealed class ToolErrorContractTests
         var process = MapException(processFailure);
         var element = MapException(elementFailure);
         var invalidReason = MapException(new ProcessSelectionAmbiguityException(
-            processFailure.Ambiguity with { TruncatedReason = PrivateSentinel }));
+            processFailure.Ambiguity with { TruncatedReason = DiagnosticSentinel }));
         var oversizedReason = MapException(new ProcessSelectionAmbiguityException(
             processFailure.Ambiguity with { TruncatedReason = new string('a', 65) }));
         var processJson = JsonSerializer.Serialize(process, JsonOptions);
@@ -207,10 +207,10 @@ public sealed class ToolErrorContractTests
                     ProcessInstanceId = "123:456",
                     Pid = 123,
                     WindowHandle = 789,
-                    ProcessName = PrivateSentinel,
+                    ProcessName = DiagnosticSentinel,
                     StartTimeUtc = "2026-01-01T00:00:00Z",
-                    MainWindowTitle = PrivateSentinel,
-                    ExecutablePath = PrivateSentinel
+                    MainWindowTitle = DiagnosticSentinel,
+                    ExecutablePath = DiagnosticSentinel
                 }));
             Assert.That(element.Code, Is.EqualTo("ambiguous_element"));
             Assert.That(element.Context!.ReturnedCandidates, Is.EqualTo(element.Context.Candidates!.Count));
@@ -219,24 +219,24 @@ public sealed class ToolErrorContractTests
                 new ToolErrorCandidate(ToolErrorCandidateKind.Element, 0)
                 {
                     ElementId = "uia_abcdefghijklmnop",
-                    ElementType = PrivateSentinel,
-                    AutomationId = PrivateSentinel,
-                    Name = PrivateSentinel,
-                    XPath = PrivateSentinel,
+                    ElementType = DiagnosticSentinel,
+                    AutomationId = DiagnosticSentinel,
+                    Name = DiagnosticSentinel,
+                    XPath = DiagnosticSentinel,
                     Bounds = new Rect(1, 2, 3, 4)
                 }));
             Assert.That(invalidReason.Context!.TruncatedReason, Is.Null);
             Assert.That(oversizedReason.Context!.TruncatedReason, Is.Null);
-            Assert.That(processJson, Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
-            Assert.That(elementJson, Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
-            Assert.That(invalidReasonJson, Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
+            Assert.That(processJson, Does.Contain(DiagnosticSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
+            Assert.That(elementJson, Does.Contain(DiagnosticSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
+            Assert.That(invalidReasonJson, Does.Contain(DiagnosticSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
         });
     }
 
     [Test]
-    public void Process_candidate_executable_path_is_bounded_without_treating_local_paths_as_private()
+    public void Process_candidate_executable_path_is_bounded_without_omitting_local_paths()
     {
-        var observedPath = PrivateSentinel + new string('x', 600);
+        var observedPath = DiagnosticSentinel + new string('x', 600);
         var failure = new ProcessSelectionAmbiguityException(new ProcessSelectionAmbiguity(
             Code: "ambiguous_process",
             RequestedProcessName: "test",
@@ -265,7 +265,7 @@ public sealed class ToolErrorContractTests
         {
             Assert.That(executablePath, Has.Length.EqualTo(512));
             Assert.That(executablePath, Is.EqualTo(observedPath[..512]));
-            Assert.That(executablePath, Does.StartWith(PrivateSentinel));
+            Assert.That(executablePath, Does.StartWith(DiagnosticSentinel));
         });
     }
 
@@ -376,14 +376,14 @@ public sealed class ToolErrorContractTests
     [Test]
     public void Unknown_and_known_code_mappings_keep_stable_details_and_bounded_cause_evidence()
     {
-        var unknown = MapException(new InvalidOperationException(PrivateSentinel));
-        var stale = MapException(new InvalidOperationException($"wpf_handle_stale: {PrivateSentinel}"));
-        var capability = MapException(new InvalidOperationException($"agent_capability_unavailable: {PrivateSentinel}"));
-        var outsideSession = MapException(new InvalidOperationException($"window_outside_session: {PrivateSentinel}"));
-        var occluded = MapException(new InvalidOperationException($"mouse_target_occluded: {PrivateSentinel}"));
+        var unknown = MapException(new InvalidOperationException(DiagnosticSentinel));
+        var stale = MapException(new InvalidOperationException($"wpf_handle_stale: {DiagnosticSentinel}"));
+        var capability = MapException(new InvalidOperationException($"agent_capability_unavailable: {DiagnosticSentinel}"));
+        var outsideSession = MapException(new InvalidOperationException($"window_outside_session: {DiagnosticSentinel}"));
+        var occluded = MapException(new InvalidOperationException($"mouse_target_occluded: {DiagnosticSentinel}"));
         var performanceOwner = MapException(new InvalidOperationException("performance_run_not_owned"));
-        var subscription = MapException(new InvalidOperationException($"subscription_not_found: {PrivateSentinel}"));
-        var missingWpfElement = MapException(new InvalidOperationException($"wpf_resolve:not_found: {PrivateSentinel}"));
+        var subscription = MapException(new InvalidOperationException($"subscription_not_found: {DiagnosticSentinel}"));
+        var missingWpfElement = MapException(new InvalidOperationException($"wpf_resolve:not_found: {DiagnosticSentinel}"));
         var oversized = MapException(new InvalidOperationException(new string('m', 1_200)));
 
         Assert.Multiple(() =>
@@ -392,11 +392,11 @@ public sealed class ToolErrorContractTests
             Assert.That(unknown.Detail, Is.EqualTo("The tool operation failed."));
             Assert.That(unknown.Cause, Is.EqualTo(new DiagnosticCauseInfo(typeof(InvalidOperationException).FullName!)
             {
-                Message = PrivateSentinel
+                Message = DiagnosticSentinel
             }));
             Assert.That(stale.Code, Is.EqualTo("stale_element"));
             Assert.That(stale.Detail, Is.EqualTo("The element handle is no longer valid."));
-            Assert.That(stale.Cause!.Message, Is.EqualTo($"wpf_handle_stale: {PrivateSentinel}"));
+            Assert.That(stale.Cause!.Message, Is.EqualTo($"wpf_handle_stale: {DiagnosticSentinel}"));
             Assert.That(capability.Code, Is.EqualTo("agent_capability_unavailable"));
             Assert.That(capability.RecoveryActions, Is.EqualTo(new[] { "restart_and_reattach" }));
             Assert.That(outsideSession.Code, Is.EqualTo("window_outside_session"));
@@ -420,28 +420,28 @@ public sealed class ToolErrorContractTests
                         oversized
                     },
                     JsonOptions),
-                Does.Contain(PrivateSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
+                Does.Contain(DiagnosticSentinel.Replace("\\", "\\\\", StringComparison.Ordinal)));
         });
     }
 
     [Test]
     public void Error_mapping_reads_overridden_exception_messages_best_effort()
     {
-        var directHostile = new HostileMessageException();
-        var aggregateHostile = new HostileMessageException();
+        var directThrowing = new ThrowingMessageException();
+        var aggregateThrowing = new ThrowingMessageException();
 
-        var direct = MapException(directHostile);
-        var aggregate = MapException(new AggregateException(aggregateHostile));
+        var direct = MapException(directThrowing);
+        var aggregate = MapException(new AggregateException(aggregateThrowing));
 
         Assert.Multiple(() =>
         {
             Assert.That(direct.Code, Is.EqualTo("tool_failed"));
             Assert.That(aggregate.Code, Is.EqualTo("tool_failed"));
-            Assert.That(direct.Cause!.Type, Is.EqualTo(typeof(HostileMessageException).FullName));
+            Assert.That(direct.Cause!.Type, Is.EqualTo(typeof(ThrowingMessageException).FullName));
             Assert.That(direct.Cause.Message, Is.Null);
             Assert.That(direct.Cause.MessageUnavailableReason, Does.StartWith("getter_threw: System.InvalidOperationException:"));
-            Assert.That(directHostile.GetterCalls, Is.EqualTo(1));
-            Assert.That(aggregateHostile.GetterCalls, Is.GreaterThanOrEqualTo(1));
+            Assert.That(directThrowing.GetterCalls, Is.EqualTo(1));
+            Assert.That(aggregateThrowing.GetterCalls, Is.GreaterThanOrEqualTo(1));
         });
     }
 
@@ -529,17 +529,17 @@ public sealed class ToolErrorContractTests
     [Test]
     public void Aggregate_request_cancellation_is_normalized_without_reading_inner_messages()
     {
-        var hostile = new HostileMessageException();
+        var throwingMessage = new ThrowingMessageException();
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        var aggregate = new AggregateException(new OperationCanceledException(), hostile);
+        var aggregate = new AggregateException(new OperationCanceledException(), throwingMessage);
         var normalized = CreateRequestCancellation(aggregate, cancellation.Token);
 
         Assert.Multiple(() =>
         {
             Assert.That(normalized.CancellationToken, Is.EqualTo(cancellation.Token));
             Assert.That(normalized.InnerException, Is.SameAs(aggregate));
-            Assert.That(hostile.GetterCalls, Is.Zero);
+            Assert.That(throwingMessage.GetterCalls, Is.Zero);
         });
     }
 
@@ -588,7 +588,7 @@ public sealed class ToolErrorContractTests
         return (OperationCanceledException)method.Invoke(null, [exception, cancellationToken])!;
     }
 
-    private sealed class HostileMessageException : Exception
+    private sealed class ThrowingMessageException : Exception
     {
         public int GetterCalls { get; private set; }
 

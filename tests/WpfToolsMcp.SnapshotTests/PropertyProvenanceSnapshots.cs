@@ -115,7 +115,10 @@ public sealed class PropertyProvenanceSnapshots
         var elementResource = await GetPropertyAsync("Provenance_ElementResource", "Background", maxProvenanceCandidates: 50);
         var applicationResource = await GetPropertyAsync("Provenance_ApplicationResource", "Background", maxProvenanceCandidates: 50);
         var mergedResource = await GetPropertyAsync("Provenance_MergedResource", "Background", maxProvenanceCandidates: 50);
-        var unsafeDynamicResource = await GetPropertyAsync("Provenance_UnsafeDynamicResource", "Background", maxProvenanceCandidates: 50);
+        var throwingFormatterDynamicResource = await GetPropertyAsync(
+            "Provenance_ThrowingFormatterDynamicResource",
+            "Background",
+            maxProvenanceCandidates: 50);
         var implicitStyle = await GetPropertyAsync("Provenance_ImplicitStyle", "Padding");
         var themeStyle = await GetPropertyAsync("Provenance_ThemeStyle", "Padding");
         var template = await GetPropertyAsync("Provenance_Template", "Padding");
@@ -184,14 +187,14 @@ public sealed class PropertyProvenanceSnapshots
             Assert.That(mergedResource.Provenance.Resource.Scope,
                 Is.EqualTo("Element.Resources.MergedDictionaries[0]"));
 
-            Assert.That(unsafeDynamicResource.Provenance!.Resource!.ReferenceKind, Is.EqualTo("DynamicResource"));
+            Assert.That(throwingFormatterDynamicResource.Provenance!.Resource!.ReferenceKind, Is.EqualTo("DynamicResource"));
             Assert.That(
-                unsafeDynamicResource.Provenance.Resource.Key,
-                Is.EqualTo("WpfToolsMcp.TestApp.ProvenanceProbe.UnsafeResourceKey"));
+                throwingFormatterDynamicResource.Provenance.Resource.Key,
+                Is.EqualTo("WpfToolsMcp.TestApp.ProvenanceProbe.ThrowingStringResourceKey"));
             Assert.That(
-                unsafeDynamicResource.Provenance.Resource.KeyEvidence.Kind,
+                throwingFormatterDynamicResource.Provenance.Resource.KeyEvidence.Kind,
                 Is.EqualTo(ProvenanceEvidenceKind.Unavailable));
-            Assert.That(unsafeDynamicResource.Provenance.Resource.KeyEvidence.Reason,
+            Assert.That(throwingFormatterDynamicResource.Provenance.Resource.KeyEvidence.Reason,
                 Is.EqualTo("resource_key_to_string_failed:System.InvalidOperationException"));
 
             Assert.That(implicitStyle.Provenance!.Style!.Kind, Is.EqualTo(StyleProvenanceKind.Implicit));
