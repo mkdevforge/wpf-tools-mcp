@@ -31,6 +31,9 @@ internal static class TestAppPaths
 
     public static string FindTreeViewTestAppExecutable() => FindExecutable("WpfToolsMcp.TestApp.TreeView", "WpfToolsMcp.TestApp.TreeView");
 
+    public static string FindVirtualizedItemsTestAppExecutable() =>
+        FindExecutable("WpfToolsMcp.TestApp.VirtualizedItems", "WpfToolsMcp.TestApp.VirtualizedItems");
+
     public static string FindViewportProbeTestAppExecutable() =>
         FindExecutable("WpfToolsMcp.TestApp.ViewportProbe", "WpfToolsMcp.TestApp.ViewportProbe");
 

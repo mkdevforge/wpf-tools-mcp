@@ -29,6 +29,7 @@ var mcpBuilder = builder.Services
         filters.AddListToolsFilter(McpToolOutputSchema.CreateListToolsFilter());
         filters.AddListToolsFilter(WaitToolSchema.CreateListToolsFilter());
         filters.AddListToolsFilter(DiagnosticSnapshotToolSchema.CreateListToolsFilter());
+        filters.AddListToolsFilter(RealizeItemToolSchema.CreateListToolsFilter());
         filters.AddCallToolFilter(McpToolErrorFilter.CreateCallToolFilter());
     })
     .WithStdioServerTransport();

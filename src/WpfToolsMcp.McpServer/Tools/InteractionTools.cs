@@ -367,6 +367,37 @@ public static class InteractionTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "realize_item", UseStructuredContent = true), Description("Realize one virtualized UIA item by provider-order index or exact Name. This explicit mutation may change viewport position and trigger data or container loading.")]
+    public static Task<RealizeItemResponse> RealizeItem(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("ItemContainer provider locator")] ElementLocator? containerLocator = null,
+        [Description("ItemContainer provider elementId")] string? containerElementId = null,
+        [Description("Zero-based provider-order item index (mutually exclusive with name)")] int? index = null,
+        [Description("Exact UIA Name using provider-defined equality (mutually exclusive with index)")] string? name = null,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        [Description("Maximum ItemContainer provider calls (1-1000)")] int maxProviderCalls = RealizeItemLimits.DefaultMaxProviderCalls,
+        [Description("Advisory elapsed limit checked between provider calls, in milliseconds (1-60000)")] int advisoryElapsedLimitMs = RealizeItemLimits.DefaultAdvisoryElapsedLimitMs,
+        [Description("Postcondition polling interval in milliseconds (10-1000)")] int pollIntervalMs = RealizeItemLimits.DefaultPollIntervalMs,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasContainerElementId = !string.IsNullOrWhiteSpace(containerElementId);
+            return automation.RunExclusiveAsync(
+                () => automation.RealizeItemAsync(
+                    containerLocator,
+                    containerElementId,
+                    index,
+                    name,
+                    hasContainerElementId ? windowHandle : effectiveWindowHandle,
+                    maxProviderCalls,
+                    advisoryElapsedLimitMs,
+                    pollIntervalMs,
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "scroll_to_element", UseStructuredContent = true), Description("Scroll a container to bring an element into view (locator or elementId).")]
     public static Task<ScrollToElementResponse> ScrollToElement(
         SessionManager sessions,

@@ -69,8 +69,8 @@ agent workflows:
 
 | Profile | Tools | Purpose |
 |---|---:|---|
-| `core` (default) | 33 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 56 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `core` (default) | 34 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
+| `diagnostics` | 57 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Every advertised tool includes an MCP `outputSchema` with exactly two `oneOf`
 branches: the tool's typed success schema and the common tool-error schema.
@@ -109,8 +109,8 @@ The `core` profile exposes:
   `resolve_element`, `get_element_properties`, `get_uia_locators`,
   `get_uia_tree`, `capture_diagnostic_snapshot`.
 - **Interaction and synchronization:** `click_element`, `invoke`, `type_text`,
-  `send_keys`, `set_value`, `select_item`, `scroll_to_element`, `drag`,
-  `wait_for`.
+  `send_keys`, `set_value`, `select_item`, `realize_item`, `scroll_to_element`,
+  `drag`, `wait_for`.
 - **WPF diagnostics:** `get_binding_info`, `get_command_info`, `get_binding_errors`,
   `get_validation_errors`, `get_data_context`, `get_computed_properties`,
   `get_layout_context`.
@@ -614,6 +614,41 @@ fields describe MCP automation, not arbitrary side effects of the invoked
 application code. For example, a semantic command handler may independently
 open or activate one of its own windows.
 
+### Virtualized Item Realization
+
+`realize_item` is an explicit UIA mutation for one item exposed by an
+`ItemContainerPattern` provider. Supply exactly one container locator or
+registered container element ID, and exactly one zero-based provider-order
+`index` or exact UIA `name`. A Name is passed to the provider unchanged,
+including casing and leading or trailing whitespace. Indexes describe the
+provider's order, not an application data-source index. Name uniqueness is only
+what that provider exposes; the tool does not claim collection-wide duplicate
+detection when the provider suppresses equal items.
+
+The operation uses `ItemContainerPattern.FindItemByProperty` and
+`VirtualizedItemPattern.Realize` only. It does not inject the WPF agent, activate
+the window, send physical input, or run a scrolling search. An already realized
+provider item returns `methodUsed=alreadyRealized`; an out-of-tree placeholder
+without `VirtualizedItemPattern` is unsupported. For Name selection, the tool
+probes for a second provider-observed match and reacquires the unique first item
+before realization because provider calls can invalidate placeholders.
+
+Calling the tool is sufficient mutation intent; there is no separate
+acknowledgement flag. Realization may move the viewport and trigger data or
+container loading. After `Realize()` is invoked, the response retains that fact
+even if deferred container generation cannot be verified. It reports the
+requested identity, method, provider-call and postcondition-poll counts,
+elapsed time, stop and recovery reasons, and mutation flags. A reusable
+`uia_...` handle is returned only after path reacquisition verifies process,
+window, and runtime identity; missing, changed, or recycled identity leaves
+`reusable=false` without erasing the mutation evidence.
+When present, that handle uses the existing action-time identity checks for
+inspection, selection, scroll-to, and element-screenshot workflows.
+
+`maxProviderCalls` counts every `FindItemByProperty` call. The elapsed limit is
+advisory and checked between provider calls and postcondition polls; it cannot
+make one blocking provider call or `Realize()` obey a hard timeout.
+
 ### Text and Keyboard Input
 
 `type_text` makes text placement explicit with `mode=Replace`, `Append`, or
@@ -851,6 +886,7 @@ complete controls live in the `diagnostics` profile when exposing them in
 | `get_visual_tree` | Depth 4, at most 500 nodes, minimal fields | Set `depth`, `maxNodes`, `preset`, or `fields` in `diagnostics` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `get_uia_tree` | Depth 4, at most 200 nodes | Increase `depth` or `maxNodes` | `ReturnedNodes`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
 | `find_elements` | At most 25 matches while scanning at most 5,000 nodes; minimal fields | Set `maxResults` or `returnFields`; `diagnostics` also exposes backend, root, scan limit, and ID controls | `ReturnedMatches`, `DiscoveredMatches`, `ScannedNodes`, `Truncated`, `TruncatedReason` |
+| `realize_item` | At most 100 ItemContainer provider calls, a 5,000 ms advisory elapsed limit, and 50 ms postcondition polling | In `diagnostics`, set `maxProviderCalls` (1-1,000), `advisoryElapsedLimitMs` (1-60,000), or `pollIntervalMs` (10-1,000) | `FindItemByPropertyCalls`, `PostconditionPolls`, `ElapsedMs`, `StopReason`, optional `RecoveryReason`, mutation flags, `PostconditionVerified`, and `Reusable` |
 | `get_element_properties` | Summary preset, at most 25 selected UIA properties; values cap strings at 2,000 characters, collections at 50 items, and nesting at depth 2, with one shared 20,000-character serialized-value budget. XPaths over 2,000 characters are omitted rather than returned incomplete. | Select the `full` preset and an explicit `maxProperties` in `diagnostics` | `ReturnedProperties`, `SelectedProperties`, `ScannedProperties`, `Truncated`, `TruncatedReason`, `TruncatedReasons` |
 | `get_binding_info` | Return at most 2,000 bindings after inspecting the target's dependency properties | In `diagnostics`, set `includeUnbound`, `maxProperties`, or `valueFormat` | `returnedBindings`, `discoveredBindings`, `scannedProperties`, `scanComplete`, `truncated`, compatibility `truncatedReason`, and ordered `truncatedReasons` |
 | `get_command_info` | Effective context start plus 8 nearest public WPF parent levels, at most 128 command/input binding entries total, and 500 characters per formatted value | In `diagnostics`, set `maxAncestors`, `maxBindings`, or `maxValueLength`; hard caps are 32, 512, and 2,000 respectively | Separate source, `ControlIsEnabled`, and `CanExecute` states; returned context and discovered/returned binding counts; ordered truncation reasons; structured getter, formatter, gesture, and evaluation failures |

@@ -751,6 +751,34 @@ public static class CoreInteractionTools
                 cancellationToken);
         });
 
+    [McpServerTool(Name = "realize_item", UseStructuredContent = true), Description("Realize one virtualized UIA item by provider-order index or exact Name. This explicit mutation may change viewport position and trigger data or container loading.")]
+    public static Task<RealizeItemResponse> RealizeItem(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("ItemContainer provider locator")] CoreElementLocator? containerLocator = null,
+        [Description("ItemContainer provider elementId")] string? containerElementId = null,
+        [Description("Zero-based provider-order item index (mutually exclusive with name)")] int? index = null,
+        [Description("Exact UIA Name using provider-defined equality (mutually exclusive with index)")] string? name = null,
+        [Description("Optional native window handle")] long? windowHandle = null,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, effectiveWindowHandle) = sessions.GetController(sessionId, windowHandle);
+            var hasContainerElementId = !string.IsNullOrWhiteSpace(containerElementId);
+            return automation.RunExclusiveAsync(
+                () => automation.RealizeItemAsync(
+                    containerLocator?.ToElementLocator(),
+                    containerElementId,
+                    index,
+                    name,
+                    hasContainerElementId ? windowHandle : effectiveWindowHandle,
+                    RealizeItemLimits.DefaultMaxProviderCalls,
+                    RealizeItemLimits.DefaultAdvisoryElapsedLimitMs,
+                    RealizeItemLimits.DefaultPollIntervalMs,
+                    cancellationToken),
+                cancellationToken);
+        });
+
     [McpServerTool(Name = "invoke", UseStructuredContent = true), Description("Invoke an element via UI Automation.")]
     public static Task<InvokeResponse> Invoke(
         SessionManager sessions,

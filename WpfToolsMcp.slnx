@@ -22,6 +22,7 @@
     <Project Path="src/WpfToolsMcp.TestApp.ScreenshotCorrelationProbe/WpfToolsMcp.TestApp.ScreenshotCorrelationProbe.csproj" />
     <Project Path="src/WpfToolsMcp.TestApp.Tabs/WpfToolsMcp.TestApp.Tabs.csproj" />
     <Project Path="src/WpfToolsMcp.TestApp.TreeView/WpfToolsMcp.TestApp.TreeView.csproj" />
+    <Project Path="src/WpfToolsMcp.TestApp.VirtualizedItems/WpfToolsMcp.TestApp.VirtualizedItems.csproj" />
     <Project Path="src/WpfToolsMcp.TestApp.ViewportProbe/WpfToolsMcp.TestApp.ViewportProbe.csproj" />
     <Project Path="src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj" />
   </Folder>

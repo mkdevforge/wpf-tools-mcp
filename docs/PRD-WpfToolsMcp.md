@@ -121,7 +121,7 @@ The MCP server manages both channels in Phase 2. Backend-neutral inspection tool
 ## MCP Tools
 
 The tables below describe the full `diagnostics` profile. The default `core`
-profile intentionally exposes a smaller 33-tool surface with compact schemas;
+profile intentionally exposes a smaller 34-tool surface with compact schemas;
 see `README.md` for the current profile split and configuration.
 
 ### Phase 1 — Inspection (FlaUI / UIA)
@@ -152,6 +152,7 @@ see `README.md` for the current profile split and configuration.
 | `send_keys` | Send ordered physical keys and modifier chords to the focused or specified element | Optional locator/elementId + 1-100 structured key strokes |
 | `set_value` | Set a value through WPF-native or UIA value semantics | Locator + value |
 | `select_item` | Select semantically, with mouse fallback when allowed | Locator + item identifier (`text`, `index`, or `itemLocator`) |
+| `realize_item` | Explicitly realize one provider-observed virtualized UIA item without foreground or physical input | ItemContainer locator/elementId plus exactly one provider-order index or exact UIA Name; bounded provider calls and advisory elapsed/poll controls |
 | `invoke` | Invoke through WPF-native or UIA semantic patterns | Locator |
 | `scroll_to_element` | Scroll a container to bring an element into view | Locator of the target element |
 | `drag` | Send physical pointer input from an element to another element or screen coordinates | Source locator/elementId + target locator/elementId or `toX/toY` |
@@ -239,6 +240,39 @@ responses also distinguish foreground-focus and physical-input requirements
 from effects that occurred. The policy and effects cover automation performed by this
 server. Code reached by a semantic invocation can independently open, restore,
 or activate the application's own windows.
+
+### Virtualized Item Realization Contract
+
+`realize_item` is a UIA-only mutation through `ItemContainerPattern` and
+`VirtualizedItemPattern`. The explicit call itself communicates intent; no
+additional acknowledgement flag is required. It accepts exactly one container
+locator or registered element ID and exactly one zero-based provider-order
+index or exact UIA Name. Name is forwarded unchanged under provider-defined
+equality. Provider order is not represented as a data-source index, and Name
+ambiguity is limited to matches the provider exposes.
+
+Every `FindItemByProperty` call counts against `maxProviderCalls`. Name lookup
+probes for a second provider-observed match and then reacquires the unique first
+item before realization. The operation recognizes an already realized item and
+rejects an out-of-tree placeholder that lacks `VirtualizedItemPattern`. It does
+not inject, activate the foreground window, send physical input, or approximate
+realization with a scrolling loop.
+
+Default bounds are 100 provider calls, a 5,000 ms advisory elapsed limit, and a
+50 ms postcondition poll interval. Diagnostics callers can select 1-1,000
+provider calls, 1-60,000 ms advisory elapsed time, and a 10-1,000 ms poll
+interval. Elapsed checks occur between provider calls and polls; they are not a
+hard timeout for one blocking provider call or `Realize()`.
+
+After `Realize()` is invoked, its response always preserves mutation evidence:
+requested identity, method, invocation and postcondition state, provider and
+poll counts, elapsed time, stop/recovery reason, and whether viewport or
+data/container loading may have changed. A reusable handle requires fresh path
+reacquisition plus process, window, and runtime-identity verification. Missing,
+changed, or recycled identity suppresses the handle and sets `reusable=false`;
+it does not turn an invoked mutation into an opaque failure.
+Verified handles keep the existing action-time identity checks for
+inspection, selection, scroll-to, and element-screenshot workflows.
 
 ### Application-Owned Native Window Contract
 
@@ -533,6 +567,8 @@ large app with scenario pages:
 - `WpfToolsMcp.TestApp.Scroll`: off-viewport discovery and scrolling.
 - `WpfToolsMcp.TestApp.Tabs`: tab selection with nested selectable content.
 - `WpfToolsMcp.TestApp.TreeView`: hierarchical selection.
+- `WpfToolsMcp.TestApp.VirtualizedItems`: bounded ItemContainer realization,
+  provider-observed duplicate Names, and recycling/stale-identity behavior.
 - `WpfToolsMcp.TestApp.ViewportProbe`: independent WPF logical-size, physical
   client-size, DPI, minimum-size, and application-coercion verification.
 
@@ -668,7 +704,8 @@ Phase 1 delivers a fully functional MCP server that can see and interact with WP
 - Snapshot tests for all inspection tools
 
 #### P1-M2 — Interact
-- `click_element`, `type_text`, `send_keys`, `set_value`, `select_item`, `invoke`
+- `click_element`, `type_text`, `send_keys`, `set_value`, `select_item`,
+  `realize_item`, `invoke`
 - Playwright-like robustness: `wait_for` (attached|visible|enabled|actionable|stable|value_equals|name_contains)
 - Pointer interactions: `drag` (for sliders, splitters, reorder, etc.)
 - `scroll_to_element`, `set_active_window`

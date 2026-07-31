@@ -37,6 +37,7 @@ public sealed class ToolProfileTests
         "launch_app",
         "list_sessions",
         "list_windows",
+        "realize_item",
         "resolve_element",
         "scroll_to_element",
         "select_item",
