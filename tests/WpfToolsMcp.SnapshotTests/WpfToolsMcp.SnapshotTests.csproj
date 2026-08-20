@@ -29,6 +29,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\WpfToolsMcp.Contracts\WpfToolsMcp.Contracts.csproj" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.AgentProtocol\WpfToolsMcp.AgentProtocol.csproj" />
+    <ProjectReference Include="..\..\src\WpfToolsMcp.Agent.Bootstrap\WpfToolsMcp.Agent.Bootstrap.csproj" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.Agent\WpfToolsMcp.Agent.csproj" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.Automation\WpfToolsMcp.Automation.csproj" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.McpServer\WpfToolsMcp.McpServer.csproj" />
@@ -53,6 +54,7 @@
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.ViewportProbe\WpfToolsMcp.TestApp.ViewportProbe.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\WpfToolsMcp.TestApp.BindingErrors\WpfToolsMcp.TestApp.BindingErrors.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\WpfToolsMcp.ProcessFixture\WpfToolsMcp.ProcessFixture.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\WpfToolsMcp.ConflictFixture\WpfToolsMcp.ConflictFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

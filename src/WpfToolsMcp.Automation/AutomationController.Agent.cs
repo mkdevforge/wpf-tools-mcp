@@ -18,6 +18,8 @@ public sealed partial class AutomationController
         "performance_stop_failed"
     ];
     private readonly object _agentSync = new();
+    private readonly object _agentDisposalSync = new();
+    private readonly HashSet<Task> _pendingAgentDisposals = [];
     private AgentClient? _agentClient;
     private string? _agentPipeName;
     private int? _agentPid;
@@ -228,7 +230,12 @@ public sealed partial class AutomationController
         }
     }
 
-    public async Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default)
+    public Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default) =>
+        InjectAgentAsync(initialWindowHandle: null, cancellationToken);
+
+    public async Task<InjectAgentResponse> InjectAgentAsync(
+        long? initialWindowHandle,
+        CancellationToken cancellationToken = default)
     {
         using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
@@ -285,14 +292,14 @@ public sealed partial class AutomationController
                 }
                 catch (Exception) when (!operationToken.IsCancellationRequested)
                 {
-                    CleanupAgent();
+                    await CleanupAgentAsync().ConfigureAwait(false);
                 }
             }
 
             if (existingClient is not null &&
                 (existingPid != pid || !existingClient.IsConnected || existingPipeName is null))
             {
-                CleanupAgent();
+                await CleanupAgentAsync().ConfigureAwait(false);
             }
 
             // Connect-first lets a restarted MCP server reuse an agent without injecting again.
@@ -346,7 +353,10 @@ public sealed partial class AutomationController
             var assets = Phase2Assets.ResolveFromAppBase();
 
             stage = FailureDiagnostics.Stages.Attachment;
-            var window = FindMainWindow(application, automation);
+            var window = SelectInitialInjectionWindow(
+                initialWindowHandle,
+                requestedWindowHandle => FindWindowByHandle(application, automation, requestedWindowHandle),
+                () => FindMainWindow(application, automation));
             var hwnd = window.Properties.NativeWindowHandle.Value;
             if (hwnd == IntPtr.Zero)
             {
@@ -1736,7 +1746,7 @@ public sealed partial class AutomationController
             {
                 SetAutoAgentFailure(
                     FailureDiagnostics.CreateException(ex, FailureDiagnostics.Stages.Protocol));
-                CleanupAgent(clearFailure: false);
+                await CleanupAgentAsync(clearFailure: false).ConfigureAwait(false);
                 return null;
             }
         }
@@ -1749,7 +1759,7 @@ public sealed partial class AutomationController
                 preserveFailure = _agentAutoConnectFailure is not null;
             }
 
-            CleanupAgent(clearFailure: !preserveFailure);
+            await CleanupAgentAsync(clearFailure: !preserveFailure).ConfigureAwait(false);
         }
 
         var processIdentity = EnsureAttachedProcessIdentityCurrent(pid);
@@ -2092,7 +2102,57 @@ public sealed partial class AutomationController
         builder.AppendLine(string.IsNullOrWhiteSpace(value) ? "<empty>" : value.TrimEnd());
     }
 
-    private void CleanupAgent(bool clearFailure = true)
+    internal static T SelectInitialInjectionWindow<T>(
+        long? initialWindowHandle,
+        Func<long, T> findByHandle,
+        Func<T> findMainWindow)
+    {
+        ArgumentNullException.ThrowIfNull(findByHandle);
+        ArgumentNullException.ThrowIfNull(findMainWindow);
+
+        return initialWindowHandle is long requestedWindowHandle
+            ? findByHandle(requestedWindowHandle)
+            : findMainWindow();
+    }
+
+    private async Task CleanupAgentAsync(bool clearFailure = true)
+    {
+        var client = DetachAgentClient(clearFailure);
+        if (client is not null)
+        {
+            await DisposeAgentClientAsync(client).ConfigureAwait(false);
+        }
+    }
+
+    private void QueueAgentCleanup(bool clearFailure = true)
+    {
+        var client = DetachAgentClient(clearFailure);
+        if (client is null)
+        {
+            return;
+        }
+
+        var disposal = DisposeAgentClientAsync(client);
+        lock (_agentDisposalSync)
+        {
+            _pendingAgentDisposals.Add(disposal);
+        }
+
+        _ = RemoveCompletedAgentDisposalAsync(disposal);
+    }
+
+    private async Task AwaitPendingAgentDisposalsAsync()
+    {
+        Task[] disposals;
+        lock (_agentDisposalSync)
+        {
+            disposals = [.. _pendingAgentDisposals];
+        }
+
+        await Task.WhenAll(disposals).ConfigureAwait(false);
+    }
+
+    private AgentClient? DetachAgentClient(bool clearFailure)
     {
         AgentClient? client;
         lock (_agentSync)
@@ -2109,16 +2169,27 @@ public sealed partial class AutomationController
             }
         }
 
-        if (client is not null)
+        return client;
+    }
+
+    private static async Task DisposeAgentClientAsync(AgentClient client)
+    {
+        try
         {
-            try
-            {
-                client.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            }
-            catch
-            {
-                // best effort
-            }
+            await client.DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // best effort
+        }
+    }
+
+    private async Task RemoveCompletedAgentDisposalAsync(Task disposal)
+    {
+        await disposal.ConfigureAwait(false);
+        lock (_agentDisposalSync)
+        {
+            _pendingAgentDisposals.Remove(disposal);
         }
     }
 }

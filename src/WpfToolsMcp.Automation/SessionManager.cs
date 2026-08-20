@@ -471,7 +471,7 @@ internal static class SessionWindowReconciler
     }
 }
 
-public sealed class SessionManager : IDisposable
+public sealed class SessionManager : IDisposable, IAsyncDisposable
 {
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -585,18 +585,31 @@ public sealed class SessionManager : IDisposable
     private readonly ConcurrentDictionary<string, RetiredSession> _retiredSessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _retiredSessionOrder = new();
     private readonly object _retiredSessionSync = new();
+    private readonly object _disposeSync = new();
     private readonly SemaphoreSlim _replacementMutex = new(1, 1);
+    private Task? _disposeTask;
     private const int MaximumRetiredSessions = 256;
 
     private sealed record RetiredSession(string SuccessorSessionId, int PreviousPid, int SuccessorPid);
 
-    public void Dispose()
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    public ValueTask DisposeAsync()
+    {
+        lock (_disposeSync)
+        {
+            _disposeTask ??= DisposeCoreAsync();
+            return new ValueTask(_disposeTask);
+        }
+    }
+
+    private async Task DisposeCoreAsync()
     {
         foreach (var kvp in _sessions)
         {
             try
             {
-                kvp.Value.Controller.Dispose();
+                await kvp.Value.Controller.DisposeAsync().ConfigureAwait(false);
             }
             catch
             {
@@ -690,7 +703,7 @@ public sealed class SessionManager : IDisposable
         }
         catch
         {
-            controller.Dispose();
+            await controller.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
@@ -745,7 +758,7 @@ public sealed class SessionManager : IDisposable
         }
         catch
         {
-            controller.Dispose();
+            await controller.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
@@ -912,7 +925,7 @@ public sealed class SessionManager : IDisposable
 
                 try
                 {
-                    previous.Controller.Dispose();
+                    await previous.Controller.DisposeAsync().ConfigureAwait(false);
                 }
                 catch
                 {
@@ -936,7 +949,7 @@ public sealed class SessionManager : IDisposable
             }
             catch (ProcessSelectionAmbiguityException ex)
             {
-                successorController.Dispose();
+                await successorController.DisposeAsync().ConfigureAwait(false);
                 throw new ProcessSelectionAmbiguityException(ex.Ambiguity with
                 {
                     Recovery = $"Retry attach_to_app with sessionId '{previousSessionId}' and one candidate " +
@@ -949,7 +962,7 @@ public sealed class SessionManager : IDisposable
                     !_sessions.TryGetValue(successor.SessionId, out var registered) ||
                     !ReferenceEquals(successor, registered))
                 {
-                    successorController.Dispose();
+                    await successorController.DisposeAsync().ConfigureAwait(false);
                 }
 
                 throw;
@@ -1029,7 +1042,7 @@ public sealed class SessionManager : IDisposable
         finally
         {
             _sessions.TryRemove(sessionId, out _);
-            session.Controller.Dispose();
+            await session.Controller.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -1266,7 +1279,7 @@ public sealed class SessionManager : IDisposable
         finally
         {
             _sessions.TryRemove(sessionId, out _);
-            session.Controller.Dispose();
+            await session.Controller.DisposeAsync().ConfigureAwait(false);
         }
     }
 

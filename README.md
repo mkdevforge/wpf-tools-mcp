@@ -336,8 +336,7 @@ dotnet pack src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj -c Release -o artifacts
 
 The [architecture note](docs/architecture.md)
 describes the process boundaries and recovery model. Accepted design decisions
-live under `docs/decisions/`. The current implementation constraints are listed
-in [known engineering risks](docs/known-issues.md).
+live under `docs/decisions/`.
 
 ## License
 

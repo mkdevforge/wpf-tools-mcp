@@ -95,7 +95,7 @@ internal sealed class AgentClient : IAsyncDisposable
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(timeout);
-            await pipe.ConnectAsync(cts.Token);
+            await pipe.ConnectAsync(cts.Token).ConfigureAwait(false);
             return new AgentClient(pipe);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -114,7 +114,7 @@ internal sealed class AgentClient : IAsyncDisposable
     public async Task<T> CallAsync<T>(string method, object? @params, CancellationToken cancellationToken)
     {
         var paramsNode = @params is null ? null : JsonSerializer.SerializeToNode(@params, JsonOptions);
-        var result = await CallRawAsync(method, paramsNode, cancellationToken);
+        var result = await CallRawAsync(method, paramsNode, cancellationToken).ConfigureAwait(false);
         T? value;
         try
         {
@@ -157,7 +157,7 @@ internal sealed class AgentClient : IAsyncDisposable
         var responseReceived = false;
         try
         {
-            await _mutex.WaitAsync(callToken);
+            await _mutex.WaitAsync(callToken).ConfigureAwait(false);
             lockTaken = true;
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
             if (Volatile.Read(ref _faulted) != 0 || !_pipe.IsConnected)
@@ -166,8 +166,8 @@ internal sealed class AgentClient : IAsyncDisposable
             }
 
             ioStarted = true;
-            await PipeProtocol.WriteAsync(_pipe, request, callToken);
-            var response = await PipeProtocol.ReadAsync<AgentResponse>(_pipe, callToken);
+            await PipeProtocol.WriteAsync(_pipe, request, callToken).ConfigureAwait(false);
+            var response = await PipeProtocol.ReadAsync<AgentResponse>(_pipe, callToken).ConfigureAwait(false);
             responseReceived = true;
 
             if (!string.Equals(response.Id, request.Id, StringComparison.Ordinal))
@@ -245,7 +245,7 @@ internal sealed class AgentClient : IAsyncDisposable
         _disposeCts.Cancel();
         _pipe.Dispose();
 
-        await _mutex.WaitAsync();
+        await _mutex.WaitAsync().ConfigureAwait(false);
         // Keep the semaphore held. Disposing it can race callers that are still
         // unwinding from the cancellation above and will release it in finally.
         _disposeCts.Dispose();

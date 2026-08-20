@@ -8,11 +8,13 @@ internal sealed class Phase2Assets
     {
         AgentDir = agentDir;
         SnoopDir = snoopDir;
-        AgentDllPath = Path.Combine(AgentDir, "WpfToolsMcp.Agent.dll");
+        AgentDllPath = Path.Combine(AgentDir, "WpfToolsMcp.Agent.Bootstrap.dll");
+        AgentRuntimeDllPath = Path.Combine(AgentDir, "WpfToolsMcp.Agent.dll");
     }
 
     public string AgentDir { get; }
     public string AgentDllPath { get; }
+    public string AgentRuntimeDllPath { get; }
     public string SnoopDir { get; }
 
     public string GetInjectorLauncherPath(Architecture architecture)
@@ -72,7 +74,13 @@ internal sealed class Phase2Assets
                 assets.AgentDllPath);
         }
 
+        if (!File.Exists(assets.AgentRuntimeDllPath))
+        {
+            throw new FileNotFoundException(
+                $"Phase 2 agent runtime assembly not found: '{assets.AgentRuntimeDllPath}'. Build WpfToolsMcp.McpServer to generate it.",
+                assets.AgentRuntimeDllPath);
+        }
+
         return assets;
     }
 }
-
