@@ -1,0 +1,102 @@
+name: Bug report
+description: Report a reproducible problem with WPF Tools MCP
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report one problem per issue. Do not include passwords, tokens, or private application data.
+
+  - type: input
+    id: version
+    attributes:
+      label: WPF Tools MCP version
+      description: Provide the installed package version, preview version, or commit.
+      placeholder: 0.1.0-preview.27
+    validations:
+      required: true
+
+  - type: dropdown
+    id: profile
+    attributes:
+      label: Tool profile
+      options:
+        - core
+        - diagnostics
+        - I do not know
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Server environment
+      description: Include Windows version, server architecture, .NET runtime, and MCP client.
+      placeholder: Windows 11; x64; .NET 8; Claude Desktop
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Target application
+      description: Include the target architecture and whether it runs elevated or under another user.
+      placeholder: WPF .NET 8 x64 application; same user; not elevated
+    validations:
+      required: true
+
+  - type: input
+    id: tool
+    attributes:
+      label: Tool and arguments
+      description: Name the MCP tool and relevant arguments, if applicable.
+      placeholder: get_element_properties, sessionId=...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Give the smallest reliable sequence that reproduces the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or errors
+      description: Include the complete relevant output with sensitive data removed.
+      render: text
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Additional evidence
+      description: Add screenshots, traces, sample projects, or links when they clarify the problem.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: I removed passwords, tokens, and other sensitive data.
+          required: true
