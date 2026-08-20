@@ -118,6 +118,18 @@ public sealed class ToolProfileTests
         }
     }
 
+    [Test]
+    public async Task Inject_agent_accepts_an_optional_initial_window_handle()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(serverExe, toolProfile: "diagnostics");
+        var tools = (await mcp.ListToolsAsync()).ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+
+        Assert.That(
+            GetInputPropertyNames(tools["inject_agent"]),
+            Is.EqualTo(new[] { "sessionId", "windowHandle" }));
+    }
+
     [TestCase(null)]
     [TestCase("diagnostics")]
     public async Task Profiles_advertise_output_schemas_for_every_tool(string? toolProfile)

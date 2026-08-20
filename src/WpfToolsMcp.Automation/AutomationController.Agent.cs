@@ -228,7 +228,12 @@ public sealed partial class AutomationController
         }
     }
 
-    public async Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default)
+    public Task<InjectAgentResponse> InjectAgentAsync(CancellationToken cancellationToken = default) =>
+        InjectAgentAsync(initialWindowHandle: null, cancellationToken);
+
+    public async Task<InjectAgentResponse> InjectAgentAsync(
+        long? initialWindowHandle,
+        CancellationToken cancellationToken = default)
     {
         using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
@@ -346,7 +351,10 @@ public sealed partial class AutomationController
             var assets = Phase2Assets.ResolveFromAppBase();
 
             stage = FailureDiagnostics.Stages.Attachment;
-            var window = FindMainWindow(application, automation);
+            var window = SelectInitialInjectionWindow(
+                initialWindowHandle,
+                requestedWindowHandle => FindWindowByHandle(application, automation, requestedWindowHandle),
+                () => FindMainWindow(application, automation));
             var hwnd = window.Properties.NativeWindowHandle.Value;
             if (hwnd == IntPtr.Zero)
             {
@@ -2090,6 +2098,19 @@ public sealed partial class AutomationController
     {
         builder.Append("--- ").Append(name).AppendLine(" ---");
         builder.AppendLine(string.IsNullOrWhiteSpace(value) ? "<empty>" : value.TrimEnd());
+    }
+
+    internal static T SelectInitialInjectionWindow<T>(
+        long? initialWindowHandle,
+        Func<long, T> findByHandle,
+        Func<T> findMainWindow)
+    {
+        ArgumentNullException.ThrowIfNull(findByHandle);
+        ArgumentNullException.ThrowIfNull(findMainWindow);
+
+        return initialWindowHandle is long requestedWindowHandle
+            ? findByHandle(requestedWindowHandle)
+            : findMainWindow();
     }
 
     private void CleanupAgent(bool clearFailure = true)

@@ -12,11 +12,14 @@ public static class AgentTools
     public static Task<InjectAgentResponse> InjectAgent(
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
+        [Description("Native window handle used as the initial injection target")] long? windowHandle = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
-            var (automation, _) = sessions.GetController(sessionId);
-            return automation.RunExclusiveAsync(() => automation.InjectAgentAsync(cancellationToken), cancellationToken);
+            var (automation, _) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.InjectAgentAsync(windowHandle, cancellationToken),
+                cancellationToken);
         });
 
     [McpServerTool(Name = "agent_ping", UseStructuredContent = true), Description("Ping the injected agent over the named pipe.")]
