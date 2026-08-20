@@ -22,16 +22,18 @@ using WpfToolsMcp.Contracts;
 
 namespace WpfToolsMcp.Automation;
 
-public sealed partial class AutomationController : IDisposable
+public sealed partial class AutomationController : IDisposable, IAsyncDisposable
 {
     private Application? _application;
     private UIA3Automation? _automation;
     private ProcessInstanceIdentity? _processIdentity;
     private readonly SemaphoreSlim _toolMutex = new(1, 1);
     private readonly CancellationTokenSource _lifetimeCts = new();
+    private readonly object _disposeSync = new();
     private readonly string _resourceOwnerId = Guid.NewGuid().ToString("N");
     private LastHighlightRequest? _lastHighlight;
     private int _disposeStarted;
+    private Task? _disposeTask;
 
     private static readonly int UiDelayMs = GetEnvInt("WPF_TOOLS_MCP_UI_DELAY_MS", defaultValue: 0, minValue: 0, maxValue: 1000);
     private static readonly int UiDelayScrollMs = GetEnvInt("WPF_TOOLS_MCP_UI_SCROLL_DELAY_MS", defaultValue: 15, minValue: 0, maxValue: 1000);
@@ -74,7 +76,18 @@ public sealed partial class AutomationController : IDisposable
     internal bool IsDisposing => Volatile.Read(ref _disposeStarted) != 0;
     internal CancellationToken LifetimeToken => _lifetimeCts.Token;
 
-    public void Dispose()
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    public ValueTask DisposeAsync()
+    {
+        lock (_disposeSync)
+        {
+            _disposeTask ??= DisposeCoreAsync();
+            return new ValueTask(_disposeTask);
+        }
+    }
+
+    private async Task DisposeCoreAsync()
     {
         if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
         {
@@ -82,14 +95,14 @@ public sealed partial class AutomationController : IDisposable
         }
 
         _lifetimeCts.Cancel();
-        _toolMutex.Wait();
+        await _toolMutex.WaitAsync().ConfigureAwait(false);
         try
         {
             HighlightOverlay.Hide(_resourceOwnerId);
             _lastHighlight = null;
             CloseActiveTrace();
             _elementHandles.Clear();
-            Cleanup();
+            await CleanupAsync().ConfigureAwait(false);
         }
         finally
         {
@@ -12968,7 +12981,7 @@ public sealed partial class AutomationController : IDisposable
 
     private void Cleanup()
     {
-        CleanupAgent();
+        QueueAgentCleanup();
 
         if (_automation is not null)
         {
@@ -12983,5 +12996,11 @@ public sealed partial class AutomationController : IDisposable
         }
 
         _processIdentity = null;
+    }
+
+    private async Task CleanupAsync()
+    {
+        Cleanup();
+        await AwaitPendingAgentDisposalsAsync().ConfigureAwait(false);
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Reflection;
 using System.Text.Json;
@@ -171,6 +172,81 @@ public sealed class AgentClientLifecycleTests
                 await client.DisposeAsync();
             }
         }
+    }
+
+    [Test]
+    public async Task Controller_dispose_does_not_wait_on_captured_agent_continuations()
+    {
+        var pipeName = $"wpf-tools-mcp-controller-dispose-test-{Guid.NewGuid():N}";
+        await using var server = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous);
+        using var connectionTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var acceptTask = server.WaitForConnectionAsync(connectionTimeout.Token);
+        var clientTask = AgentClient.ConnectAsync(pipeName, TimeSpan.FromSeconds(2), connectionTimeout.Token);
+        await Task.WhenAll(acceptTask, clientTask).WaitAsync(TimeSpan.FromSeconds(2));
+        var client = await clientTask;
+
+        var controller = new AutomationController();
+        SetPrivateField(controller, "_agentClient", client);
+        SetPrivateField(controller, "_agentPipeName", pipeName);
+        SetPrivateField(controller, "_agentPid", (int?)Environment.ProcessId);
+
+        using var context = new QueueingSynchronizationContext();
+        using var callStarted = new ManualResetEventSlim();
+        using var startDisposal = new ManualResetEventSlim();
+        using var disposalReturned = new ManualResetEventSlim();
+        Task<string>? callTask = null;
+        Exception? disposalError = null;
+        var disposalThread = new Thread(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+            callTask = client.CallAsync<string>("ping", null, CancellationToken.None);
+            callStarted.Set();
+            startDisposal.Wait();
+            try
+            {
+                controller.Dispose();
+            }
+            catch (Exception ex)
+            {
+                disposalError = ex;
+            }
+            finally
+            {
+                disposalReturned.Set();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "controller-disposal-test"
+        };
+
+        disposalThread.Start();
+        Assert.That(callStarted.Wait(TimeSpan.FromSeconds(2)), Is.True);
+        var requestTask = PipeProtocol.ReadAsync<AgentRequest>(server, connectionTimeout.Token);
+        context.DrainUntil(() => requestTask.IsCompleted, TimeSpan.FromSeconds(2));
+        var request = await requestTask;
+        Assert.That(request.Method, Is.EqualTo("ping"));
+
+        startDisposal.Set();
+        var completedWithoutPumping = disposalReturned.Wait(TimeSpan.FromSeconds(1));
+        if (!completedWithoutPumping)
+        {
+            context.DrainUntil(disposalReturned.WaitHandle, TimeSpan.FromSeconds(2));
+        }
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(disposalThread.Join(TimeSpan.FromSeconds(2)), Is.True);
+            Assert.That(disposalError, Is.Null);
+            Assert.That(completedWithoutPumping, Is.True);
+        });
+        Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+            _ = await callTask!.WaitAsync(TimeSpan.FromSeconds(2)));
     }
 
     [Test]
@@ -1093,5 +1169,37 @@ public sealed class AgentClientLifecycleTests
         var field = typeof(AutomationController).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)
                     ?? throw new InvalidOperationException($"Missing AutomationController field '{name}'.");
         field.SetValue(controller, value);
+    }
+
+    private sealed class QueueingSynchronizationContext : SynchronizationContext, IDisposable
+    {
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _callbacks = new();
+        private readonly AutoResetEvent _callbackAvailable = new(initialState: false);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            _callbacks.Enqueue((d, state));
+            _callbackAvailable.Set();
+        }
+
+        public void DrainUntil(WaitHandle completion, TimeSpan timeout)
+            => DrainUntil(() => completion.WaitOne(0), timeout);
+
+        public void DrainUntil(Func<bool> isComplete, TimeSpan timeout)
+        {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            while (!isComplete() && stopwatch.Elapsed < timeout)
+            {
+                if (_callbacks.TryDequeue(out var callback))
+                {
+                    callback.Callback(callback.State);
+                    continue;
+                }
+
+                _callbackAvailable.WaitOne(TimeSpan.FromMilliseconds(25));
+            }
+        }
+
+        public void Dispose() => _callbackAvailable.Dispose();
     }
 }
