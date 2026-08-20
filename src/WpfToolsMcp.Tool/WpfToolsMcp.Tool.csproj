@@ -49,7 +49,7 @@
       Text="Server payload was not published to '$(ServerPublishDir)'. Re-run pack and check the publish output." />
 
     <Error
-      Condition="!Exists('$(ServerPublishDir)agent\WpfToolsMcp.Agent.dll')"
+      Condition="!Exists('$(ServerPublishDir)agent\WpfToolsMcp.Agent.Bootstrap.dll') OR !Exists('$(ServerPublishDir)agent\WpfToolsMcp.Agent.dll')"
       Text="Missing Phase 2 agent payload under '$(ServerPublishDir)agent'. Ensure WpfToolsMcp.McpServer publish copies the 'agent/' folder." />
 
     <Error

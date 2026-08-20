@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\WpfToolsMcp.Contracts\WpfToolsMcp.Contracts.csproj" />
     <ProjectReference Include="..\WpfToolsMcp.Automation\WpfToolsMcp.Automation.csproj" />
+    <ProjectReference Include="..\WpfToolsMcp.Agent.Bootstrap\WpfToolsMcp.Agent.Bootstrap.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\WpfToolsMcp.Agent\WpfToolsMcp.Agent.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
@@ -21,6 +22,7 @@
 
   <PropertyGroup>
     <Phase2AgentOutputDir>$(MSBuildProjectDirectory)\..\WpfToolsMcp.Agent\bin\$(Configuration)\net8.0-windows\</Phase2AgentOutputDir>
+    <Phase2AgentBootstrapOutputDir>$(MSBuildProjectDirectory)\..\WpfToolsMcp.Agent.Bootstrap\bin\$(Configuration)\net8.0-windows\</Phase2AgentBootstrapOutputDir>
     <Phase2SnoopBinDir>$(MSBuildProjectDirectory)\..\..\references\snoopwpf\bin\$(Configuration)\</Phase2SnoopBinDir>
     <Phase2SnoopLicensePath>$(MSBuildProjectDirectory)\..\..\references\snoopwpf\License.txt</Phase2SnoopLicensePath>
   </PropertyGroup>
@@ -28,6 +30,7 @@
   <Target Name="CopyPhase2Assets" AfterTargets="Build">
     <ItemGroup>
       <Phase2AgentPayload Include="$(Phase2AgentOutputDir)**\*.*" />
+      <Phase2AgentPayload Include="$(Phase2AgentBootstrapOutputDir)**\*.*" />
       <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.exe" />
       <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.exe.config" />
       <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.pdb" />
@@ -73,6 +76,7 @@
   <Target Name="CopyPhase2AssetsToPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
     <ItemGroup>
       <Phase2AgentPayload Include="$(Phase2AgentOutputDir)**\*.*" />
+      <Phase2AgentPayload Include="$(Phase2AgentBootstrapOutputDir)**\*.*" />
       <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.exe" />
       <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.exe.config" />
       <Phase2SnoopLauncherPayload Include="$(Phase2SnoopBinDir)Snoop.InjectorLauncher.*.pdb" />

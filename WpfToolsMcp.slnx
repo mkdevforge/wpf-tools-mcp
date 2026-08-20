@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/WpfToolsMcp.Automation/WpfToolsMcp.Automation.csproj" />
+    <Project Path="src/WpfToolsMcp.Agent.Bootstrap/WpfToolsMcp.Agent.Bootstrap.csproj" />
     <Project Path="src/WpfToolsMcp.Agent/WpfToolsMcp.Agent.csproj" />
     <Project Path="src/WpfToolsMcp.AgentProtocol/WpfToolsMcp.AgentProtocol.csproj" />
     <Project Path="src/WpfToolsMcp.Contracts/WpfToolsMcp.Contracts.csproj" />
@@ -27,6 +28,7 @@
     <Project Path="src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/WpfToolsMcp.ConflictFixture/WpfToolsMcp.ConflictFixture.csproj" />
     <Project Path="tests/WpfToolsMcp.ProcessFixture/WpfToolsMcp.ProcessFixture.csproj" />
     <Project Path="tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj" />
   </Folder>
