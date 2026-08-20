@@ -1,75 +1,76 @@
-# Manual verification: `highlight_element`
+# Verify `highlight_element` manually
 
-Goal: make sure `highlight_element` works reliably (incl. multi-monitor), and that UIA element handles can be highlighted via the in-proc WPF agent when available.
+Use this check for the diagnostics-only picker and highlight paths. It covers the
+Win32 overlay, optional UIA-to-WPF mapping, screenshot annotation, and negative
+virtual-screen coordinates.
 
-## Preconditions
+## Before you start
 
-- Windows 10/11
-- A WPF app to test against (recommended: any of the `src/WpfToolsMcp.TestApp.*` projects, or your own app)
-- An MCP client wired up to the `wpf-tools-mcp` MCP server
-- The server started with the full diagnostics profile:
+- Run Windows 10 or Windows 11.
+- Build or install WPF Tools MCP with its agent and Snoop payload present.
+- Start a WPF target. A project under `src/WpfToolsMcp.TestApp.*` is suitable.
+- Configure the MCP server with `--tool-profile diagnostics`.
 
-  ```powershell
-  wpf-tools-mcp --tool-profile diagnostics
-  ```
+Keep the `sessionId` returned by `launch_app` or `attach_to_app`.
 
-  For an MCP client configuration, add
-  `"args": ["--tool-profile", "diagnostics"]` to the server entry. The default
-  core profile does not expose `inject_agent`, `pick_element_at_point`,
-  `highlight_element`, or `set_window_bounds`.
+## Check the UIA overlay
 
-## 1) Baseline: UIA overlay highlight (no agent)
+1. Call `list_windows` and choose the target HWND.
+2. Call `take_screenshot` for that window and choose a point inside a visible
+   control.
+3. Call `pick_element_at_point` with `backend=Uia` and keep the returned
+   `element.elementId`.
+4. Call `highlight_element` with that element ID and
+   `preferInProcHighlight=false`.
 
-1. Launch/attach to the app:
-   - `launch_app` or `attach_to_app` → capture `sessionId`
-2. Take a screenshot to pick a stable coordinate:
-   - `take_screenshot` (client or window)
-3. Pick an element via UIA:
-   - `pick_element_at_point` with `backend=Uia` at a point inside a visible control
-   - copy `element.elementId`
-4. Highlight it:
-   - `highlight_element` with `elementId=<uia elementId>`
-   - set `preferInProcHighlight=false`
+Expected result:
 
-Expected:
-- `Highlighted=true`
-- `MethodUsed="win32_overlay"`
+- `highlighted` is `true`.
+- `methodUsed` is `win32_overlay`.
+- The overlay surrounds the selected control rather than the whole window.
 
-## 2) UIA elementId → WPF agent highlight mapping
+## Check UIA-to-WPF mapping
 
-1. Ensure the agent is available:
-   - `inject_agent` with the same `sessionId`
-2. Re-run highlight on the same UIA elementId:
-   - `highlight_element` with `elementId=<uia elementId>`
-   - set `preferInProcHighlight=true` (default)
+1. Call `inject_agent` for the same session.
+2. Call `highlight_element` again with the UIA element ID and
+   `preferInProcHighlight=true`.
 
-Preferred result:
-- `Highlighted=true`
-- `MethodUsed="wpf_agent_mapped"` (meaning: UIA bounds were mapped to a WPF visual via `wpf/pick_element_at_point`)
+The preferred result is `methodUsed=wpf_agent_mapped`. This means the tool
+mapped the UIA bounds to a WPF visual and used the in-process highlighter.
 
-`MethodUsed="win32_overlay"` means the visible fallback worked but the WPF
-mapping path did not pass this check. Agent connectivity alone does not
-guarantee that a particular UIA element can be mapped to a WPF visual.
+`methodUsed=win32_overlay` is a supported fallback. It shows that highlighting
+worked but the chosen UIA element did not produce a usable WPF mapping. Agent
+connectivity alone does not guarantee a mapping for every automation element.
 
-## 3) Screenshot guarantee (annotated)
+## Check the screenshot
 
-1. Call:
-   - `highlight_element` with `returnScreenshot=true`
+Call `highlight_element` with `returnScreenshot=true`.
 
-Expected:
-- `Screenshot.Path` exists on disk and opens as a valid image
-- The returned image has a rectangle annotation around the target bounds (even if any on-screen overlay isn’t captured by the screenshot pipeline)
+Verify that:
 
-## 4) Multi-monitor / negative coordinates
+- `screenshot.path` exists and is a valid image.
+- The image contains a rectangle around the returned target bounds.
 
-1. Move the window to each display (including negative X on a left-side monitor):
-   - `set_window_bounds` (set `x` / `y` explicitly; keep `clampToVirtualScreen=true`)
-2. Repeat:
-   - `pick_element_at_point`
-   - `highlight_element` (with mapping enabled)
-   - `highlight_element(returnScreenshot=true)`
+The image annotation is the durable evidence. A temporary on-screen overlay
+does not have to appear in the captured pixels.
 
-Expected:
-- No failures due to negative coordinates
-- `MethodUsed="wpf_agent_mapped"` when mapping succeeds; `win32_overlay` is the
-  supported fallback when mapping is unavailable
+## Check multiple displays
+
+1. Call `list_displays` and note the virtual-screen and per-display bounds.
+2. Move the target with `set_window_bounds`. Keep
+   `clampToVirtualScreen=true`.
+3. Repeat the picker, mapped highlight, overlay highlight, and screenshot checks
+   on each display.
+4. Include a display with negative X or Y coordinates when the monitor layout
+   has one.
+
+Expected result:
+
+- Picking and highlighting use the same virtual-screen coordinates.
+- Negative coordinates do not cause clipping or selection errors.
+- WPF mapping returns `wpf_agent_mapped` when a suitable visual is found and
+  otherwise falls back to `win32_overlay`.
+
+Record the date, WPF target, display layout, result from each section, and paths
+to annotated screenshots with the related issue or pull request. This file is a
+procedure, not evidence that the check has already passed on a particular build.
