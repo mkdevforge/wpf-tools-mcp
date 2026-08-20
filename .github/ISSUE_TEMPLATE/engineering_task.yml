@@ -1,0 +1,89 @@
+name: Engineering task
+description: Track a scoped implementation, maintenance, configuration, or documentation task
+title: "[Task]: "
+body:
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Implementation
+        - Maintenance
+        - Configuration
+        - Documentation
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Core inspection
+        - Interaction and input
+        - Diagnostics and observability
+        - Agent and injection
+        - UI Automation and windowing
+        - Packaging and installation
+        - Documentation
+        - Build and CI
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: State the bounded result this issue should deliver.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Current behavior and evidence
+      description: Summarize the relevant code, test, runtime, or documentation evidence.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: Name affected projects or files and state what is deliberately out of scope.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable, testable conditions for completion.
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification plan
+      description: Name the targeted tests, builds, or manual evidence required.
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and risks
+      description: Record ordering constraints, external dependencies, or known risks.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: The outcome is scoped enough to complete in one issue.
+          required: true
+        - label: Acceptance criteria and verification steps are concrete.
+          required: true
