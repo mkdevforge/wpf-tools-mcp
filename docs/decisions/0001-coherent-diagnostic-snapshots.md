@@ -1,58 +1,51 @@
-# Coherent Diagnostic Snapshots
+# 0001: Capture related WPF diagnostics in one dispatcher callback
 
-## Status
-
-Accepted, 2026-07-29.
+- Status: Accepted and implemented
+- Date: 2026-07-29
 
 ## Context
 
-A WPF investigation often needs UIA properties, dependency properties,
-bindings, DataContext, layout, binding errors, tree context, and a screenshot.
-Calling each tool separately is slow and lets dispatcher work advance between
-WPF reads. A server-side session lock prevents another call in that session
-from interleaving, but it does not combine separate named-pipe requests into
-one application dispatcher turn. Different MCP sessions can also have separate
-server-side locks while sharing the same target process.
+A WPF investigation often needs bindings, `DataContext`, dependency properties,
+layout, tree context, UIA properties, and a screenshot. Separate MCP calls are
+separate observations. The session lock prevents other calls in that session
+from interleaving, but the target dispatcher can process application work
+between them.
+
+UIA reads and native screenshot capture cannot run as part of an in-process WPF
+dispatcher callback. A useful snapshot must expose that timing difference.
 
 ## Decision
 
-Add the read-only `capture_diagnostic_snapshot` tool. The caller selects a
-closed set of at most eight diagnostic sections and supplies one locator,
-element handle, or no element target for the window root. The operation pins
-the resolved session, process, HWND, element, and anchor backend once.
+Provide the read-only `capture_diagnostic_snapshot` tool. The caller chooses at
+most eight named sections and one target: a locator, an element ID, or the
+window root.
 
-All requested WPF sections are sent in one capability-gated agent request and
-captured in one `DispatcherPriority.Send` callback on the target HWND's
-dispatcher. Each section remains independently fallible and bounded. UIA
-properties and native screenshot capture remain separate phases because they
-cannot be made part of the WPF dispatcher callback. Absolute timestamps,
-offsets, capture groups, sources, and aggregate skew make that limitation
-explicit. The response never claims cross-backend atomicity when more than one
-phase contributes evidence.
+The server resolves and pins the session, process, HWND, element, and anchor
+backend once. It sends all requested WPF sections in one agent request, and the
+agent reads them in one `DispatcherPriority.Send` callback. Each section has
+its own status and limits.
 
-The input exposes only named read sections and fixed budgets. It accepts no
-method names, scripts, expressions, loops, arbitrary arguments, or action
-steps. Screenshots are file-backed, omit Base64, and disable auto-scroll.
-Depth, item, and node limits apply to section structures that expose those
-dimensions. The value-length and payload budgets cover section evidence while
-the shared target identity, its reusable handle and XPath, and screenshot paths
-remain exact.
+UIA properties and screenshots run in separate phases. The response records
+timestamps, sources, capture groups, offsets, and aggregate skew. It does not
+claim that evidence from different phases is atomic.
 
-## Interaction Sequences
-
-Short interaction sequences do not belong in this operation. Actions introduce
-side effects, interaction-policy checks, idempotency, retry timing, partial-step
-failure, and possible recovery semantics. Those concerns require a separate
-follow-up contract and must not be hidden inside a diagnostic snapshot. No
-interaction-sequence implementation is implied by this decision.
+The input accepts a fixed set of read operations and budgets. It does not accept
+scripts, expressions, arbitrary method calls, loops, or interaction steps.
+Screenshots are file-backed, omit Base64, and do not auto-scroll.
 
 ## Consequences
 
-- One MCP call replaces repeated diagnostic orchestration for a pinned target.
-- WPF evidence is coherent to one dispatcher turn; UIA and rendered pixels are
-  explicitly later or earlier observations.
-- Per-section failures do not discard successful evidence.
-- Shared depth, item, node, value-length, deadline, and total payload limits
-  keep the operation bounded.
-- Existing focused tools remain the right choice for a single section or for
-  specialist controls not present in the composite contract.
+- Related WPF evidence describes one dispatcher turn.
+- UIA and rendered pixels remain explicitly separate observations.
+- One failed section does not discard successful sections.
+- Shared deadlines and item, node, value, and payload limits bound the call.
+- Focused tools remain better for one section or for diagnostics-only controls
+  not present in the composite request.
+- Actions and recovery semantics remain separate from read-only capture.
+
+## Implementation
+
+- Tool entry point: `src/WpfToolsMcp.McpServer/Tools/DiagnosticTools.cs`
+- Coordinator: `src/WpfToolsMcp.Automation/DiagnosticSnapshotCoordinator.cs`
+- WPF capture: `src/WpfToolsMcp.Agent/WpfVisualTreeInspector.DiagnosticSnapshot.cs`
+- Tests: `tests/WpfToolsMcp.SnapshotTests/DiagnosticSnapshot*Tests.cs`
