@@ -208,7 +208,7 @@ dropped, coalesced, truncated, and terminal-event fields before treating an
 observation as complete. `trace_stop` and screenshot sequences write artifacts
 to disk rather than returning an unbounded event or image stream.
 
-For more detail, see the [tool guide](https://github.com/mkdevforge/wpf-tools-mcp/blob/main/docs/tool-guide.md).
+For more detail, see the [tool guide](docs/tool-guide.md).
 
 ## Errors and response limits
 
@@ -334,10 +334,10 @@ dotnet pack src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj -c Release -o artifacts
 | `tools/WpfToolsMcp.McpSmokeRunner` | black-box smoke runner |
 | `references/snoopwpf` | pinned Snoop submodule |
 
-The [architecture note](https://github.com/mkdevforge/wpf-tools-mcp/blob/main/docs/architecture.md)
+The [architecture note](docs/architecture.md)
 describes the process boundaries and recovery model. Accepted design decisions
 live under `docs/decisions/`. The current implementation constraints are listed
-in [known engineering risks](https://github.com/mkdevforge/wpf-tools-mcp/blob/main/docs/known-issues.md).
+in [known engineering risks](docs/known-issues.md).
 
 ## License
 
