@@ -389,6 +389,16 @@ public sealed class InspectionResponseMetadataWpfTests
                     PropertyPaths: tooManyPaths),
                 CancellationToken.None));
             Assert.That(exception!.Message, Does.Contain("supports at most 32 paths"));
+
+            var depthException = Assert.Throws<ArgumentException>(() => WpfVisualTreeInspector.GetDataContext(
+                ownerId,
+                new GetDataContextRequest(
+                    WindowHandle: GetWindowHandle(window),
+                    Locator: new ElementLocator(AutomationId: "DataContextTarget"),
+                    MaxDepth: 0,
+                    PropertyPaths: ["Current"]),
+                CancellationToken.None));
+            Assert.That(depthException!.Message, Does.Contain("maxDepth of at least 1"));
         }
         finally
         {

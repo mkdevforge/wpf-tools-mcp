@@ -4271,6 +4271,14 @@ internal static partial class WpfVisualTreeInspector
             return Array.Empty<string>();
         }
 
+        if (maxDepth < 1)
+        {
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: propertyPaths requires maxDepth of at least 1.",
+                nameof(GetDataContextRequest.MaxDepth));
+        }
+
         if (requestedPaths.Count > DataContextPropertyPathLimits.MaxPaths)
         {
             throw AgentToolError.InvalidArgument(
@@ -4279,7 +4287,7 @@ internal static partial class WpfVisualTreeInspector
                 nameof(GetDataContextRequest.PropertyPaths));
         }
 
-        var maxSegments = Math.Clamp(maxDepth, 1, DataContextPropertyPathLimits.MaxSegments);
+        var maxSegments = Math.Min(maxDepth, DataContextPropertyPathLimits.MaxSegments);
         var normalized = new List<string>(requestedPaths.Count);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var requestedPath in requestedPaths)
