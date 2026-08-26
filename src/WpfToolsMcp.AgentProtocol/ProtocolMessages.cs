@@ -22,6 +22,8 @@ public static class AgentProtocolCapabilities
     public const string GetCapabilitiesMethod = "capabilities";
     public const string ResolveElementDetailed = "wpf/resolve_element_detailed";
     public const string FindElementsDiscoveryCounts = "wpf/find_elements:discovery-counts";
+    public const string GetComputedPropertiesBatch = "wpf/get_computed_properties_batch:v1";
+    public const string GetDataContextPropertyPaths = "wpf/get_data_context:property-paths-v1";
     public const string GetLayoutContext = "wpf/get_layout_context";
     public const string CaptureDiagnosticSnapshot = "wpf/capture_diagnostic_snapshot:v1";
     public const string GetComputedPropertyProvenance = "wpf/get_computed_properties:provenance-v1";
@@ -39,6 +41,8 @@ public static class AgentProtocolCapabilities
     [
         ResolveElementDetailed,
         FindElementsDiscoveryCounts,
+        GetComputedPropertiesBatch,
+        GetDataContextPropertyPaths,
         GetLayoutContext,
         CaptureDiagnosticSnapshot,
         GetComputedPropertyProvenance,

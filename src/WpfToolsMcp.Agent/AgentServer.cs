@@ -505,6 +505,21 @@ internal static class AgentServer
                             Ok: true,
                             Result: JsonSerializer.SerializeToNode(response, JsonOptions));
                     }, request.Id, cancellationToken);
+                case AgentProtocolCapabilities.GetComputedPropertiesBatch:
+                    return await RunOnUiAsync(() =>
+                    {
+                        var typedRequest = request.Params?.Deserialize<GetComputedPropertiesBatchRequest>(JsonOptions)
+                            ?? new GetComputedPropertiesBatchRequest();
+
+                        var response = WpfVisualTreeInspector.GetComputedPropertiesBatch(
+                            ownerId,
+                            typedRequest,
+                            cancellationToken);
+                        return new AgentResponse(
+                            request.Id,
+                            Ok: true,
+                            Result: JsonSerializer.SerializeToNode(response, JsonOptions));
+                    }, request.Id, cancellationToken);
                 case AgentProtocolCapabilities.GetLayoutContext:
                     return await RunOnUiAsync(() =>
                     {

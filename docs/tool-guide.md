@@ -81,8 +81,8 @@ then inspect a subtree if the first response is too broad.
 
 Use `find_elements` when you know some identity text or control type. Search is
 bounded and returns stable ordering, match counts, scan counts, truncation, and
-optional element IDs. It is usually cheaper and easier to interpret than a deep
-tree dump.
+optional element IDs. Pass `root` to keep the scan inside a known subtree. It is
+usually cheaper and easier to interpret than a deep tree dump.
 
 `get_element_properties` reads bounded UIA properties and supported patterns.
 Use the WPF-specific tools for data that UIA cannot expose:
@@ -94,6 +94,7 @@ Use the WPF-specific tools for data that UIA cannot expose:
 | What validation error is active? | `get_validation_errors` |
 | What object is behind this view? | `get_data_context` |
 | Where did this dependency-property value come from? | `get_computed_properties` |
+| What are the same properties across several elements? | `get_computed_properties_batch` |
 | Why is this element clipped, offset, or allocated this size? | `get_layout_context` |
 | Which style or template is applied? | `get_style_chain`, `get_template_info` in `diagnostics` |
 | Which WPF elements lack useful automation peers? | `uia_coverage_report` in `diagnostics` |
@@ -102,6 +103,13 @@ WPF getters, binding APIs, command `CanExecute`, UIA providers, and value
 formatters can run application code. These tools are read-only in the sense that
 they do not intentionally invoke a command or send input. They cannot promise
 that target-defined getters are free of side effects.
+
+For repeated controls, call `find_elements` once and pass the returned WPF
+element IDs to `get_computed_properties_batch`. The batch reports its applied
+element and property limits, scanned and returned counts, and truncation.
+For a nested view-model value, pass dotted `propertyPaths` to `get_data_context`
+instead of serializing the surrounding object graph. Both operations have hard
+request limits and reject malformed or unbounded input.
 
 ## Use locators deliberately
 

@@ -958,6 +958,7 @@ public sealed partial class AutomationController
         bool includeNulls = false,
         bool includeFrameworkProperties = false,
         IReadOnlyList<string>? propertyAllowList = null,
+        IReadOnlyList<string>? propertyPaths = null,
         CancellationToken cancellationToken = default)
     {
         var trace = BeginTraceSpan("get_data_context");
@@ -966,7 +967,13 @@ public sealed partial class AutomationController
         var target = PrepareWpfAgentTarget("get_data_context", locator, elementId, windowHandle);
 
         var client = await EnsureAgentConnectedAsync(cancellationToken);
-        EnsureInspectionResponseMetadataCapability(GetAgentCapabilities(client));
+        var capabilities = GetAgentCapabilities(client);
+        EnsureInspectionResponseMetadataCapability(capabilities);
+        if (propertyPaths is { Count: > 0 })
+        {
+            EnsureDataContextPropertyPathsCapability(capabilities);
+        }
+
         var request = new GetDataContextRequest(
             WindowHandle: target.WindowHandle,
             Locator: target.Locator,
@@ -977,7 +984,8 @@ public sealed partial class AutomationController
             MaxStringLength: maxStringLength,
             IncludeNulls: includeNulls,
             IncludeFrameworkProperties: includeFrameworkProperties,
-            PropertyAllowList: propertyAllowList);
+            PropertyAllowList: propertyAllowList,
+            PropertyPaths: propertyPaths);
 
         var fallbackRequest = target.RecoveryLocator is null
             ? null
@@ -1107,6 +1115,189 @@ public sealed partial class AutomationController
         {
             trace?.Dispose();
         }
+    }
+
+    public async Task<GetComputedPropertiesBatchResponse> GetComputedPropertiesBatchAsync(
+        IReadOnlyList<string> elementIds,
+        IReadOnlyList<string> propertyNames,
+        long? windowHandle = null,
+        int maxElements = 128,
+        int maxPropertiesPerElement = 16,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(elementIds);
+        ArgumentNullException.ThrowIfNull(propertyNames);
+        var trace = BeginTraceSpan("get_computed_properties_batch");
+        try
+        {
+            if (elementIds.Count is 0 or > ComputedPropertiesBatchLimits.MaxInputElements)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(elementIds),
+                    $"Provide between 1 and {ComputedPropertiesBatchLimits.MaxInputElements} element IDs.");
+            }
+
+            if (propertyNames.Count is 0 or > ComputedPropertiesBatchLimits.MaxInputProperties)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(propertyNames),
+                    $"Provide between 1 and {ComputedPropertiesBatchLimits.MaxInputProperties} property names.");
+            }
+
+            var publicElementIds = NormalizeDistinctBatchValues(elementIds, nameof(elementIds));
+            var normalizedPropertyNames = NormalizeDistinctBatchValues(propertyNames, nameof(propertyNames));
+            var appliedMaxElements = Math.Clamp(maxElements, 1, ComputedPropertiesBatchLimits.MaxElements);
+            var selectedPublicElementIds = publicElementIds.Take(appliedMaxElements).ToArray();
+            var handles = selectedPublicElementIds.Select(RequireHandle).ToArray();
+            if (handles.Any(handle => handle.Backend != InspectionBackend.Wpf))
+            {
+                throw new InvalidOperationException(
+                    "get_computed_properties_batch requires WPF element IDs from find_elements or resolve_element.");
+            }
+
+            var effectiveWindowHandle = handles[0].WindowHandle;
+            if (handles.Any(handle => handle.WindowHandle != effectiveWindowHandle))
+            {
+                throw new ArgumentException("All elementIds must belong to the same window.", nameof(elementIds));
+            }
+
+            if (windowHandle is long requestedWindowHandle && requestedWindowHandle != effectiveWindowHandle)
+            {
+                throw new ArgumentException("windowHandle does not match the elementId window.", nameof(windowHandle));
+            }
+
+            var agentElementIds = handles
+                .Select(handle => handle.WpfAgentElementId)
+                .ToArray();
+            if (agentElementIds.Any(string.IsNullOrWhiteSpace))
+            {
+                throw new InvalidOperationException(
+                    "stale_element: get_computed_properties_batch requires current WPF element handles. Call find_elements or resolve_element again.");
+            }
+
+            var normalizedAgentElementIds = agentElementIds
+                .Select(elementId => elementId!)
+                .ToArray();
+
+            var client = await EnsureAgentConnectedAsync(cancellationToken).ConfigureAwait(false);
+            EnsureComputedPropertiesBatchCapability(GetAgentCapabilities(client));
+            GetComputedPropertiesBatchResponse response;
+            try
+            {
+                response = await client.CallAsync<GetComputedPropertiesBatchResponse>(
+                    AgentProtocolCapabilities.GetComputedPropertiesBatch,
+                    new GetComputedPropertiesBatchRequest(
+                        WindowHandle: effectiveWindowHandle,
+                        ElementIds: normalizedAgentElementIds,
+                        PropertyNames: normalizedPropertyNames,
+                        MaxElements: maxElements,
+                        MaxPropertiesPerElement: maxPropertiesPerElement,
+                        IncludeSources: true,
+                        ValueFormat: "string"),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsWpfAgentStaleOrNotFound(ex))
+            {
+                throw new InvalidOperationException(
+                    "stale_element: one or more batch element IDs are no longer available. Call find_elements or resolve_element again.",
+                    ex);
+            }
+
+            if (response.Results.Count != selectedPublicElementIds.Length ||
+                response.ScannedElements != response.Results.Count ||
+                response.ReturnedElements != response.Results.Count)
+            {
+                throw new InvalidOperationException(
+                    "agent_protocol_error: get_computed_properties_batch returned inconsistent element counts.");
+            }
+
+            var normalizedResults = new List<GetComputedPropertiesResponse>(response.Results.Count);
+            for (var index = 0; index < response.Results.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (index >= selectedPublicElementIds.Length)
+                {
+                    throw new InvalidOperationException("Agent returned more batch results than requested elements.");
+                }
+
+                var result = response.Results[index];
+                if (!string.Equals(
+                        result.Element.ElementIdWpf,
+                        normalizedAgentElementIds[index],
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "agent_protocol_error: get_computed_properties_batch returned elements out of order.");
+                }
+
+                var element = await StripAgentElementIdAsync(
+                    client,
+                    result.Element,
+                    selectedPublicElementIds[index]).ConfigureAwait(false);
+                normalizedResults.Add(result with
+                {
+                    Element = element with { ElementId = selectedPublicElementIds[index] },
+                    WindowHandleUsed = effectiveWindowHandle
+                });
+            }
+
+            var truncatedReasons = response.TruncatedReasons?.ToList()
+                ?? (response.TruncatedReason is null ? [] : [response.TruncatedReason]);
+            if (publicElementIds.Count > selectedPublicElementIds.Length &&
+                !truncatedReasons.Contains("maxElements", StringComparer.Ordinal))
+            {
+                truncatedReasons.Insert(0, "maxElements");
+            }
+
+            response = response with
+            {
+                Results = normalizedResults,
+                RequestedElements = publicElementIds.Count,
+                MaxElements = appliedMaxElements,
+                Truncated = truncatedReasons.Count > 0,
+                TruncatedReason = truncatedReasons.FirstOrDefault(),
+                TruncatedReasons = truncatedReasons.Count > 0 ? truncatedReasons : null,
+                WindowHandleUsed = effectiveWindowHandle
+            };
+            trace?.SetSummary(
+                $"elements={response.ReturnedElements}/{response.RequestedElements} " +
+                $"properties={response.RequestedProperties} truncated={response.Truncated}");
+            return response;
+        }
+        catch (Exception ex)
+        {
+            trace?.SetError(ex);
+            throw;
+        }
+        finally
+        {
+            trace?.Dispose();
+        }
+    }
+
+    private static IReadOnlyList<string> NormalizeDistinctBatchValues(
+        IReadOnlyList<string> values,
+        string parameterName)
+    {
+        var normalized = new List<string>(values.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var rawValue in values)
+        {
+            if (string.IsNullOrWhiteSpace(rawValue))
+            {
+                throw new ArgumentException($"{parameterName} cannot contain blank values.", parameterName);
+            }
+
+            var value = rawValue.Trim();
+            if (!seen.Add(value))
+            {
+                throw new ArgumentException($"{parameterName} cannot contain duplicates.", parameterName);
+            }
+
+            normalized.Add(value);
+        }
+
+        return normalized;
     }
 
     internal readonly record struct PreparedAgentPropertyNames(
@@ -1610,6 +1801,16 @@ public sealed partial class AutomationController
             "agent_capability_unavailable: truthful inspection response metadata requires the current WPF agent. " +
             "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
 
+    internal static InvalidOperationException CreateComputedPropertiesBatchCapabilityException() =>
+        new(
+            "agent_capability_unavailable: get_computed_properties_batch requires the current WPF agent. " +
+            "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
+
+    internal static InvalidOperationException CreateDataContextPropertyPathsCapabilityException() =>
+        new(
+            "agent_capability_unavailable: get_data_context with propertyPaths requires the current WPF agent. " +
+            "Restart the target application, start a new MCP session, and attach again so the current agent can be injected.");
+
     internal static void EnsureInspectionResponseMetadataCapability(AgentCapabilitiesResponse? capabilities)
     {
         if (capabilities is null ||
@@ -1618,6 +1819,28 @@ public sealed partial class AutomationController
                 StringComparer.Ordinal))
         {
             throw CreateInspectionResponseMetadataCapabilityException();
+        }
+    }
+
+    internal static void EnsureComputedPropertiesBatchCapability(AgentCapabilitiesResponse? capabilities)
+    {
+        if (capabilities is null ||
+            !capabilities.Capabilities.Contains(
+                AgentProtocolCapabilities.GetComputedPropertiesBatch,
+                StringComparer.Ordinal))
+        {
+            throw CreateComputedPropertiesBatchCapabilityException();
+        }
+    }
+
+    internal static void EnsureDataContextPropertyPathsCapability(AgentCapabilitiesResponse? capabilities)
+    {
+        if (capabilities is null ||
+            !capabilities.Capabilities.Contains(
+                AgentProtocolCapabilities.GetDataContextPropertyPaths,
+                StringComparer.Ordinal))
+        {
+            throw CreateDataContextPropertyPathsCapabilityException();
         }
     }
 
