@@ -1650,7 +1650,8 @@ public sealed record GetDataContextRequest(
     int MaxStringLength = 2000,
     bool IncludeNulls = false,
     bool IncludeFrameworkProperties = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? PropertyAllowList = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? PropertyAllowList = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? PropertyPaths = null);
 
 public sealed record GetDataContextResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DataContextType,
@@ -1688,6 +1689,30 @@ public sealed record GetComputedPropertiesRequest(
     string ValueFormat = "string",
     bool IncludeProvenance = false,
     int MaxProvenanceCandidates = 20);
+
+public sealed record GetComputedPropertiesBatchRequest(
+    long? WindowHandle = null,
+    IReadOnlyList<string>? ElementIds = null,
+    IReadOnlyList<string>? PropertyNames = null,
+    int MaxElements = 128,
+    int MaxPropertiesPerElement = 16,
+    bool IncludeSources = true,
+    string ValueFormat = "string");
+
+public static class ComputedPropertiesBatchLimits
+{
+    public const int MaxInputElements = 500;
+    public const int MaxInputProperties = 200;
+    public const int MaxElements = 200;
+    public const int MaxPropertiesPerElement = 50;
+}
+
+public static class DataContextPropertyPathLimits
+{
+    public const int MaxPaths = 32;
+    public const int MaxSegments = 16;
+    public const int MaxPathLength = 512;
+}
 
 public sealed record ComputedPropertyInfo(
     string Name,
@@ -1929,6 +1954,21 @@ public sealed record GetComputedPropertiesResponse(
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? TruncatedReasons { get; init; }
+}
+
+public sealed record GetComputedPropertiesBatchResponse(
+    IReadOnlyList<GetComputedPropertiesResponse> Results,
+    int RequestedElements,
+    int RequestedProperties,
+    int ScannedElements,
+    int ReturnedElements,
+    int MaxElements,
+    int MaxPropertiesPerElement,
+    bool Truncated,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TruncatedReason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? TruncatedReasons = null)
+{
+    public long WindowHandleUsed { get; init; }
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

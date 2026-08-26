@@ -342,6 +342,61 @@ public sealed class InspectionResponseMetadataWpfTests
     }
 
     [Test]
+    public void Data_context_property_paths_cache_shared_getters_and_report_unresolved_paths()
+    {
+        var ownerId = $"data-context-paths-{Guid.NewGuid():N}";
+        var model = new CountingDataContextModel();
+        var target = new Border
+        {
+            Name = "DataContextTarget",
+            Width = 100,
+            Height = 30,
+            DataContext = model
+        };
+        AutomationProperties.SetAutomationId(target, "DataContextTarget");
+        var window = CreateWindow(target);
+
+        try
+        {
+            ShowAndLayout(window);
+            var response = WpfVisualTreeInspector.GetDataContext(
+                ownerId,
+                new GetDataContextRequest(
+                    WindowHandle: GetWindowHandle(window),
+                    Locator: new ElementLocator(AutomationId: "DataContextTarget"),
+                    Mode: DataContextMode.Summary,
+                    MaxDepth: 2,
+                    PropertyPaths: ["Current.Kind", "Current.Key", "Absent.Kind", "Unknown.Value"]),
+                CancellationToken.None);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(model.CurrentReads, Is.EqualTo(1));
+                Assert.That(response.Data?["Current"]?["Kind"]?.GetValue<string>(), Is.EqualTo("Primary"));
+                Assert.That(response.Data?["Current"]?["Key"]?.GetValue<string>(), Is.EqualTo("item-7"));
+                Assert.That(response.Warnings, Has.Some.StartsWith("property_path_null:"));
+                Assert.That(response.Warnings, Has.Some.StartsWith("property_path_not_found:"));
+            });
+
+            var tooManyPaths = Enumerable.Range(0, DataContextPropertyPathLimits.MaxPaths + 1)
+                .Select(index => $"Property{index}")
+                .ToArray();
+            var exception = Assert.Throws<ArgumentException>(() => WpfVisualTreeInspector.GetDataContext(
+                ownerId,
+                new GetDataContextRequest(
+                    WindowHandle: GetWindowHandle(window),
+                    Locator: new ElementLocator(AutomationId: "DataContextTarget"),
+                    PropertyPaths: tooManyPaths),
+                CancellationToken.None));
+            Assert.That(exception!.Message, Does.Contain("supports at most 32 paths"));
+        }
+        finally
+        {
+            CloseAndRelease(window, ownerId);
+        }
+    }
+
+    [Test]
     public void Style_and_template_nested_collections_report_one_item_lookahead()
     {
         const string templateXaml = """
@@ -626,6 +681,31 @@ public sealed class InspectionResponseMetadataWpfTests
     private sealed class DataContextChild
     {
         public string Value { get; set; } = string.Empty;
+    }
+
+    private sealed class CountingDataContextModel
+    {
+        private readonly CountingDataContextChild _current = new();
+
+        public int CurrentReads { get; private set; }
+
+        public CountingDataContextChild Current
+        {
+            get
+            {
+                CurrentReads++;
+                return _current;
+            }
+        }
+
+        public CountingDataContextChild? Absent => null;
+    }
+
+    private sealed class CountingDataContextChild
+    {
+        public string Kind => "Primary";
+
+        public string Key => "item-7";
     }
 
     private sealed class ThrowingDataContextDictionary : Dictionary<object, string>

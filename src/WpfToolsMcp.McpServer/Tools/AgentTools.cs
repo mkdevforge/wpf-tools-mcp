@@ -170,6 +170,7 @@ public static class AgentTools
         [Description("Include null values")] bool includeNulls = false,
         [Description("Include framework object properties (WPF/Dispatcher/etc) in summary mode")] bool includeFrameworkProperties = false,
         [Description("Optional root property allowlist (summary mode)")] string[]? propertyAllowList = null,
+        [Description("Optional dotted property paths (summary mode; hard limit 32, at most maxDepth segments each)")] string[]? propertyPaths = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -187,6 +188,7 @@ public static class AgentTools
                     includeNulls: includeNulls,
                     includeFrameworkProperties: includeFrameworkProperties,
                     propertyAllowList: propertyAllowList,
+                    propertyPaths: propertyPaths,
                     cancellationToken: cancellationToken),
                 cancellationToken);
         });
@@ -225,6 +227,30 @@ public static class AgentTools
                     includeProvenance: includeProvenance,
                     maxProvenanceCandidates: maxProvenanceCandidates,
                     cancellationToken: cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "get_computed_properties_batch", UseStructuredContent = true), Description("Inspect selected dependency properties for a bounded set of WPF element IDs in one agent call.")]
+    public static Task<GetComputedPropertiesBatchResponse> GetComputedPropertiesBatch(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("WPF element IDs from find_elements or resolve_element; hard limit 500 input IDs")] string[] elementIds,
+        [Description("Dependency property names to inspect; hard limit 200 input names")] string[] propertyNames,
+        [Description("Native window handle; all IDs must belong to this window")] long? windowHandle = null,
+        [Description("Maximum elements inspected; hard limit 200")] int maxElements = 128,
+        [Description("Maximum properties inspected per element; hard limit 50")] int maxPropertiesPerElement = 16,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, _) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.GetComputedPropertiesBatchAsync(
+                    elementIds,
+                    propertyNames,
+                    windowHandle,
+                    maxElements,
+                    maxPropertiesPerElement,
+                    cancellationToken),
                 cancellationToken);
         });
 

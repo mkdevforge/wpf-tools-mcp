@@ -115,6 +115,32 @@ public sealed class InspectionResponseContractTests
         });
     }
 
+    [Test]
+    public void Bounded_inspection_features_require_explicit_agent_capabilities()
+    {
+        var previousAgent = new AgentCapabilitiesResponse(
+            AgentProtocolCapabilities.CurrentProtocolVersion,
+            [AgentProtocolCapabilities.InspectionResponseMetadata]);
+        var currentAgent = new AgentCapabilitiesResponse(
+            AgentProtocolCapabilities.CurrentProtocolVersion,
+            AgentProtocolCapabilities.Current);
+
+        var batchException = Assert.Throws<InvalidOperationException>(
+            () => AutomationController.EnsureComputedPropertiesBatchCapability(previousAgent));
+        var pathException = Assert.Throws<InvalidOperationException>(
+            () => AutomationController.EnsureDataContextPropertyPathsCapability(previousAgent));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(batchException!.Message, Does.StartWith("agent_capability_unavailable:"));
+            Assert.That(pathException!.Message, Does.StartWith("agent_capability_unavailable:"));
+            Assert.DoesNotThrow(
+                () => AutomationController.EnsureComputedPropertiesBatchCapability(currentAgent));
+            Assert.DoesNotThrow(
+                () => AutomationController.EnsureDataContextPropertyPathsCapability(currentAgent));
+        });
+    }
+
     private static TakeScreenshotResponse CreateScreenshotResponse() =>
         new(
             Path: "capture.png",

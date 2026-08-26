@@ -307,6 +307,7 @@ public static class CoreInspectionTools
         SessionManager sessions,
         [Description("Session ID")] string sessionId,
         [Description("Search query")] CoreFindQuery query,
+        [Description("Optional root locator for subtree")] CoreElementLocator? root = null,
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Only include visible elements")] bool visibleOnly = true,
         [Description("Maximum returned matches")] int maxResults = 25,
@@ -319,7 +320,7 @@ public static class CoreInspectionTools
                 () => automation.FindElementsAsync(
                     InspectionBackend.Auto,
                     effectiveWindowHandle,
-                    root: null,
+                    root?.ToElementLocator(),
                     query.ToFindElementsQuery(),
                     visibleOnly,
                     includeOffViewport: true,
@@ -526,6 +527,7 @@ public static class CoreWpfDiagnosticsTools
         [Description("Optional native window handle")] long? windowHandle = null,
         [Description("Maximum object graph depth")] int maxDepth = 2,
         [Description("Optional root property allowlist")] string[]? properties = null,
+        [Description("Optional dotted property paths; at most 32 paths and maxDepth segments per path")] string[]? propertyPaths = null,
         CancellationToken cancellationToken = default) =>
         McpToolErrors.RunAsync(() =>
         {
@@ -543,6 +545,7 @@ public static class CoreWpfDiagnosticsTools
                     includeNulls: false,
                     includeFrameworkProperties: false,
                     propertyAllowList: properties,
+                    propertyPaths: propertyPaths,
                     cancellationToken),
                 cancellationToken);
         });
@@ -577,6 +580,30 @@ public static class CoreWpfDiagnosticsTools
                     maxProperties: Math.Min(propertyNames.Length, 200),
                     valueFormat: "string",
                     cancellationToken: cancellationToken),
+                cancellationToken);
+        });
+
+    [McpServerTool(Name = "get_computed_properties_batch", UseStructuredContent = true), Description("Inspect selected dependency properties for a bounded set of WPF element IDs in one agent call.")]
+    public static Task<GetComputedPropertiesBatchResponse> GetComputedPropertiesBatch(
+        SessionManager sessions,
+        [Description("Session ID")] string sessionId,
+        [Description("WPF element IDs from find_elements or resolve_element; hard limit 500 input IDs")] string[] elementIds,
+        [Description("Dependency property names to inspect; hard limit 200 input names")] string[] propertyNames,
+        [Description("Optional native window handle; all IDs must belong to this window")] long? windowHandle = null,
+        [Description("Maximum elements inspected; hard limit 200")] int maxElements = 128,
+        [Description("Maximum properties inspected per element; hard limit 50")] int maxPropertiesPerElement = 16,
+        CancellationToken cancellationToken = default) =>
+        McpToolErrors.RunAsync(() =>
+        {
+            var (automation, _) = sessions.GetController(sessionId, windowHandle);
+            return automation.RunExclusiveAsync(
+                () => automation.GetComputedPropertiesBatchAsync(
+                    elementIds,
+                    propertyNames,
+                    windowHandle,
+                    maxElements,
+                    maxPropertiesPerElement,
+                    cancellationToken),
                 cancellationToken);
         });
 

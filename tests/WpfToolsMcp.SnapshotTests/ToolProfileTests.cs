@@ -26,6 +26,7 @@ public sealed class ToolProfileTests
         "get_binding_info",
         "get_command_info",
         "get_computed_properties",
+        "get_computed_properties_batch",
         "get_data_context",
         "get_element_properties",
         "get_layout_context",
@@ -207,6 +208,18 @@ public sealed class ToolProfileTests
             "scannedProperties",
             "scanComplete",
             "truncatedReasons");
+        AssertOutputContains(
+            tools["get_computed_properties_batch"],
+            "results",
+            "requestedElements",
+            "requestedProperties",
+            "scannedElements",
+            "returnedElements",
+            "maxElements",
+            "maxPropertiesPerElement",
+            "truncated",
+            "truncatedReasons",
+            "windowHandleUsed");
         AssertOutputContains(tools["get_layout_context"], "windowHandleUsed");
 
         if (!string.Equals(toolProfile, "diagnostics", StringComparison.Ordinal))
@@ -380,7 +393,7 @@ public sealed class ToolProfileTests
         Assert.That(GetInputPropertyNames(tools["get_visual_tree"]), Is.EqualTo(
             new[] { "depth", "maxNodes", "root", "sessionId", "visibleOnly", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["find_elements"]), Is.EqualTo(
-            new[] { "maxResults", "query", "returnFields", "sessionId", "visibleOnly", "windowHandle" }));
+            new[] { "maxResults", "query", "returnFields", "root", "sessionId", "visibleOnly", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_uia_tree"]), Is.EqualTo(
             new[] { "depth", "maxNodes", "root", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_element_properties"]), Is.EqualTo(
@@ -392,9 +405,11 @@ public sealed class ToolProfileTests
         Assert.That(GetInputPropertyNames(tools["get_validation_errors"]), Is.EqualTo(
             new[] { "depth", "rootXPath", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_data_context"]), Is.EqualTo(
-            new[] { "elementId", "locator", "maxDepth", "properties", "sessionId", "windowHandle" }));
+            new[] { "elementId", "locator", "maxDepth", "properties", "propertyPaths", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_computed_properties"]), Is.EqualTo(
             new[] { "elementId", "locator", "propertyNames", "sessionId", "windowHandle" }));
+        Assert.That(GetInputPropertyNames(tools["get_computed_properties_batch"]), Is.EqualTo(
+            new[] { "elementIds", "maxElements", "maxPropertiesPerElement", "propertyNames", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["get_layout_context"]), Is.EqualTo(
             new[] { "elementId", "locator", "sessionId", "windowHandle" }));
         Assert.That(GetInputPropertyNames(tools["capture_diagnostic_snapshot"]), Is.EqualTo(
@@ -451,6 +466,7 @@ public sealed class ToolProfileTests
                      "get_validation_errors",
                      "get_data_context",
                      "get_computed_properties",
+                     "get_computed_properties_batch",
                      "get_layout_context",
                      "capture_diagnostic_snapshot",
                      "click_element",
@@ -1611,6 +1627,125 @@ public sealed class ToolProfileTests
             });
             Assert.That(computed.Element.AutomationId, Is.EqualTo("BindingErrors_OkTextBox"));
             Assert.That(computed.Properties.Select(p => p.Name), Does.Contain("Text"));
+        }
+        finally
+        {
+            await CloseSessionBestEffortAsync(mcp, launch.SessionId);
+        }
+    }
+
+    [Test]
+    public async Task Default_profile_supports_subtree_search_and_batch_property_inspection()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(
+            serverExe,
+            toolProfile: null,
+            environmentVariables: new Dictionary<string, string?> { ["WPF_TOOLS_MCP_TOOL_PROFILE"] = null });
+
+        var launch = await LaunchPrimaryTestAppAsync(mcp);
+        try
+        {
+            var subtreeMatches = await mcp.CallToolAsync<FindElementsResponse>("find_elements", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["root"] = new Dictionary<string, object?> { ["automationId"] = "XPathDemo_Right_Panel" },
+                ["query"] = new Dictionary<string, object?> { ["type"] = "Button" },
+                ["maxResults"] = 10
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(subtreeMatches.BackendUsed, Is.EqualTo(InspectionBackend.Wpf));
+                Assert.That(subtreeMatches.ReturnedMatches, Is.EqualTo(1));
+                Assert.That(subtreeMatches.Matches[0].AutomationId, Is.EqualTo("XPathDemo_Right_Button1"));
+            });
+
+            var matches = await mcp.CallToolAsync<FindElementsResponse>("find_elements", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["query"] = new Dictionary<string, object?> { ["type"] = "Button" },
+                ["maxResults"] = 3
+            });
+            var elementIds = matches.Matches
+                .Select(match => match.ElementId)
+                .Where(elementId => !string.IsNullOrWhiteSpace(elementId))
+                .Select(elementId => elementId!)
+                .ToArray();
+            Assert.That(elementIds, Has.Length.EqualTo(3));
+
+            var batch = await mcp.CallToolAsync<GetComputedPropertiesBatchResponse>("get_computed_properties_batch", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["elementIds"] = elementIds,
+                ["propertyNames"] = new[] { "Content", "IsEnabled" },
+                ["maxElements"] = 2,
+                ["maxPropertiesPerElement"] = 1
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(batch.RequestedElements, Is.EqualTo(3));
+                Assert.That(batch.RequestedProperties, Is.EqualTo(2));
+                Assert.That(batch.ScannedElements, Is.EqualTo(2));
+                Assert.That(batch.ReturnedElements, Is.EqualTo(2));
+                Assert.That(batch.MaxElements, Is.EqualTo(2));
+                Assert.That(batch.MaxPropertiesPerElement, Is.EqualTo(1));
+                Assert.That(batch.Truncated, Is.True);
+                Assert.That(batch.TruncatedReasons, Is.EquivalentTo(new[] { "maxElements", "maxPropertiesPerElement" }));
+                Assert.That(batch.Results.Select(result => result.Element.ElementId),
+                    Is.EqualTo(elementIds.Take(2)));
+                Assert.That(batch.Results.All(result => result.Properties.Count <= 1), Is.True);
+            });
+
+            var boundedBeforeResolution = await mcp.CallToolAsync<GetComputedPropertiesBatchResponse>("get_computed_properties_batch", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["elementIds"] = new[] { elementIds[0], "not-inspected-because-of-limit" },
+                ["propertyNames"] = new[] { "IsEnabled" },
+                ["maxElements"] = 1
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(boundedBeforeResolution.RequestedElements, Is.EqualTo(2));
+                Assert.That(boundedBeforeResolution.ReturnedElements, Is.EqualTo(1));
+                Assert.That(boundedBeforeResolution.Results[0].Element.ElementId, Is.EqualTo(elementIds[0]));
+                Assert.That(boundedBeforeResolution.TruncatedReasons, Does.Contain("maxElements"));
+            });
+        }
+        finally
+        {
+            await CloseSessionBestEffortAsync(mcp, launch.SessionId);
+        }
+    }
+
+    [Test]
+    public async Task Default_profile_supports_targeted_data_context_paths()
+    {
+        var serverExe = McpServerPaths.FindMcpServerExecutable();
+        await using var mcp = await McpTestContext.StartAsync(
+            serverExe,
+            toolProfile: null,
+            environmentVariables: new Dictionary<string, string?> { ["WPF_TOOLS_MCP_TOOL_PROFILE"] = null });
+
+        var launch = await LaunchAppAsync(mcp, TestAppPaths.FindDataGridTestAppExecutable());
+        try
+        {
+            var dataContext = await mcp.CallToolAsync<GetDataContextResponse>("get_data_context", new Dictionary<string, object?>
+            {
+                ["sessionId"] = launch.SessionId,
+                ["locator"] = new Dictionary<string, object?> { ["automationId"] = "DataGrid_PeopleGrid" },
+                ["maxDepth"] = 2,
+                ["propertyPaths"] = new[] { "People.Count" }
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(dataContext.DataContextType, Does.Contain("DataGridViewModel"));
+                Assert.That(dataContext.Data?["People"]?["Count"]?.GetValue<int>(), Is.EqualTo(4));
+                Assert.That(dataContext.Warnings, Is.Null.Or.Empty);
+            });
         }
         finally
         {

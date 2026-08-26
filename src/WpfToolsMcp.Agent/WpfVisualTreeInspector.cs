@@ -4262,6 +4262,233 @@ internal static partial class WpfVisualTreeInspector
         }
     }
 
+    private static IReadOnlyList<string> NormalizeDataContextPropertyPaths(
+        IReadOnlyList<string>? requestedPaths,
+        int maxDepth)
+    {
+        if (requestedPaths is null || requestedPaths.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        if (requestedPaths.Count > DataContextPropertyPathLimits.MaxPaths)
+        {
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                $"invalid_request: propertyPaths supports at most {DataContextPropertyPathLimits.MaxPaths} paths.",
+                nameof(GetDataContextRequest.PropertyPaths));
+        }
+
+        var maxSegments = Math.Clamp(maxDepth, 1, DataContextPropertyPathLimits.MaxSegments);
+        var normalized = new List<string>(requestedPaths.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var requestedPath in requestedPaths)
+        {
+            if (string.IsNullOrWhiteSpace(requestedPath))
+            {
+                throw AgentToolError.InvalidArgument(
+                    "invalid_request",
+                    "invalid_request: propertyPaths cannot contain blank values.",
+                    nameof(GetDataContextRequest.PropertyPaths));
+            }
+
+            var path = requestedPath.Trim();
+            if (path.Length > DataContextPropertyPathLimits.MaxPathLength || !IsDottedIdentifierPath(path))
+            {
+                throw AgentToolError.InvalidArgument(
+                    "invalid_request",
+                    $"invalid_request: property path '{path}' must contain at most {DataContextPropertyPathLimits.MaxSegments} dotted identifiers and {DataContextPropertyPathLimits.MaxPathLength} characters.",
+                    nameof(GetDataContextRequest.PropertyPaths));
+            }
+
+            if (path.Split('.').Length > maxSegments)
+            {
+                throw AgentToolError.InvalidArgument(
+                    "invalid_request",
+                    $"invalid_request: property path '{path}' exceeds maxDepth={maxDepth}.",
+                    nameof(GetDataContextRequest.PropertyPaths));
+            }
+
+            if (seen.Add(path))
+            {
+                normalized.Add(path);
+            }
+        }
+
+        for (var left = 0; left < normalized.Count; left++)
+        {
+            for (var right = left + 1; right < normalized.Count; right++)
+            {
+                if (normalized[left].StartsWith(normalized[right] + ".", StringComparison.Ordinal) ||
+                    normalized[right].StartsWith(normalized[left] + ".", StringComparison.Ordinal))
+                {
+                    throw AgentToolError.InvalidArgument(
+                        "invalid_request",
+                        $"invalid_request: propertyPaths cannot contain overlapping paths '{normalized[left]}' and '{normalized[right]}'.",
+                        nameof(GetDataContextRequest.PropertyPaths));
+                }
+            }
+        }
+
+        return normalized;
+    }
+
+    private static JsonObject BuildDataContextPropertyPathProjection(
+        object dataContext,
+        IReadOnlyList<string> propertyPaths,
+        DataContextSerializationOptions options,
+        DataContextTruncationTracker truncation,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var projection = new JsonObject();
+        var prefixCache = new Dictionary<string, DataContextPropertyPathPrefix>(StringComparer.Ordinal);
+        foreach (var path in propertyPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var segments = path.Split('.');
+            object? current = dataContext;
+            var resolved = true;
+            var prefix = "";
+
+            foreach (var segment in segments)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                prefix = prefix.Length == 0 ? segment : $"{prefix}.{segment}";
+                if (prefixCache.TryGetValue(prefix, out var cached))
+                {
+                    if (!cached.Resolved)
+                    {
+                        warnings.Add($"{cached.WarningCode}: '{path}' {cached.WarningDetail}");
+                        resolved = false;
+                        break;
+                    }
+
+                    current = cached.Value;
+                    continue;
+                }
+
+                if (current is null)
+                {
+                    var failure = new DataContextPropertyPathPrefix(
+                        Resolved: false,
+                        Value: null,
+                        WarningCode: "property_path_null",
+                        WarningDetail: $"could not continue at '{segment}'.");
+                    prefixCache[prefix] = failure;
+                    warnings.Add($"{failure.WarningCode}: '{path}' {failure.WarningDetail}");
+                    resolved = false;
+                    break;
+                }
+
+                PropertyInfo? property;
+                try
+                {
+                    property = current.GetType()
+                        .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                        .FirstOrDefault(candidate =>
+                            candidate.CanRead &&
+                            candidate.GetMethod?.IsPublic == true &&
+                            candidate.GetIndexParameters().Length == 0 &&
+                            string.Equals(candidate.Name, segment, StringComparison.Ordinal));
+                }
+                catch (Exception ex)
+                {
+                    var failure = new DataContextPropertyPathPrefix(
+                        Resolved: false,
+                        Value: null,
+                        WarningCode: "property_path_error",
+                        WarningDetail: $"metadata read failed with {ex.GetType().Name}.");
+                    prefixCache[prefix] = failure;
+                    warnings.Add($"{failure.WarningCode}: '{path}' {failure.WarningDetail}");
+                    resolved = false;
+                    break;
+                }
+
+                if (property is null)
+                {
+                    var failure = new DataContextPropertyPathPrefix(
+                        Resolved: false,
+                        Value: null,
+                        WarningCode: "property_path_not_found",
+                        WarningDetail: $"stopped at '{segment}'.");
+                    prefixCache[prefix] = failure;
+                    warnings.Add($"{failure.WarningCode}: '{path}' {failure.WarningDetail}");
+                    resolved = false;
+                    break;
+                }
+
+                try
+                {
+                    current = property.GetValue(current);
+                }
+                catch (Exception ex)
+                {
+                    var failure = ex is TargetInvocationException { InnerException: not null }
+                        ? ex.InnerException
+                        : ex;
+                    var failedPrefix = new DataContextPropertyPathPrefix(
+                        Resolved: false,
+                        Value: null,
+                        WarningCode: "property_path_error",
+                        WarningDetail: $"getter failed with {failure.GetType().Name}.");
+                    prefixCache[prefix] = failedPrefix;
+                    warnings.Add($"{failedPrefix.WarningCode}: '{path}' {failedPrefix.WarningDetail}");
+                    resolved = false;
+                    break;
+                }
+
+                prefixCache[prefix] = new DataContextPropertyPathPrefix(
+                    Resolved: true,
+                    Value: current,
+                    WarningCode: null,
+                    WarningDetail: null);
+            }
+
+            if (!resolved)
+            {
+                continue;
+            }
+
+            var value = SerializeDataContextValueSummary(
+                current,
+                options,
+                remainingDepth: 0,
+                new HashSet<object>(ReferenceEqualityComparer.Instance),
+                truncation,
+                warnings,
+                applyAllowList: false,
+                cancellationToken);
+            InsertDataContextPropertyPath(projection, segments, value);
+        }
+
+        return projection;
+    }
+
+    private sealed record DataContextPropertyPathPrefix(
+        bool Resolved,
+        object? Value,
+        string? WarningCode,
+        string? WarningDetail);
+
+    private static void InsertDataContextPropertyPath(JsonObject projection, string[] segments, JsonNode? value)
+    {
+        var current = projection;
+        for (var index = 0; index < segments.Length - 1; index++)
+        {
+            var segment = segments[index];
+            if (current[segment] is not JsonObject child)
+            {
+                child = new JsonObject();
+                current[segment] = child;
+            }
+
+            current = child;
+        }
+
+        current[segments[^1]] = value;
+    }
+
     private static JsonValue SerializeDoubleJson(double value)
     {
         if (double.IsNaN(value))
@@ -4881,6 +5108,22 @@ internal static partial class WpfVisualTreeInspector
         var maxPropertiesPerObject = Math.Clamp(request.MaxPropertiesPerObject, 1, 5000);
         var maxStringLength = Math.Clamp(request.MaxStringLength, 0, 200_000);
         maxNodes = Math.Clamp(maxNodes, 1, 200_000);
+        var propertyPaths = NormalizeDataContextPropertyPaths(request.PropertyPaths, maxDepth);
+        if (propertyPaths.Count > 0 && request.Mode == DataContextMode.Full)
+        {
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: propertyPaths cannot be combined with mode=Full.",
+                nameof(request.PropertyPaths));
+        }
+
+        if (propertyPaths.Count > 0 && request.PropertyAllowList is { Count: > 0 })
+        {
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: propertyPaths cannot be combined with propertyAllowList.",
+                nameof(request.PropertyPaths));
+        }
 
         var window = ResolveWindow(request.WindowHandle);
         using var treeService = new VisualTreeService();
@@ -4941,6 +5184,37 @@ internal static partial class WpfVisualTreeInspector
             maxStringLength: maxStringLength,
             truncation: truncation,
             warnings: warnings);
+
+        if (propertyPaths.Count > 0)
+        {
+            var options = new DataContextSerializationOptions(
+                MaxDepth: 0,
+                MaxPropertiesPerObject: maxPropertiesPerObject,
+                MaxStringLength: maxStringLength,
+                IncludeNulls: true,
+                IncludeFrameworkProperties: false,
+                PropertyAllowList: null);
+            var projection = BuildDataContextPropertyPathProjection(
+                dataContext,
+                propertyPaths,
+                options,
+                truncation,
+                warnings,
+                cancellationToken);
+            var truncatedReasons = truncation.GetReasons();
+
+            return new GetDataContextResponse(
+                DataContextType: dataContextType,
+                Data: projection,
+                Summary: summary,
+                Truncated: truncation.Truncated,
+                Warnings: warnings.Count > 0 ? warnings : null)
+            {
+                Element = elementRef,
+                WindowHandleUsed = windowHandleUsed,
+                TruncatedReasons = truncatedReasons
+            };
+        }
 
         if (request.Mode == DataContextMode.Full)
         {
@@ -5032,6 +5306,138 @@ internal static partial class WpfVisualTreeInspector
         GetComputedPropertiesRequest request,
         CancellationToken cancellationToken) =>
         GetComputedProperties(ownerId, request, cancellationToken, visibleOnly: true);
+
+    public static GetComputedPropertiesBatchResponse GetComputedPropertiesBatch(
+        string ownerId,
+        GetComputedPropertiesBatchRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerId);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.WindowHandle is not long windowHandle || windowHandle == 0)
+        {
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: windowHandle is required.",
+                nameof(request.WindowHandle));
+        }
+
+        if (request.ElementIds is not { Count: > 0 })
+        {
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: provide at least one elementId.",
+                nameof(request.ElementIds));
+        }
+
+        if (request.PropertyNames is not { Count: > 0 })
+        {
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                "invalid_request: provide at least one property name.",
+                nameof(request.PropertyNames));
+        }
+
+        if (request.ElementIds.Count > ComputedPropertiesBatchLimits.MaxInputElements ||
+            request.PropertyNames.Count > ComputedPropertiesBatchLimits.MaxInputProperties)
+        {
+            throw AgentToolError.InvalidArgument(
+                "invalid_request",
+                $"invalid_request: input supports at most {ComputedPropertiesBatchLimits.MaxInputElements} elementIds and {ComputedPropertiesBatchLimits.MaxInputProperties} propertyNames.");
+        }
+
+        var elementIds = NormalizeBatchValues(request.ElementIds, "elementIds");
+        var propertyNames = NormalizeBatchValues(request.PropertyNames, "propertyNames");
+        var maxElements = Math.Clamp(request.MaxElements, 1, ComputedPropertiesBatchLimits.MaxElements);
+        var maxPropertiesPerElement = Math.Clamp(
+            request.MaxPropertiesPerElement,
+            1,
+            ComputedPropertiesBatchLimits.MaxPropertiesPerElement);
+        var selectedElementIds = elementIds.Take(maxElements).ToArray();
+        var selectedPropertyNames = propertyNames.Take(maxPropertiesPerElement).ToArray();
+        var results = new List<GetComputedPropertiesResponse>(selectedElementIds.Length);
+
+        foreach (var elementId in selectedElementIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            results.Add(GetComputedProperties(
+                ownerId,
+                new GetComputedPropertiesRequest(
+                    WindowHandle: windowHandle,
+                    ElementId: elementId,
+                    PropertyNames: selectedPropertyNames,
+                    IncludeSources: request.IncludeSources,
+                    IncludeDefault: false,
+                    IncludeUnset: false,
+                    MaxProperties: selectedPropertyNames.Length,
+                    ValueFormat: request.ValueFormat),
+                cancellationToken,
+                visibleOnly: true));
+        }
+
+        var truncatedReasons = new List<string>(3);
+        if (elementIds.Count > selectedElementIds.Length)
+        {
+            truncatedReasons.Add("maxElements");
+        }
+
+        if (propertyNames.Count > selectedPropertyNames.Length)
+        {
+            truncatedReasons.Add("maxPropertiesPerElement");
+        }
+
+        if (results.Any(result => result.Truncated))
+        {
+            truncatedReasons.Add("elementProperties");
+        }
+
+        return new GetComputedPropertiesBatchResponse(
+            Results: results,
+            RequestedElements: elementIds.Count,
+            RequestedProperties: propertyNames.Count,
+            ScannedElements: results.Count,
+            ReturnedElements: results.Count,
+            MaxElements: maxElements,
+            MaxPropertiesPerElement: maxPropertiesPerElement,
+            Truncated: truncatedReasons.Count > 0,
+            TruncatedReason: truncatedReasons.FirstOrDefault(),
+            TruncatedReasons: truncatedReasons.Count > 0 ? truncatedReasons : null)
+        {
+            WindowHandleUsed = windowHandle
+        };
+    }
+
+    private static IReadOnlyList<string> NormalizeBatchValues(
+        IReadOnlyList<string> values,
+        string parameterName)
+    {
+        var normalized = new List<string>(values.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var rawValue in values)
+        {
+            if (string.IsNullOrWhiteSpace(rawValue))
+            {
+                throw AgentToolError.InvalidArgument(
+                    "invalid_request",
+                    $"invalid_request: {parameterName} cannot contain blank values.",
+                    parameterName);
+            }
+
+            var value = rawValue.Trim();
+            if (!seen.Add(value))
+            {
+                throw AgentToolError.InvalidArgument(
+                    "invalid_request",
+                    $"invalid_request: {parameterName} cannot contain duplicates.",
+                    parameterName);
+            }
+
+            normalized.Add(value);
+        }
+
+        return normalized;
+    }
 
     private static GetComputedPropertiesResponse GetComputedProperties(
         string ownerId,

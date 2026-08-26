@@ -82,7 +82,7 @@ The `core` profile exposes these tools:
 | Sessions | `launch_app`, `attach_to_app`, `detach_session`, `close_app`, `terminate_app`, `close_session`, `list_sessions` |
 | Windows and screenshots | `list_windows`, `set_active_window`, `take_screenshot`, `take_screenshot_sequence` |
 | Inspection | `get_visual_tree`, `find_elements`, `resolve_element`, `get_element_properties`, `get_uia_locators`, `get_uia_tree`, `capture_diagnostic_snapshot` |
-| WPF diagnostics | `get_binding_info`, `get_command_info`, `get_binding_errors`, `get_validation_errors`, `get_data_context`, `get_computed_properties`, `get_layout_context` |
+| WPF diagnostics | `get_binding_info`, `get_command_info`, `get_binding_errors`, `get_validation_errors`, `get_data_context`, `get_computed_properties`, `get_computed_properties_batch`, `get_layout_context` |
 | Interaction | `click_element`, `invoke`, `type_text`, `send_keys`, `set_value`, `select_item`, `realize_item`, `scroll_to_element`, `drag`, `wait_for` |
 
 The `diagnostics` profile adds:
@@ -198,8 +198,11 @@ screenshots run in separate phases, and the response reports timing skew rather
 than claiming cross-backend atomicity.
 
 `get_layout_context` reports bounds, transforms, clipping, nearby visual-tree
-context, and Grid allocation. `get_computed_properties` can include dependency
-property value-source evidence in the diagnostics profile. These tools report
+context, and Grid allocation. `get_computed_properties_batch` reads named
+dependency properties for a bounded list of WPF element IDs in one call.
+`get_data_context` accepts dotted `propertyPaths` when only a few nested values
+are needed. The diagnostics profile can also include dependency-property
+value-source evidence in `get_computed_properties`. These tools report
 unavailable evidence and truncation instead of filling gaps with inferred
 values.
 
