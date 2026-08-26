@@ -1649,8 +1649,8 @@ public sealed class ToolProfileTests
             var subtreeMatches = await mcp.CallToolAsync<FindElementsResponse>("find_elements", new Dictionary<string, object?>
             {
                 ["sessionId"] = launch.SessionId,
-                ["root"] = new Dictionary<string, object?> { ["automationId"] = "XPathDemo_Right_Panel" },
-                ["query"] = new Dictionary<string, object?> { ["type"] = "Button" },
+                ["root"] = new Dictionary<string, object?> { ["automationId"] = "XPathDemo_Right_Button1" },
+                ["query"] = new Dictionary<string, object?> { ["type"] = "TextBlock" },
                 ["maxResults"] = 10
             });
 
@@ -1658,7 +1658,7 @@ public sealed class ToolProfileTests
             {
                 Assert.That(subtreeMatches.BackendUsed, Is.EqualTo(InspectionBackend.Wpf));
                 Assert.That(subtreeMatches.ReturnedMatches, Is.EqualTo(1));
-                Assert.That(subtreeMatches.Matches[0].AutomationId, Is.EqualTo("XPathDemo_Right_Button1"));
+                Assert.That(subtreeMatches.Matches[0].Type, Is.EqualTo("TextBlock"));
             });
 
             var matches = await mcp.CallToolAsync<FindElementsResponse>("find_elements", new Dictionary<string, object?>
