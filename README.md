@@ -40,6 +40,8 @@ dotnet tool update --global MkDevForge.WpfToolsMcp --prerelease
 
 The installed command is `wpf-tools-mcp`.
 
+See the [changelog](CHANGELOG.md) for release notes.
+
 ## Configure an MCP client
 
 The default `core` profile covers normal inspection and interaction:
