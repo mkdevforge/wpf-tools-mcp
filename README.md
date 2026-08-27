@@ -1,32 +1,22 @@
 # WPF Tools MCP
 
-WPF Tools MCP is a Windows-only MCP server for inspecting, testing, and
-diagnosing running WPF applications. It combines two views of the target:
+WPF Tools MCP lets an MCP client inspect and operate a running WPF app. UI
+Automation handles windows and controls from outside the process. Windows APIs
+capture screenshots and send physical input. An injected agent reads WPF details
+such as the visual tree, bindings, `DataContext`, dependency properties, layout,
+commands, styles, and templates.
 
-- FlaUI and UI Automation run outside the target process. They handle windows,
-  screenshots, the automation tree, semantic control patterns, and physical
-  mouse or keyboard input.
-- An injected WPF agent reads the visual tree, bindings, validation state,
-  `DataContext`, dependency properties, layout, commands, styles, and templates.
-
-The server uses stdio for MCP. Target applications do not need a package or
-source-code change.
-
-## Requirements
-
-- Windows 10 or Windows 11.
-- The .NET 8 SDK or newer to install the global tool or build the repository.
-- The .NET 8 Desktop Runtime to run an installed package.
-- An x86 or x64 .NET 8 or newer WPF target for in-process inspection.
-
-The MCP server and target must run as the same Windows user. The target cannot
-run at a higher integrity level than the server. UIA-only features can still
-work when agent injection is unavailable.
+The target app needs no package or source change.
+The server speaks MCP over stdio. UIA tools still work when injection is
+unavailable.
 
 ## Install
 
-The package is currently published as a preview. `--prerelease` avoids pinning
-the README to an old preview number.
+You need Windows 10 or 11. Installing the global tool requires the .NET 8 SDK or
+newer. The tool runs on the .NET 8 Desktop Runtime. The injected agent supports
+x86 and x64 WPF apps running on .NET 8 or newer.
+
+Published versions are previews, so install with `--prerelease`:
 
 ```powershell
 dotnet tool install --global MkDevForge.WpfToolsMcp --prerelease
@@ -38,13 +28,12 @@ Update an existing installation with:
 dotnet tool update --global MkDevForge.WpfToolsMcp --prerelease
 ```
 
-The installed command is `wpf-tools-mcp`.
+The command is `wpf-tools-mcp`. See the [changelog](CHANGELOG.md) for release
+notes.
 
-See the [changelog](CHANGELOG.md) for release notes.
+## Configure your MCP client
 
-## Configure an MCP client
-
-The default `core` profile covers normal inspection and interaction:
+Start with the `core` profile:
 
 ```json
 {
@@ -56,9 +45,8 @@ The default `core` profile covers normal inspection and interaction:
 }
 ```
 
-Use the `diagnostics` profile when you need explicit backend controls,
-subscriptions, traces, performance sampling, element picking, highlighting, or
-window geometry tools:
+Use `diagnostics` for manual injection, backend selection, traces, subscriptions,
+performance samples, element picking or highlighting, and window controls:
 
 ```json
 {
@@ -71,20 +59,33 @@ window geometry tools:
 }
 ```
 
-`WPF_TOOLS_MCP_TOOL_PROFILE=diagnostics` is equivalent. The accepted profile
-names are `core` and `diagnostics`; `diagnostic` and `full` are aliases for the
-latter.
+You can also set `WPF_TOOLS_MCP_TOOL_PROFILE=diagnostics`. The aliases
+`diagnostic` and `full` select the same profile.
 
-## Tool profiles
+## Run a session
 
-The `core` profile exposes these tools:
+1. Call `launch_app` or `attach_to_app`. Keep the returned `sessionId`.
+2. Call `list_windows`. Keep a window handle when the process owns several
+   top-level windows.
+3. Use `get_visual_tree` to browse or `find_elements` to search.
+4. Use `resolve_element` when several later calls will target the same element.
+5. Interact, then check the result with `wait_for`, another inspection, or a
+   screenshot.
+6. Finish with `detach_session`, `close_app`, or `terminate_app`.
+
+`detach_session` leaves the app running. `close_app` asks it to close.
+`terminate_app` kills the process. `close_session` remains for older clients.
+
+## Tools
+
+The `core` profile includes:
 
 | Area | Tools |
 |---|---|
 | Sessions | `launch_app`, `attach_to_app`, `detach_session`, `close_app`, `terminate_app`, `close_session`, `list_sessions` |
 | Windows and screenshots | `list_windows`, `set_active_window`, `take_screenshot`, `take_screenshot_sequence` |
 | Inspection | `get_visual_tree`, `find_elements`, `resolve_element`, `get_element_properties`, `get_uia_locators`, `get_uia_tree`, `capture_diagnostic_snapshot` |
-| WPF diagnostics | `get_binding_info`, `get_command_info`, `get_binding_errors`, `get_validation_errors`, `get_data_context`, `get_computed_properties`, `get_computed_properties_batch`, `get_layout_context` |
+| WPF details | `get_binding_info`, `get_command_info`, `get_binding_errors`, `get_validation_errors`, `get_data_context`, `get_computed_properties`, `get_computed_properties_batch`, `get_layout_context` |
 | Interaction | `click_element`, `invoke`, `type_text`, `send_keys`, `set_value`, `select_item`, `realize_item`, `scroll_to_element`, `drag`, `wait_for` |
 
 The `diagnostics` profile adds:
@@ -94,64 +95,57 @@ The `diagnostics` profile adds:
 | Agent and handles | `inject_agent`, `agent_ping`, `get_path_to_element`, `release_element` |
 | Desktop inspection | `list_displays`, `get_active_window`, `pick_element_at_point`, `highlight_element` |
 | Window control | `set_window_bounds`, `set_window_viewport`, `set_window_state`, `mouse_click` |
-| WPF detail | `get_style_chain`, `get_template_info`, `uia_coverage_report` |
+| WPF details | `get_style_chain`, `get_template_info`, `uia_coverage_report` |
 | Observation | `subscribe_property_changes`, `subscribe_binding_errors`, `poll_subscription`, `unsubscribe` |
 | Tracing and performance | `trace_keyboard_navigation`, `trace_start`, `trace_stop`, `performance_start`, `performance_stop` |
 
-The diagnostics profile also exposes more input controls on several shared
-tools. Ask the MCP client for the advertised input and output schemas rather
-than relying on copied parameter lists. Those schemas are the current contract.
+Some shared tools accept more options in `diagnostics`. Use the schema returned
+by the MCP server for exact fields, defaults, and response types.
 
-## A normal inspection run
+## Find and inspect elements
 
-1. Call `launch_app` or `attach_to_app` and keep the returned `sessionId`.
-2. Call `list_windows`. Use the returned handle when the process owns more than
-   one top-level window.
-3. Inspect with `get_visual_tree` or search with `find_elements`.
-4. Call `resolve_element` when several later calls will use the same element.
-5. Interact, then verify the result with `wait_for`, another inspection, or a
-   screenshot.
-6. Call `detach_session` to leave the application running. Use `close_app` for
-   a graceful close or `terminate_app` to force the process to exit.
+A locator can match Automation ID, name, class, control type, XPath, or a
+contains filter. Each supplied field must match.
 
-`close_session` remains for compatibility. New clients should choose one of the
-three explicit lifecycle operations.
+Tools that resolve one element use strict locators by default. If several
+elements match, they return `ambiguous_element` with a short candidate list.
+Add a unique field, use `index`, or set `strict=false` if any matching element
+will do. `find_elements` returns several matches by design.
 
-## Locators and element IDs
+`resolve_element` returns an `elementId` for later calls. Element IDs belong to
+one session and one process instance, and they retain their WPF or UIA backend.
+Resolve them again after the app restarts or rebuilds the relevant UI. The
+`diagnostics` profile adds `release_element` for clients that keep many IDs.
 
-Locators can use Automation ID, name, class, control type, XPath, and related
-contains filters. Fields in one locator are combined. They are not tried as an
-ordered set of alternatives.
+Use a shallow `get_visual_tree` when hierarchy matters. Use `find_elements` when
+you know what you are looking for. A `root` locator keeps the search inside one
+subtree.
 
-Locators are strict by default. More than one match returns an
-`ambiguous_element` error with bounded candidate details. Use `index` or set
-`strict=false` only when selecting a non-unique match is intentional.
+For repeated WPF elements, pass their IDs to
+`get_computed_properties_batch` instead of making one call per element. Use
+dotted `propertyPaths` with `get_data_context` when you need only a few nested
+values.
 
-`resolve_element` returns an `elementId` that can be passed to later tools.
-Handles keep their original UIA or WPF backend and are scoped to the session and
-process instance. Re-resolve them after the target restarts or the relevant UI
-is recreated. The diagnostics profile exposes `release_element` for callers
-that retain many handles.
+See the [tool guide](docs/tool-guide.md) for full tool behavior.
 
-## UIA and WPF routing
+## WPF and UI Automation
 
-`backend=Auto` prefers WPF inspection for WPF windows and uses UIA for known
-native or non-WPF windows. When a WPF route is unavailable and the operation has
-a UIA equivalent, the response reports the fallback. WPF-only diagnostics fail
-with a structured backend or injection error instead of returning UIA data
-under a WPF label.
+With `backend=Auto`, WPF windows use the injected agent when the operation needs
+WPF data. Native windows and supported fallbacks use UI Automation. Responses
+include the backend used and whether the server fell back.
 
-The core profile injects the WPF agent on demand. The diagnostics profile also
-offers `inject_agent` and `agent_ping` for direct troubleshooting.
+WPF-only calls return an injection or backend error when the agent is
+unavailable.
 
-`get_uia_locators` can explain a bounded UIA-to-WPF or WPF-to-UIA mapping. A
-mapping may be exact, heuristic, ambiguous, or unavailable. A valid UIA locator
-is still useful when no WPF match exists.
+`get_uia_locators` explains matches between WPF and UIA elements. A mapping can
+be exact, heuristic, ambiguous, or unavailable. A UIA locator can still work
+when no WPF match exists.
 
 ## Interaction policy
 
-Sessions allow foreground activation and physical input by default. Set either
-policy field to `false` when an automation run must avoid that effect:
+Sessions allow foreground activation and physical input by default. Each flag
+can block its corresponding effect. For a run that must not disturb the desktop,
+set both to `false` and use semantic actions:
 
 ```json
 {
@@ -162,117 +156,92 @@ policy field to `false` when an automation run must avoid that effect:
 }
 ```
 
-The server prefers semantic WPF or UIA actions. A tool that requires a blocked
-effect returns `interaction_policy_blocked` and names the required setting.
-Interaction responses report observed effects such as foreground activation,
-mouse input, keyboard input, and cursor movement.
+Tools use WPF or UIA control patterns when the target supports them. `send_keys`
+and `drag` use physical input; other actions may fall back to it. A blocked
+fallback returns `interaction_policy_blocked` and names the setting it needs.
 
-`type_text` supports `Replace`, `Append`, and `AtSelection`. `send_keys` sends an
-ordered sequence of named keys and modifier chords. Both physical paths require
-the target to receive real desktop input, so do not run them against an
-untrusted or unattended desktop session.
+`type_text` supports `Replace`, `Append`, and `AtSelection`. `send_keys` accepts
+named keys and modifier chords. Physical mouse and keyboard paths use the real
+desktop. They can move the pointer, change focus, and bring a window forward.
 
-## Windows, viewports, and screenshots
+## Windows and screenshots
 
-`list_windows` includes visible same-process top-level windows, including
-application-owned native dialogs when UIA can expose them. Use `ownerHandle`,
-`isModal`, and `frameworkId` to keep dialog context. Window handles are valid
-only for the current process instance.
+`list_windows` returns visible top-level windows owned by the target process.
+This includes accessible native dialogs opened by the app. Window handles expire
+when that process exits. `ownerHandle`, `isModal`, and `frameworkId` describe a
+dialog's relationship to the WPF window.
 
-In the diagnostics profile, `set_window_viewport` sets the client area in
-physical pixels or WPF device-independent pixels. Screenshot calls can return
-the measured viewport so a test can distinguish requested size from the actual
-window and DPI state.
+The `diagnostics` profile adds `set_window_viewport` for sizing the client area
+in physical pixels or WPF device-independent pixels. Screenshot responses can
+include the measured viewport and DPI.
 
-`take_screenshot_sequence` captures a bounded series of PNG frames and writes a
-manifest with actual timing and frame metadata. Diagnostics-only screenshot
-correlation can annotate a small image region with bounded WPF and UIA
-candidates. It is evidence for investigation, not an assertion that pixels map
-to one unique element.
+`take_screenshot_sequence` writes a bounded set of PNG frames and a JSON
+manifest. In the `diagnostics` profile, `take_screenshot` can return nearby WPF
+and UIA candidates for a small region. Overlapping controls can produce several
+candidates.
 
-Multi-monitor coordinates use the Windows virtual screen and may be negative.
+Coordinates use the Windows virtual screen. Monitors left of or above the
+primary display have negative coordinates.
 
-## Diagnostics and observation
+## Partial results
 
-`capture_diagnostic_snapshot` reads selected evidence for one pinned window or
-element. WPF sections share one dispatcher callback. UIA properties and native
-screenshots run in separate phases, and the response reports timing skew rather
-than claiming cross-backend atomicity.
+Tool failures set MCP `isError` and include a stable `code` plus readable
+`detail`. Branch on `code`; application messages inside `detail` may change.
 
-`get_layout_context` reports bounds, transforms, clipping, nearby visual-tree
-context, and Grid allocation. `get_computed_properties_batch` reads named
-dependency properties for a bounded list of WPF element IDs in one call.
-`get_data_context` accepts dotted `propertyPaths` when only a few nested values
-are needed. The diagnostics profile can also include dependency-property
-value-source evidence in `get_computed_properties`. These tools report
-unavailable evidence and truncation instead of filling gaps with inferred
-values.
-
-Subscriptions are bounded queues. Poll until `hasMore` is false, and inspect the
-dropped, coalesced, truncated, and terminal-event fields before treating an
-observation as complete. `trace_stop` and screenshot sequences write artifacts
-to disk rather than returning an unbounded event or image stream.
-
-For more detail, see the [tool guide](docs/tool-guide.md).
-
-## Errors and response limits
-
-Tool failures set MCP `isError` and return a structured error with a stable
-`code` and human-readable `detail`. Branch on `error.code`. Diagnostic cause
-text is supporting evidence and can contain target application messages.
-
-Tree scans, property reads, queues, strings, artifacts, waits, and returned
-collections have explicit limits. Responses include returned, discovered, or
-scanned counts where the distinction matters. Check `truncated`,
+Tree and search operations stop at their configured limits. Check `truncated`,
 `truncatedReasons`, and `scanComplete` before treating a result as exhaustive.
+Where relevant, compare returned, discovered, and scanned counts. Screenshot
+sequences cap frame count and delay; individual screenshots report clipping.
+Property reads, queues, waits, strings, and files also have limits.
+Subscriptions report dropped or coalesced events.
 
-## Local trust model
+## Trust the app you inspect
 
-This is a same-user developer tool, not a security boundary for hostile target
-processes. WPF property getters and UIA providers run application code during
-normal inspection. Formatting observed values may call application-defined
-`ToString()` or `Exception.Message`. The server catches those failures and
-bounds returned text, but it cannot make inspection side-effect free.
+Inspection is not passive. Reading a WPF property, asking UIA for a value,
+evaluating `CanExecute`, or formatting an object can run code from the target
+app. That code may throw, hang, or change state. Only attach to apps you trust.
 
-The server validates session, process, window, and element identity. It bounds
-work and artifacts, honors cancellation, and removes only resources it owns.
-The injected agent communicates over a current-user-only named pipe.
+Agent injection requires the server and target to run as the same Windows user.
+The target cannot run at a higher integrity level than the server. Agent traffic
+uses a named pipe restricted to that user.
 
-## Limitations
+The server checks session, process, window, and element identity before use, so
+stale handles fail instead of reaching a different process.
 
-- The server and packaged tool run only on Windows.
-- Agent injection supports x86 and x64 targets, not ARM64 targets.
-- Elevation, user boundaries, endpoint security software, or an incompatible
-  target runtime can block injection.
-- Custom controls without useful WPF or UIA peers may be inspectable but not
-  semantically actionable.
-- Native-dialog support is limited to accessible same-process windows. It does
-  not cross process or secure-desktop boundaries.
-- Physical input depends on the active interactive desktop and can disturb the
+## Known limits
+
+- The server runs only on Windows.
+- Agent injection does not support ARM64 target processes.
+- Injection fails when the target runs as another Windows user or at a higher
+  integrity level. Endpoint security software or an incompatible runtime can
+  also block it.
+- Native-dialog support stops at accessible windows owned by the target process.
+  It cannot inspect another process or the secure desktop.
+- Custom controls without a useful WPF or UIA peer may not support semantic
+  interaction.
+- Physical input requires an active interactive desktop and can disturb the
   user's mouse, keyboard focus, or foreground window.
 
-## Troubleshoot injection
+## When injection fails
 
-The default injector timeout is 15 seconds. Override it with
-`WPF_TOOLS_MCP_INJECTOR_TIMEOUT_MS`. Positive values are clamped to 1,000 through
-120,000 milliseconds.
+Switch to the `diagnostics` profile and call `inject_agent`, then `agent_ping`.
+The failure reports a stage such as `injection`, `pipe_connection`, or
+`protocol`.
 
-Each injector launch receives a temporary writable profile. The server captures
-bounded stdout, stderr, exit information, and process context. It also suppresses
-Windows fault dialogs for the launcher process tree and requests tree
-termination on cancellation or timeout. An exit code of `0xE0434352` indicates
-an unhandled CLR exception in the launcher.
+The default timeout is 15 seconds. Set `WPF_TOOLS_MCP_INJECTOR_TIMEOUT_MS` to a
+value from 1,000 through 120,000 milliseconds to change it.
 
-Common causes are a missing packaged payload, target/server elevation mismatch,
-security software blocking injection, or an unsupported target architecture.
-Use the diagnostics profile with `inject_agent`, `agent_ping`, and a tool trace
-to separate launcher failure from agent connection failure.
+Common blockers are missing packaged files, a target at higher integrity,
+endpoint security software, an unsupported architecture, or an incompatible
+runtime. Exit code `0xE0434352` means the launcher ended with an unhandled CLR
+exception.
 
 ## Build and test
 
-Source builds need the .NET 8 SDK, PowerShell 7, and Visual Studio 2022 or Build
-Tools with MSBuild, Desktop development with C++, and a Windows 10 or 11 SDK.
-The C++ toolchain builds Snoop's x86 and x64 generic injectors.
+Source builds need the .NET 8 and .NET 10 SDKs, PowerShell 7, and Visual Studio
+2022 or Build Tools with MSBuild, Desktop development with C++, and a Windows 10
+or 11 SDK. The Snoop submodule pins SDK 10.0.100 and allows later .NET 10 feature
+bands. The C++ toolchain builds its x86 and x64 injectors.
 
 ```powershell
 git submodule update --init --recursive
@@ -281,42 +250,40 @@ $env:DisableGitVersionTask = "true"
 dotnet build src/WpfToolsMcp.McpServer/WpfToolsMcp.McpServer.csproj -c Debug
 ```
 
-The environment setting prevents the pinned Snoop project's GitVersion task
-from trying to normalize the parent repository. It is required in Git worktrees
-and harmless in a normal clone. Keep it set in the same PowerShell session when
-running the tests below.
+`DisableGitVersionTask` skips Snoop's GitVersion step, which can fail on a
+detached submodule checkout or in a worktree. Keep it set when running tests.
 
-Run the server from source with:
+Run the server from source:
 
 ```powershell
 dotnet run --project src/WpfToolsMcp.McpServer -- --tool-profile diagnostics
 ```
 
-Prefer a focused snapshot test while developing:
+Run a focused test while developing:
 
 ```powershell
 dotnet test tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj -c Debug --filter "FullyQualifiedName~ToolProfileTests"
 ```
 
-The complete snapshot project launches real WPF processes and exercises UIA and
-agent injection:
+The full snapshot project starts real WPF processes and exercises UIA and agent
+injection:
 
 ```powershell
 dotnet test tests/WpfToolsMcp.SnapshotTests/WpfToolsMcp.SnapshotTests.csproj -c Debug
 ```
 
-The smoke runner accepts another WPF executable and writes a JSON report,
-screenshots, and tree captures under `artifacts/smoke/<timestamp>` by default:
+The smoke runner takes a WPF executable and writes a JSON report, screenshots,
+and tree captures under `artifacts/smoke/<timestamp>`:
 
 ```powershell
 dotnet run --project tools/WpfToolsMcp.McpSmokeRunner -- --exe C:\path\to\App.exe
 ```
 
-CI runs on Windows, builds the Snoop payload and tool, and runs the snapshot
-project. Tags matching `v*.*.*` run the same checks, pack the tool, and publish
-it to NuGet.
+CI runs the full snapshot project on Windows. A `v*.*.*` tag runs a Release
+build and the full snapshot project, then packs `MkDevForge.WpfToolsMcp` and
+publishes it to NuGet.
 
-Build a local Release package with:
+Build a local release package with:
 
 ```powershell
 pwsh scripts/build-snoop.ps1 -Configuration Release
@@ -328,23 +295,22 @@ dotnet pack src/WpfToolsMcp.Tool/WpfToolsMcp.Tool.csproj -c Release -o artifacts
 
 | Path | Purpose |
 |---|---|
-| `src/WpfToolsMcp.McpServer` | stdio host, tool profiles, tool definitions, subscriptions |
-| `src/WpfToolsMcp.Automation` | sessions, FlaUI/UIA, screenshots, input, tracing, agent orchestration |
+| `src/WpfToolsMcp.McpServer` | MCP host and tool definitions |
+| `src/WpfToolsMcp.Automation` | sessions, UIA, screenshots, input, traces, and agent control |
 | `src/WpfToolsMcp.Agent` | injected WPF inspector |
-| `src/WpfToolsMcp.AgentProtocol` | bounded named-pipe request and response protocol |
-| `src/WpfToolsMcp.Contracts` | shared request, response, and enum types |
+| `src/WpfToolsMcp.AgentProtocol` | named-pipe messages |
+| `src/WpfToolsMcp.Contracts` | request, response, and enum types |
 | `src/WpfToolsMcp.Tool` | global-tool launcher and NuGet package |
-| `src/WpfToolsMcp.TestApp*` | focused integration fixtures |
-| `tests/WpfToolsMcp.SnapshotTests` | NUnit and Verify integration coverage |
-| `tools/WpfToolsMcp.McpSmokeRunner` | black-box smoke runner |
+| `src/WpfToolsMcp.TestApp*` | integration test apps |
+| `tests/WpfToolsMcp.SnapshotTests` | NUnit and Verify tests |
+| `tools/WpfToolsMcp.McpSmokeRunner` | smoke runner for another WPF app |
 | `references/snoopwpf` | pinned Snoop submodule |
 
-The [architecture note](docs/architecture.md)
-describes the process boundaries and recovery model. Accepted design decisions
-live under `docs/decisions/`.
+Read [architecture](docs/architecture.md) for process boundaries, routing, and
+cleanup. Design decisions live under [`docs/decisions`](docs/decisions/).
 
 ## License
 
-Original project code is MIT licensed. The packaged inspection payload includes
-Snoop components under the Microsoft Public License. See
+Project code uses the MIT license. The packaged agent includes Snoop components
+under the Microsoft Public License. See
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
