@@ -708,6 +708,9 @@ still reports as active and unlocked. The check cannot detect this. On a QA
 VM, use the hypervisor's console view, or keep the Remote Desktop window
 restored.
 
+To create a QA VM with VMware Workstation, see
+[docs/remote-qa-vm.md](docs/remote-qa-vm.md).
+
 ### Virtualized Item Realization
 
 `realize_item` is an explicit UIA mutation for one item exposed by an
