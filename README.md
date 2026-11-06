@@ -69,8 +69,8 @@ agent workflows:
 
 | Profile | Tools | Purpose |
 |---|---:|---|
-| `core` (default) | 35 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
-| `diagnostics` | 59 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
+| `core` (default) | 36 | Compact schemas, normal inspection and interaction, UIA locator export, and the most useful WPF diagnostics. WPF inspection is injected automatically when needed. |
+| `diagnostics` | 60 | The full surface, including explicit injection, backend and screenshot controls, element picking/highlighting, subscriptions, traces, performance sampling, and window/display diagnostics. |
 
 Every advertised tool includes an MCP `outputSchema` with exactly two `oneOf`
 branches: the tool's typed success schema and the common tool-error schema.
@@ -119,6 +119,7 @@ The `core` profile exposes:
 - **WPF diagnostics:** `get_binding_info`, `get_command_info`, `get_binding_errors`,
   `get_validation_errors`, `get_data_context`, `get_computed_properties`,
   `get_layout_context`.
+- **Server environment:** `get_server_environment`.
 
 The `diagnostics` profile additionally exposes:
 
@@ -669,6 +670,43 @@ Where available, `MethodUsed` provides the more specific mechanism. These
 fields describe MCP automation, not arbitrary side effects of the invoked
 application code. For example, a semantic command handler may independently
 open or activate one of its own windows.
+
+### Interactive Desktop Readiness
+
+Physical input, foreground activation, and screenshots need the server's
+Windows session to have an active, unlocked, interactive desktop. Without one,
+input is lost and captures can come back black. Before these effects, the
+server checks its session. When it finds evidence that the desktop is not
+usable, the operation fails with `interactive_desktop_unavailable` before any
+physical input is sent. Screenshots fail before auto-scroll moves the target.
+The detail names the operation and one reason:
+
+| Reason | Meaning | Retryable |
+|---|---|---|
+| `service_session` | The server runs in session 0 (a Windows service). | No |
+| `non_interactive_window_station` | The server runs outside `WinSta0`, for example under SSH. | No |
+| `session_disconnected` | The session is disconnected, for example after a Remote Desktop window closed. | Yes |
+| `session_not_active` | The session is in another non-active state. | Yes |
+| `session_locked` | The session is locked. | Yes |
+| `secure_desktop_active` | The lock screen or a UAC prompt owns input. | Yes |
+| `input_desktop_mismatch` | Input goes to a different desktop than the server's. | Yes |
+| `screensaver_running` | A screen saver is running. | Yes |
+
+Semantic operations do not run this check. A check that Windows does not let
+the server read never blocks an operation; it is listed in
+`unverifiedChecks` instead.
+
+`get_server_environment` reports this status together with the displays and
+their adapters, the OS edition and build, the firmware system manufacturer and
+product (virtual machines usually name their hypervisor there), and the WPF
+render tier (`0` means software rendering, which is normal in a VM without GPU
+acceleration). Call it first when the server runs on another machine or in a
+VM.
+
+A Remote Desktop client that is minimized can stop rendering while the session
+still reports as active and unlocked. The check cannot detect this. On a QA
+VM, use the hypervisor's console view, or keep the Remote Desktop window
+restored.
 
 ### Virtualized Item Realization
 

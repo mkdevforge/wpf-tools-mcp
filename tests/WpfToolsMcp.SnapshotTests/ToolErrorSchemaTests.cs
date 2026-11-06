@@ -59,6 +59,7 @@ public sealed class ToolErrorSchemaTests
         var diagnosticTools = (await diagnostics.ListToolsAsync()).ToDictionary(tool => tool.Name, StringComparer.Ordinal);
 
         var sessions = await core.CallToolResultAsync("list_sessions");
+        var environment = await core.CallToolResultAsync("get_server_environment");
         var missingProcess = await core.CallToolResultAsync("launch_app", new Dictionary<string, object?>
         {
             ["exePath"] = Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.exe")
@@ -68,11 +69,16 @@ public sealed class ToolErrorSchemaTests
             new Dictionary<string, object?>());
 
         AssertValid(coreTools["list_sessions"], sessions);
+        AssertValid(coreTools["get_server_environment"], environment);
         AssertValid(coreTools["launch_app"], missingProcess);
         AssertValid(diagnosticTools["subscribe_property_changes"], invalidSubscription);
         Assert.Multiple(() =>
         {
             Assert.That(sessions.IsError, Is.Not.True);
+            Assert.That(environment.IsError, Is.Not.True);
+            Assert.That(
+                environment.StructuredContent!.Value.GetProperty("interactiveDesktop").GetProperty("available").GetBoolean(),
+                Is.True);
             Assert.That(missingProcess.IsError, Is.True);
             Assert.That(invalidSubscription.IsError, Is.True);
         });

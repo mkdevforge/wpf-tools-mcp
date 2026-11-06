@@ -8,6 +8,7 @@ internal static class CoreToolRegistry
         typeof(CoreInspectionTools),
         typeof(CoreInteractionTools),
         typeof(CoreWpfDiagnosticsTools),
-        typeof(DiagnosticTools)
+        typeof(DiagnosticTools),
+        typeof(EnvironmentTools)
     ];
 }

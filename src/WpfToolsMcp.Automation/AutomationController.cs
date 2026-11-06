@@ -903,6 +903,9 @@ public sealed partial class AutomationController : IDisposable
                 throw new ArgumentException("Provide either locator or elementId, not both.");
             }
 
+            // Fail before auto-scroll or backend work mutates the target when no capture can succeed.
+            InteractiveDesktop.EnsureAvailable("take_screenshot");
+
             var hasElementId = !string.IsNullOrWhiteSpace(request.ElementId);
             var requestedBackend = request.Backend;
             ElementHandle? elementHandle = null;
@@ -1683,6 +1686,10 @@ public sealed partial class AutomationController : IDisposable
             ScreenshotClipMode clip,
             bool includeOverlay)
     {
+        // Both screen and PrintWindow capture depend on a rendering, unlocked desktop; a capture
+        // taken without one can come back black and would be reported as a real screenshot.
+        InteractiveDesktop.EnsureAvailable("screen_capture");
+
         static Rect Intersect(Rect a, Rect b)
         {
             var left = Math.Max(a.X, b.X);
@@ -2621,6 +2628,8 @@ public sealed partial class AutomationController : IDisposable
                 policySetting: "allowPhysicalInput",
                 alternative: $"{semanticAlternative} Retry with interactionPolicy.allowPhysicalInput=true to permit fallback.");
         }
+
+        InteractiveDesktop.EnsureAvailable(operation);
     }
 
     private static InteractionEffects MarkSemanticAndGetEffects(InteractionEffectTracker effects)
@@ -2677,6 +2686,11 @@ public sealed partial class AutomationController : IDisposable
                 requiredEffect: isMinimized ? "window restore and foreground activation" : "foreground activation",
                 policySetting: "allowForegroundActivation",
                 alternative: "Use a semantic action that can run in the background, or retry with interactionPolicy.allowForegroundActivation=true.");
+        }
+
+        if (requiresForegroundTransition || isMinimized)
+        {
+            InteractiveDesktop.EnsureAvailable(operation);
         }
 
         if (isMinimized && windowPattern is not null)

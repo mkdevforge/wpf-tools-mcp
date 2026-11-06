@@ -29,6 +29,7 @@ public sealed class ToolProfileTests
         "get_data_context",
         "get_element_properties",
         "get_layout_context",
+        "get_server_environment",
         "get_uia_locators",
         "get_uia_tree",
         "get_validation_errors",
