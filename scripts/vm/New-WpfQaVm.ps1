@@ -6,10 +6,12 @@ Creates a VMware Workstation Windows 11 VM for remote WPF Tools MCP QA.
 .DESCRIPTION
 The script needs only a Windows 11 ISO. It:
 
-1. Creates the VM (UEFI, Secure Boot, NVMe disk, NAT network).
+1. Creates the VM (legacy BIOS, NVMe disk, NAT network).
 2. Installs Windows without prompts from a generated autounattend.xml. The
-   setup check for a TPM is skipped, because VMware needs VM encryption for a
-   virtual TPM.
+   setup checks for a TPM and Secure Boot are skipped. VMware needs VM
+   encryption for a virtual TPM. UEFI boot from the Windows ISO waits for a key
+   press, and VMware has no working command that sends keys to the guest, so
+   the VM uses BIOS boot, which starts Setup from a blank disk without a prompt.
 3. Runs guest/Setup-Guest.ps1 at the first logon. It installs VMware Tools, the
    .NET 8 SDK, and OpenSSH Server, and keeps the session logged on and unlocked.
 4. Removes the setup media, starts the VM, checks the guest setup result and
@@ -183,26 +185,25 @@ function New-AutounattendXml([string] $Password) {
     <component name="Microsoft-Windows-Setup" $component>
       <RunSynchronous>
         <RunSynchronousCommand wcm:action="add"><Order>1</Order><Path>reg.exe add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path></RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add"><Order>2</Order><Path>reg.exe add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path></RunSynchronousCommand>
       </RunSynchronous>
       <DiskConfiguration>
         <Disk wcm:action="add">
           <DiskID>0</DiskID>
           <WillWipeDisk>true</WillWipeDisk>
           <CreatePartitions>
-            <CreatePartition wcm:action="add"><Order>1</Order><Type>EFI</Type><Size>260</Size></CreatePartition>
-            <CreatePartition wcm:action="add"><Order>2</Order><Type>MSR</Type><Size>16</Size></CreatePartition>
-            <CreatePartition wcm:action="add"><Order>3</Order><Type>Primary</Type><Extend>true</Extend></CreatePartition>
+            <CreatePartition wcm:action="add"><Order>1</Order><Type>Primary</Type><Size>500</Size></CreatePartition>
+            <CreatePartition wcm:action="add"><Order>2</Order><Type>Primary</Type><Extend>true</Extend></CreatePartition>
           </CreatePartitions>
           <ModifyPartitions>
-            <ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Format>FAT32</Format><Label>System</Label></ModifyPartition>
-            <ModifyPartition wcm:action="add"><Order>2</Order><PartitionID>2</PartitionID></ModifyPartition>
-            <ModifyPartition wcm:action="add"><Order>3</Order><PartitionID>3</PartitionID><Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter></ModifyPartition>
+            <ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Format>NTFS</Format><Label>System</Label><Active>true</Active></ModifyPartition>
+            <ModifyPartition wcm:action="add"><Order>2</Order><PartitionID>2</PartitionID><Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter></ModifyPartition>
           </ModifyPartitions>
         </Disk>
       </DiskConfiguration>
       <ImageInstall>
         <OSImage>
-          <InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo>
+          <InstallTo><DiskID>0</DiskID><PartitionID>2</PartitionID></InstallTo>
           <InstallToAvailablePartition>false</InstallToAvailablePartition>
         </OSImage>
       </ImageInstall>
@@ -319,8 +320,7 @@ function New-VmxContent([string] $WindowsIso, [string] $SetupIso) {
         'virtualHW.version = "22"'
         "displayName = `"$VmName`""
         'guestOS = "windows11-64"'
-        'firmware = "efi"'
-        'uefi.secureBoot.enabled = "TRUE"'
+        'firmware = "bios"'
         "numvcpus = `"$CpuCount`""
         "cpuid.coresPerSocket = `"$CpuCount`""
         "memsize = `"$MemoryMB`""
@@ -371,6 +371,8 @@ function New-VmxContent([string] $WindowsIso, [string] $SetupIso) {
         'floppy0.present = "FALSE"'
         'tools.syncTime = "TRUE"'
         'tools.upgrade.policy = "manual"'
+        # Answer VMware notices by default, so that no dialog stops an unattended power-on.
+        'msg.autoAnswer = "TRUE"'
     )
     return ($lines -join "`r`n") + "`r`n"
 }
@@ -405,16 +407,6 @@ function Wait-Until([scriptblock] $Condition, [TimeSpan] $Timeout, [string] $Des
 function Invoke-GuestVmRun([string] $Vmx, [pscredential] $Credential, [string[]] $Arguments, [switch] $AllowFailure) {
     $prefix = @('-T', 'ws', '-gu', $Credential.UserName, '-gp', $Credential.GetNetworkCredential().Password)
     return Invoke-Tool $vmware.VmRun ($prefix + $Arguments) -AllowFailure:$AllowFailure
-}
-
-function Send-BootKeys([string] $Vmx) {
-    # UEFI shows "Press any key to boot from CD or DVD" for a few seconds. Press
-    # Space (HID usage 0x2C) until Windows Setup has surely loaded from the CD.
-    # Firmware can try the empty disk and the network first, so keep pressing.
-    for ($i = 0; $i -lt 45; $i++) {
-        $null = Invoke-Tool $vmware.VmCli @($Vmx, 'MKS', 'sendKeyEvent', '44', '0') -AllowFailure
-        Start-Sleep -Seconds 1
-    }
 }
 
 # ---------------------------------------------------------------------------
@@ -479,9 +471,10 @@ if (-not $Resume) {
         createdAtUtc = (Get-Date).ToUniversalTime().ToString('o')
     } | ConvertTo-Json | Set-Content -LiteralPath $infoPath -Encoding utf8NoBOM
 
-    Write-Step 'Starting the VM and answering the CD boot prompt'
-    $null = Invoke-Tool $vmware.VmRun @('-T', 'ws', 'start', $vmx, 'gui')
-    Send-BootKeys $vmx
+    # "gui" waits until someone closes any VMware notice in the window, so start headless.
+    # Open the .vmx in VMware Workstation to watch; the window attaches to the running VM.
+    Write-Step 'Starting the VM'
+    $null = Invoke-Tool $vmware.VmRun @('-T', 'ws', 'start', $vmx, 'nogui')
 }
 else {
     if (-not (Test-Path -LiteralPath $vmx)) { throw "No VM was found at '$vmx'." }
@@ -499,18 +492,16 @@ if (Test-Path -LiteralPath $setupIso) {
 
 if (-not (Test-VmRunning $vmx)) {
     Write-Step 'Starting the configured VM'
-    $null = Invoke-Tool $vmware.VmRun @('-T', 'ws', 'start', $vmx, 'gui')
+    $null = Invoke-Tool $vmware.VmRun @('-T', 'ws', 'start', $vmx, 'nogui')
 }
 
+# Guest operations succeed only when VMware Tools runs in the guest. (checkToolsState
+# reports "installed" rather than "running" for current Tools, so it is not used.)
 Write-Step 'Waiting for VMware Tools and the automatic logon'
-Wait-Until {
-    (Invoke-Tool $vmware.VmRun @('-T', 'ws', 'checkToolsState', $vmx) -AllowFailure).Output -contains 'running'
-} ([TimeSpan]::FromMinutes(15)) 'VMware Tools to start in the guest. Check C:\ProgramData\WpfToolsMcp\vm-setup\setup.log in the VM' 10
-
 Wait-Until {
     $processes = Invoke-GuestVmRun $vmx $credential @('listProcessesInGuest', $vmx) -AllowFailure
     $processes.ExitCode -eq 0 -and ($processes.Output -match 'explorer\.exe')
-} ([TimeSpan]::FromMinutes(10)) 'the QA user desktop to start' 10
+} ([TimeSpan]::FromMinutes(20)) 'VMware Tools and the QA user desktop in the guest. Check C:\ProgramData\WpfToolsMcp\vm-setup\setup.log in the VM' 10
 
 $resultHostPath = Join-Path $stateDir 'setup-result.json'
 $null = Invoke-GuestVmRun $vmx $credential @('CopyFileFromGuestToHost', $vmx, "$guestStateDir\result.json", $resultHostPath)
@@ -552,4 +543,5 @@ Write-Host "  VM:         $vmx"
 Write-Host "  Guest:      $($info.userName)@$ip (automatic logon, desktop unlocked)"
 Write-Host "  SSH:        ssh -i `"$($info.sshKeyPath)`" -o UserKnownHostsFile=`"$knownHosts`" $($info.userName)@$ip"
 Write-Host "  Password:   (Import-Clixml '$credentialPath').GetNetworkCredential().Password"
-Write-Host "  Reset:      vmrun -T ws revertToSnapshot `"$vmx`" clean; vmrun -T ws start `"$vmx`" gui"
+Write-Host "  Reset:      vmrun -T ws revertToSnapshot `"$vmx`" clean; vmrun -T ws start `"$vmx`" nogui"
+Write-Host "  Watch:      open the .vmx in VMware Workstation; the window attaches to the running VM."

@@ -18,10 +18,14 @@ The script needs no input after it starts. It takes about 20 to 40 minutes. It:
 
 1. Downloads the .NET 8 SDK installer and checks its Microsoft signature.
 2. Creates an SSH key (`~/.ssh/wpf-tools-qa_ed25519`) if none exists.
-3. Creates the VM: UEFI with Secure Boot, 4 vCPUs, 8 GB RAM, an 80 GB NVMe disk,
-   NAT network, and 3D acceleration.
-4. Installs Windows from a generated `autounattend.xml`. The setup check for a
-   TPM is skipped, because VMware needs VM encryption for a virtual TPM.
+3. Creates the VM: legacy BIOS, 4 vCPUs, 8 GB RAM, an 80 GB NVMe disk, NAT
+   network, and 3D acceleration.
+4. Starts the VM without a window and installs Windows from a generated
+   `autounattend.xml`. The setup checks for a TPM and Secure Boot are skipped.
+   VMware needs VM encryption for a virtual TPM. UEFI boot from the Windows
+   ISO waits for a key press, and VMware has no working command that sends
+   keys to the guest. BIOS boot starts Setup from a blank disk without a
+   prompt. For WPF testing, the firmware type makes no difference.
 5. Runs `scripts/vm/guest/Setup-Guest.ps1` at the first logon. This installs
    VMware Tools, the .NET 8 SDK, and OpenSSH Server. It also keeps the session
    logged on, unlocked, and awake, and turns off the screen saver,
@@ -60,9 +64,10 @@ To show the guest password:
 
 - Revert to `clean` before a QA run to start from a known desktop:
   `vmrun -T ws revertToSnapshot <vmx> clean`, then
-  `vmrun -T ws start <vmx> gui`.
-- You can close the VMware Workstation window and let the VM run in the
-  background. The guest desktop stays unlocked.
+  `vmrun -T ws start <vmx> nogui`.
+- To watch the VM, open its `.vmx` in VMware Workstation. The window attaches
+  to the running VM. You can close the window again, and the VM continues to
+  run. The guest desktop stays unlocked.
 - Do not connect with Remote Desktop. A closed connection locks the session,
   and a minimized one stops rendering.
 - The evaluation edition expires after 90 days. Create a new VM with the same

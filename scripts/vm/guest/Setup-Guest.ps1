@@ -76,12 +76,21 @@ function Set-RegistryValue {
 
 try {
     Invoke-SetupStep 'vmware_tools' {
-        $installer = Get-PSDrive -PSProvider FileSystem |
-            ForEach-Object { Join-Path $_.Root 'setup64.exe' } |
+        # The Windows ISO also has setup.exe at its root, so find the Tools CD by
+        # its upgrader. Older Tools media name the 64-bit installer setup64.exe.
+        $toolsRoot = Get-PSDrive -PSProvider FileSystem |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.Root 'VMwareToolsUpgrader.exe') } |
+            Select-Object -First 1 -ExpandProperty Root
+        if (-not $toolsRoot) {
+            throw 'The VMware Tools CD (VMwareToolsUpgrader.exe) was not found.'
+        }
+
+        $installer = @('setup64.exe', 'setup.exe') |
+            ForEach-Object { Join-Path $toolsRoot $_ } |
             Where-Object { Test-Path -LiteralPath $_ } |
             Select-Object -First 1
         if (-not $installer) {
-            throw 'The VMware Tools CD (setup64.exe) was not found.'
+            throw "The VMware Tools CD at $toolsRoot has no setup64.exe or setup.exe."
         }
 
         # REBOOT=R defers the restart; the shutdown at the end of this script completes it.
