@@ -187,6 +187,11 @@ public sealed partial class AutomationController : IDisposable
     public Task<LaunchAppResponse> LaunchAsync(LaunchAppRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ExePath);
+        request = request with
+        {
+            ExePath = ClientPathMap.Current.ToServer(request.ExePath),
+            WorkingDirectory = ClientPathMap.Current.ToServerOrNull(request.WorkingDirectory)
+        };
         EnsureNotAttached();
 
         if (Path.IsPathRooted(request.ExePath) && !File.Exists(request.ExePath))
@@ -1497,7 +1502,7 @@ public sealed partial class AutomationController : IDisposable
             }
 
             var response = WithScreenshotRoutingMetadata(new TakeScreenshotResponse(
-                Path: outputPath,
+                Path: ClientPathMap.Current.ToClient(outputPath),
                 Width: bitmapToSave.Width,
                 Height: bitmapToSave.Height,
                 Format: GetImageFormatName(request.Format),
@@ -2060,7 +2065,7 @@ public sealed partial class AutomationController : IDisposable
     {
         if (!string.IsNullOrWhiteSpace(outputPath))
         {
-            var fullPath = Path.GetFullPath(outputPath);
+            var fullPath = Path.GetFullPath(ClientPathMap.Current.ToServer(outputPath));
             if (string.IsNullOrWhiteSpace(Path.GetExtension(fullPath)))
             {
                 fullPath = $"{fullPath}.{GetImageFileExtension(format)}";
@@ -2075,12 +2080,7 @@ public sealed partial class AutomationController : IDisposable
             return fullPath;
         }
 
-        var screenshotDirectory = Environment.GetEnvironmentVariable("WPF_TOOLS_MCP_SCREENSHOT_DIR");
-        if (string.IsNullOrWhiteSpace(screenshotDirectory))
-        {
-            screenshotDirectory = Path.Combine(Path.GetTempPath(), "wpf-tools-mcp", "screenshots");
-        }
-
+        var screenshotDirectory = ArtifactLocations.GetScreenshotDirectory();
         Directory.CreateDirectory(screenshotDirectory);
         var filename = $"screenshot-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}.{GetImageFileExtension(format)}";
         return Path.Combine(screenshotDirectory, filename);

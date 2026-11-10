@@ -64,6 +64,32 @@ internal sealed class McpTestContext : IAsyncDisposable
         return new McpTestContext(client, stderrLines);
     }
 
+    /// <summary>Connects to a server that already listens on a Streamable HTTP endpoint.</summary>
+    public static async Task<McpTestContext> ConnectHttpAsync(
+        Uri endpoint,
+        string? bearerToken,
+        CancellationToken cancellationToken = default)
+    {
+        var transportOptions = new HttpClientTransportOptions
+        {
+            Endpoint = endpoint,
+            TransportMode = HttpTransportMode.StreamableHttp,
+            Name = "WpfToolsMcp.McpServer (HTTP tests)"
+        };
+
+        if (bearerToken is not null)
+        {
+            transportOptions.AdditionalHeaders = new Dictionary<string, string>
+            {
+                ["Authorization"] = $"Bearer {bearerToken}"
+            };
+        }
+
+        var transport = new HttpClientTransport(transportOptions, NullLoggerFactory.Instance);
+        var client = await McpClient.CreateAsync(transport, clientOptions: null, NullLoggerFactory.Instance, cancellationToken);
+        return new McpTestContext(client, new ConcurrentQueue<string>());
+    }
+
     public async Task<IList<McpClientTool>> ListToolsAsync(CancellationToken cancellationToken = default) =>
         await _client.ListToolsAsync(cancellationToken: cancellationToken);
 

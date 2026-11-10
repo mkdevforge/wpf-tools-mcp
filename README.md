@@ -9,14 +9,16 @@ diagnosing running WPF applications.
   WPF visual tree, bindings, DataContext values, dependency properties, styles,
   templates, highlighting, UI-thread latency, and supported WPF-native semantic
   actions.
-- **Transport:** MCP uses stdio; the server and injected agent communicate over
-  a current-user-only named pipe.
+- **Transport:** MCP uses stdio by default, or Streamable HTTP for a server in
+  a VM or on another machine. The server and injected agent communicate over a
+  current-user-only named pipe.
 
 ## Requirements
 
 - Windows 10 or 11.
 - .NET 8 SDK to install or build the tool. Running an already-installed package
-  requires the .NET 8 Desktop Runtime.
+  requires the .NET 8 Desktop Runtime and the ASP.NET Core Runtime. The SDK
+  includes both.
 - Deep WPF inspection requires an x86 or x64 .NET 8+ WPF target running as the
   same user and at no higher elevation than the MCP server.
 
@@ -36,6 +38,12 @@ process, window, and element identities are validated; scans, queues, payloads,
 artifacts, and wait times stay bounded; cancellation is honored; cleanup removes
 only MCP-owned resources; and responses do not claim WPF or UIA capabilities
 that the current target and agent have not demonstrated.
+
+The HTTP transport gives every client that can reach the endpoint control of
+the desktop that the server runs on. It accepts other machines only with an
+access token, and it rejects requests from web pages. HTTP has no encryption,
+so use it only on a network that you trust, such as the host-only network of
+a local VM. Over other networks, use an SSH tunnel to a loopback endpoint.
 
 ## Install
 
@@ -101,6 +109,69 @@ Enable the full profile with a command argument:
 The equivalent environment setting is
 `WPF_TOOLS_MCP_TOOL_PROFILE=diagnostics`. Accepted command values are `core`
 and `diagnostics`; `diagnostic` and `full` are aliases for `diagnostics`.
+
+### HTTP Transport
+
+Use HTTP when the server runs on a different machine than the MCP client, for
+example in a QA VM. Tools that send input or capture the screen need the
+server to run in the desktop session of that machine. A process that SSH
+starts runs in session 0 and cannot use the desktop. See
+[docs/remote-qa-vm.md](docs/remote-qa-vm.md) for a VM that starts the server
+at logon.
+
+```powershell
+$env:WPF_TOOLS_MCP_HTTP_TOKEN = '<at least 32 random characters>'
+wpf-tools-mcp --transport http --http-url http://0.0.0.0:5765/mcp
+```
+
+| Option | Environment variable | Meaning |
+|---|---|---|
+| `--transport stdio\|http` | `WPF_TOOLS_MCP_TRANSPORT` | The MCP transport. The default is `stdio`. |
+| `--http-url <url>` | `WPF_TOOLS_MCP_HTTP_URL` | The address, port, and path to listen on. The default is `http://127.0.0.1:5765/mcp`. Use an IP address or `localhost`. HTTPS is not supported. |
+| `--http-token-file <path>` | `WPF_TOOLS_MCP_HTTP_TOKEN` | The access token, at least 32 characters. The variable holds the token itself. An address other than loopback requires a token. |
+
+When a token is set, clients must send `Authorization: Bearer <token>`. The
+server answers `401` without it. It answers `403` to every request with an
+`Origin` header, because MCP clients do not send one and browsers do. The
+server keeps sessions and launched applications when a client disconnects, so
+a client that connects again finds them with `list_sessions`.
+
+A client configuration for Claude Code:
+
+```powershell
+claude mcp add --transport http wpf-tools-qa http://192.168.208.128:5765/mcp --header "Authorization: Bearer <token>"
+```
+
+### Artifact Files and Path Mapping
+
+Screenshots, screenshot sequences, and traces are files. Tool responses give
+their paths, and the client reads the files when it needs them. When the
+caller gives no path, the server uses these folders:
+
+| Files | Folder |
+|---|---|
+| Screenshots and sequences | `WPF_TOOLS_MCP_SCREENSHOT_DIR`, else `screenshots` in the artifact folder, else `%TEMP%\wpf-tools-mcp\screenshots` |
+| Traces | `traces` in the artifact folder, else `%TEMP%` |
+
+Set the artifact folder with `--artifact-dir <path>` or
+`WPF_TOOLS_MCP_ARTIFACT_DIR`.
+
+When the server and the client see the same folder under different paths, for
+example a host folder that is shared into a VM, give the server a path map:
+
+```powershell
+wpf-tools-mcp --transport http --artifact-dir "\\vmware-host\Shared Folders\wpf-qa\artifacts" `
+  --path-map "\\vmware-host\Shared Folders\wpf-qa=D:\wpf-qa\shared"
+```
+
+Each `--path-map serverPath=clientPath` maps one folder. Use the option more
+than once for more folders, or separate entries with `|` in
+`WPF_TOOLS_MCP_PATH_MAP`. The server then reports artifact paths under the
+client path, also in sequence manifests. It also accepts client paths for
+`exePath` and `workingDirectory` of `launch_app`, `outputPath`,
+`outputDirectory`, and `screenshotOutputPath`. Other paths, for example in
+`launch_app` arguments, stay unchanged. Paths outside the mapped folders are
+server paths.
 
 ## Tool Surface
 
@@ -1202,8 +1273,8 @@ is supplied.
 
 ## Repository Layout
 
-- `src/WpfToolsMcp.McpServer`: stdio MCP host, tool profiles, tool definitions,
-  and subscriptions.
+- `src/WpfToolsMcp.McpServer`: MCP host (stdio and Streamable HTTP), tool
+  profiles, tool definitions, and subscriptions.
 - `src/WpfToolsMcp.Automation`: per-session controllers, FlaUI/UIA automation,
   screenshots, handles, tracing, and injected-agent orchestration.
 - `src/WpfToolsMcp.Agent` and `src/WpfToolsMcp.AgentProtocol`: injected WPF
@@ -1214,6 +1285,7 @@ is supplied.
 - `tests/WpfToolsMcp.SnapshotTests`: NUnit and Verify integration snapshots.
 - `tools/WpfToolsMcp.McpSmokeRunner`: optional black-box smoke runner.
 - `references/snoopwpf`: pinned Snoop git submodule.
+- `scripts/vm`: scripts that create a QA VM and install the server in it.
 
 The PRD and phase review files under `docs/` are historical design and review
 records. The README and MCP-advertised tool schemas are the current usage

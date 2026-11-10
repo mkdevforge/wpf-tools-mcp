@@ -253,7 +253,7 @@ public sealed partial class AutomationController
                     }
 
                     screenshot = new TakeScreenshotResponse(
-                        Path: screenshotPath,
+                        Path: ClientPathMap.Current.ToClient(screenshotPath),
                         Width: bitmap.Width,
                         Height: bitmap.Height,
                         Format: GetImageFormatName(request.ScreenshotFormat),

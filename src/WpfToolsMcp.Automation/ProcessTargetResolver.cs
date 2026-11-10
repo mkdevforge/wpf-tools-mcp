@@ -61,7 +61,7 @@ internal sealed record ResolvedProcessTarget(
             StartTimeUtc: StartTimeUtc.ToString("O", CultureInfo.InvariantCulture),
             MainWindowHandle: MainWindowHandle,
             MainWindowTitle: MainWindowTitle,
-            ExecutablePath: ExecutablePath,
+            ExecutablePath: ClientPathMap.Current.ToClientOrNull(ExecutablePath),
             ExecutablePathUnavailableReason: ExecutablePathUnavailableReason);
 }
 

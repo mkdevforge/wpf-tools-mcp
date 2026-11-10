@@ -141,9 +141,11 @@ internal static class ScreenshotSequenceCoordinator
                         sample.Viewport);
                 }
 
+                // The manifest and the response are for the client, so they carry
+                // the client's view of the frame path.
                 frames.Add(new ScreenshotSequenceFrame(
                     index,
-                    framePath,
+                    ClientPathMap.Current.ToClient(framePath),
                     observedAtUtc,
                     elapsedMs,
                     captureDurationMs,
@@ -216,8 +218,8 @@ internal static class ScreenshotSequenceCoordinator
         ScreenshotSequenceManifest manifest) =>
         new(
             manifest.SequenceId,
-            directoryPath,
-            manifestPath,
+            ClientPathMap.Current.ToClient(directoryPath),
+            ClientPathMap.Current.ToClient(manifestPath),
             manifest.Frames[0].Path,
             manifest.Frames[^1].Path,
             manifest.RequestedFrameCount,

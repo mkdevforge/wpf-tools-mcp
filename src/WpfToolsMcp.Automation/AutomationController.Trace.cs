@@ -98,8 +98,8 @@ public sealed partial class AutomationController
 
         var stoppedAt = DateTime.UtcNow;
         var path = string.IsNullOrWhiteSpace(outputPath)
-            ? Path.Combine(Path.GetTempPath(), $"wpf-tools-mcp-trace-{traceId}.json")
-            : outputPath.Trim();
+            ? Path.Combine(ArtifactLocations.GetTraceDirectory(), $"wpf-tools-mcp-trace-{traceId}.json")
+            : ClientPathMap.Current.ToServer(outputPath.Trim());
 
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -137,7 +137,7 @@ public sealed partial class AutomationController
         return new TraceStopResponse(
             TraceId: traceId,
             StoppedAtUtc: stoppedAt,
-            OutputPath: path,
+            OutputPath: ClientPathMap.Current.ToClient(path),
             EventCount: payload.RetainedEventCount,
             ReturnedEventCount: returnedEventCount,
             Truncated: truncated,

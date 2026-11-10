@@ -154,16 +154,9 @@ public sealed partial class AutomationController
 
     private static string CreateScreenshotSequenceDirectory(string? outputDirectory, string sequenceId)
     {
-        var parent = outputDirectory;
-        if (string.IsNullOrWhiteSpace(parent))
-        {
-            parent = Environment.GetEnvironmentVariable("WPF_TOOLS_MCP_SCREENSHOT_DIR");
-        }
-
-        if (string.IsNullOrWhiteSpace(parent))
-        {
-            parent = Path.Combine(Path.GetTempPath(), "wpf-tools-mcp", "screenshots");
-        }
+        var parent = string.IsNullOrWhiteSpace(outputDirectory)
+            ? ArtifactLocations.GetScreenshotDirectory()
+            : ClientPathMap.Current.ToServer(outputDirectory);
 
         var directoryPath = Path.Combine(Path.GetFullPath(parent), $"sequence-{sequenceId}");
         Directory.CreateDirectory(directoryPath);

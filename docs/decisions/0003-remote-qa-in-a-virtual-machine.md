@@ -1,7 +1,7 @@
 # 0003: Remote QA runs the server inside a virtual machine
 
-- Status: Accepted (step 1 implemented; later steps planned)
-- Date: 2026-11-07
+- Status: Accepted (implemented)
+- Date: 2026-11-07, revised 2026-11-10
 
 ## Context
 
@@ -30,10 +30,8 @@ We considered these alternatives:
 
 The MCP server runs inside a Windows VM, in the logged-on user's interactive
 session. The agent stays on the host and connects to the server over the
-network. The design does not depend on a specific hypervisor; it is developed
-on VMware Workstation and is intended for Hyper-V as well.
-
-The work proceeds in steps:
+network. The design does not depend on a specific hypervisor. The scripts
+support VMware Workstation.
 
 1. Interactive desktop readiness. Before physical input, foreground activation,
    or screen capture, the server checks its session and fails with
@@ -41,16 +39,27 @@ The work proceeds in steps:
    input or returning a black capture. `get_server_environment` reports the
    status, displays and adapters, OS, firmware system identity, and WPF render
    tier. This also helps local use.
-2. Screenshots as MCP image content, so that a remote agent receives the image
-   instead of a path on the server's disk.
-3. Streamable HTTP transport as an opt-in mode. It binds to loopback by
-   default; the recommended path from the host is an SSH tunnel. A non-loopback
-   bind requires a bearer token. One MCP client holds the server at a time; a
-   second client gets a clear busy error. Stdio stays the default.
-4. VM setup scripts (auto-logon, no lock screen or screen saver, server started
-   at logon in the interactive session) and a README section for remote mode,
-   including the changed trust boundary.
-5. Host-to-VM path mapping for `launch_app` and artifact access for traces.
+2. Streamable HTTP transport as an opt-in mode. It listens on loopback by
+   default. An address other than loopback requires a bearer token of at least
+   32 characters. The server rejects requests with an `Origin` header, so web
+   pages cannot use it. Stdio stays the default.
+3. Artifacts stay files. Screenshots, sequences, and traces are written to an
+   artifact folder, and responses give their paths. In the VM, the artifact
+   folder is in a host folder that VMware shares into the guest. A path map
+   makes the server publish host paths, also in sequence manifests, and accept
+   host paths for `launch_app` and output paths.
+4. VM scripts. `New-WpfQaVm.ps1` creates the VM with automatic logon, no lock
+   screen, no screen saver, and no automatic updates. `Install-WpfQaServer.ps1`
+   installs the server, which a scheduled task starts at logon in the desktop
+   session, and replaces the snapshot `clean`.
+
+Two parts of the first plan were dropped:
+
+- Screenshots as MCP image content. The file-and-path design already works when
+  the client can read the files, and the shared folder gives it that. Image
+  content would make every response large and would depend on client support.
+- A single-client lease. Several clients can share the server, like several
+  stdio servers on one desktop. Sessions survive when a client reconnects.
 
 ## Consequences
 
@@ -64,7 +73,12 @@ The work proceeds in steps:
   uses the hypervisor console instead.
 - A VM without GPU acceleration renders WPF in software (render tier 0). Visual
   results can differ slightly from a developer machine; the environment report
-  makes the render tier visible.
-- Remote mode (step 3) changes the trust model in the README from
-  same-user local use to an authenticated network endpoint, so that step must
-  update the documented trust boundary.
+  makes the render tier visible. VMware's 3D adapter gives render tier 2.
+- The tool needs the ASP.NET Core Runtime in addition to the Desktop Runtime,
+  also for stdio. The .NET SDK, which installs the tool, contains both.
+- HTTP has no encryption. On the host-only network of a local VM this is
+  acceptable. Over other networks, use an SSH tunnel to a loopback endpoint.
+- Windows Update restarted the VM outside active hours although a user was
+  logged on, and the VM did not boot after that update. The VM therefore has
+  automatic updates turned off. Create a new VM from a current ISO instead of
+  updating it.
