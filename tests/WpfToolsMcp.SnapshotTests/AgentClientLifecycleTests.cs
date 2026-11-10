@@ -358,8 +358,10 @@ public sealed class AgentClientLifecycleTests
             Assert.That(request.Method, Is.EqualTo("first"));
 
             callCancellation.Cancel();
-            Assert.ThrowsAsync<OperationCanceledException>(async () =>
-                _ = await callTask.WaitAsync(TimeSpan.FromSeconds(2)));
+            // A cancellation during the pending pipe read surfaces as TaskCanceledException.
+            Assert.That(
+                async () => _ = await callTask.WaitAsync(TimeSpan.FromSeconds(2)),
+                NUnit.Framework.Throws.InstanceOf<OperationCanceledException>());
 
             using var disconnectTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             var readBuffer = new byte[1];
@@ -635,8 +637,10 @@ public sealed class AgentClientLifecycleTests
             Assert.That(canceledTreeRequest.Method, Is.EqualTo("wpf/get_visual_tree"));
             callerCancellation.Cancel();
 
-            Assert.ThrowsAsync<OperationCanceledException>(async () =>
-                _ = await canceledCall.WaitAsync(TimeSpan.FromSeconds(2)));
+            // A cancellation during the pending pipe read surfaces as TaskCanceledException.
+            Assert.That(
+                async () => _ = await canceledCall.WaitAsync(TimeSpan.FromSeconds(2)),
+                NUnit.Framework.Throws.InstanceOf<OperationCanceledException>());
             var capability = controller.GetWpfBackendCapabilityState();
             Assert.Multiple(() =>
             {
