@@ -12,7 +12,7 @@ The script:
 - installs the .NET 8 SDK from the setup CD,
 - installs and starts OpenSSH Server and authorizes the host key,
 - keeps the session logged on, unlocked, and awake, without screen saver,
-  notifications, or automatic restarts while the user is logged on.
+  notifications, automatic updates, or automatic restarts.
 
 Each step records "ok" or its error in
 C:\ProgramData\WpfToolsMcp\vm-setup\result.json. The full log is setup.log in
@@ -156,8 +156,19 @@ try {
         # Toasts can cover the application under test.
         Set-RegistryValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications' 'ToastEnabled' 0
 
-        # Do not restart for updates while the QA user is logged on.
+        # No automatic updates. Windows Update restarts the VM outside active
+        # hours even with a logged-on user, and an update applied this way left
+        # the VM unable to boot. Create a new VM from a current ISO instead.
+        Set-RegistryValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoUpdate' 1
         Set-RegistryValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoRebootWithLoggedOnUsers' 1
+
+        # VMware Tools keeps the clock on host time (tools.syncTime). After a
+        # snapshot revert, the Windows Time service set the clock back to the
+        # snapshot time about a minute after VMware Tools had corrected it. Use
+        # only VMware Tools as the time source.
+        Set-RegistryValue 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config' 'UtilizeSslTimeData' 0
+        Stop-Service -Name W32Time -ErrorAction SilentlyContinue
+        Set-Service -Name W32Time -StartupType Disabled
     }
 }
 finally {

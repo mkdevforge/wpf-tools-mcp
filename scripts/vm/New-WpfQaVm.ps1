@@ -14,8 +14,10 @@ The script needs only a Windows 11 ISO. It:
    the VM uses BIOS boot, which starts Setup from a blank disk without a prompt.
 3. Runs guest/Setup-Guest.ps1 at the first logon. It installs VMware Tools, the
    .NET 8 SDK, and OpenSSH Server, and keeps the session logged on and unlocked.
-4. Removes the setup media, starts the VM, checks the guest setup result and
-   SSH access, and takes a snapshot named "clean" of the running desktop.
+4. Removes the setup media, starts the VM, and checks the guest setup result
+   and SSH access.
+5. Installs the MCP server with Install-WpfQaServer.ps1, unless -SkipServer is
+   given, and takes a snapshot named "clean" of the running desktop.
 
 Windows installation takes about 20 to 40 minutes. If the script stops while
 it waits, run it again with -Resume.
@@ -45,60 +47,20 @@ param(
     [ValidateRange(600, 4320)] [int] $ScreenHeight = 1080,
     [string] $SshKeyPath = (Join-Path $HOME '.ssh\wpf-tools-qa_ed25519'),
     [ValidateRange(10, 600)] [int] $InstallTimeoutMinutes = 120,
+    [switch] $SkipServer,
     [switch] $Resume
 )
 
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandArgumentPassing = 'Standard'
+. (Join-Path $PSScriptRoot 'WpfQaVm.Common.ps1')
 
-$stateDir = Join-Path $env:LOCALAPPDATA "WpfToolsMcp\vms\$VmName"
+$stateDir = Get-QaVmStateDirectory $VmName
 $credentialPath = Join-Path $stateDir 'guest-credential.xml'
 $infoPath = Join-Path $stateDir 'vm.json'
 $cacheDir = Join-Path $env:LOCALAPPDATA 'WpfToolsMcp\vm-cache'
 $guestStateDir = 'C:\ProgramData\WpfToolsMcp\vm-setup'
 $sdkUrl = 'https://aka.ms/dotnet/8.0/dotnet-sdk-win-x64.exe'
-
-function Write-Step([string] $Message) {
-    Write-Host "[$(Get-Date -Format HH:mm:ss)] $Message"
-}
-
-function Find-VMware {
-    $candidates = @(
-        (Join-Path $env:ProgramFiles 'VMware\VMware Workstation'),
-        (Join-Path ${env:ProgramFiles(x86)} 'VMware\VMware Workstation')
-    )
-    $dir = $candidates | Where-Object { Test-Path (Join-Path $_ 'vmrun.exe') } | Select-Object -First 1
-    if (-not $dir) {
-        throw 'VMware Workstation was not found. Install VMware Workstation Pro first.'
-    }
-
-    $tools = Join-Path $dir 'windows.iso'
-    if (-not (Test-Path $tools)) {
-        throw "The VMware Tools ISO '$tools' was not found. Repair the VMware Workstation installation."
-    }
-
-    [pscustomobject]@{
-        VmRun = Join-Path $dir 'vmrun.exe'
-        VmCli = Join-Path $dir 'vmcli.exe'
-        VDiskManager = Join-Path $dir 'vmware-vdiskmanager.exe'
-        ToolsIso = $tools
-    }
-}
-
-function Invoke-Tool([string] $FilePath, [string[]] $Arguments, [switch] $AllowFailure) {
-    $output = & $FilePath @Arguments 2>&1 | ForEach-Object { "$_" }
-    if ($LASTEXITCODE -ne 0 -and -not $AllowFailure) {
-        throw "$(Split-Path $FilePath -Leaf) $($Arguments[0..1] -join ' ') failed with exit code $LASTEXITCODE`: $($output -join ' ')"
-    }
-
-    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = @($output) }
-}
-
-function Test-VmRunning([string] $Vmx) {
-    $list = (Invoke-Tool $vmware.VmRun @('-T', 'ws', 'list')).Output
-    $full = [IO.Path]::GetFullPath($Vmx)
-    return [bool]($list | Where-Object { $_.Trim() -ieq $full })
-}
 
 function Get-DefaultInputLocale {
     $tip = Get-WinUserLanguageList |
@@ -393,22 +355,6 @@ function Remove-SetupMedia([string] $Vmx, [string] $SetupIso) {
     }
 }
 
-function Wait-Until([scriptblock] $Condition, [TimeSpan] $Timeout, [string] $Description, [int] $IntervalSeconds = 15) {
-    $deadline = (Get-Date) + $Timeout
-    while (-not (& $Condition)) {
-        if ((Get-Date) -gt $deadline) {
-            throw "Timed out after $([int]$Timeout.TotalMinutes) minutes while waiting for $Description."
-        }
-
-        Start-Sleep -Seconds $IntervalSeconds
-    }
-}
-
-function Invoke-GuestVmRun([string] $Vmx, [pscredential] $Credential, [string[]] $Arguments, [switch] $AllowFailure) {
-    $prefix = @('-T', 'ws', '-gu', $Credential.UserName, '-gp', $Credential.GetNetworkCredential().Password)
-    return Invoke-Tool $vmware.VmRun ($prefix + $Arguments) -AllowFailure:$AllowFailure
-}
-
 # ---------------------------------------------------------------------------
 
 $vmware = Find-VMware
@@ -419,6 +365,11 @@ if (-not $VmDirectory) {
 $VmDirectory = [IO.Path]::GetFullPath($VmDirectory)
 $vmx = Join-Path $VmDirectory "$VmName.vmx"
 $setupIso = Join-Path $VmDirectory 'wpf-qa-setup.iso'
+
+$snoopLauncher = Join-Path $PSScriptRoot '..\..\references\snoopwpf\bin\Release\Snoop.InjectorLauncher.x64.exe'
+if (-not $SkipServer -and -not (Test-Path -LiteralPath $snoopLauncher)) {
+    throw 'The MCP server for the VM needs the Snoop injector. Run scripts/build-snoop.ps1 -Configuration Release first, or use -SkipServer.'
+}
 
 if (-not $Resume) {
     if (-not $IsoPath) { throw 'Specify -IsoPath, the path to a Windows 11 ISO.' }
@@ -519,29 +470,27 @@ if ($failed.Count -gt 0) {
 Write-Step "Setting the guest resolution to $($ScreenWidth)x$($ScreenHeight)"
 $null = Invoke-Tool $vmware.VmCli @($vmx, 'MKS', 'SetGuestResolution', "$ScreenWidth", "$ScreenHeight")
 
-$ip = ((Invoke-Tool $vmware.VmRun @('-T', 'ws', 'getGuestIPAddress', $vmx, '-wait')).Output | Select-Object -Last 1).Trim()
+$ip = Get-GuestIpAddress $vmx
 $info = Get-Content -Raw -LiteralPath $infoPath | ConvertFrom-Json
-$knownHosts = $info.knownHostsPath
 Write-Step "Checking SSH access to $UserName@$ip"
-$sshArgs = @('-i', $info.sshKeyPath, '-o', "UserKnownHostsFile=$knownHosts", '-o', 'StrictHostKeyChecking=accept-new', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', "$($info.userName)@$ip")
-$sshCheck = & ssh @sshArgs 'Write-Output ([Environment]::UserName)' 2>&1
-if ($LASTEXITCODE -ne 0) {
-    throw "SSH access failed with exit code $LASTEXITCODE`: $sshCheck. The VM is running without a snapshot."
+$null = Invoke-GuestSsh $info $ip 'Write-Output ([Environment]::UserName)'
+$info | Add-Member -NotePropertyName ipAddress -NotePropertyValue $ip -Force
+$info | Add-Member -NotePropertyName snapshot -NotePropertyValue 'clean' -Force
+$info | ConvertTo-Json | Set-Content -LiteralPath $infoPath -Encoding utf8NoBOM
+
+if (-not $SkipServer) {
+    & (Join-Path $PSScriptRoot 'Install-WpfQaServer.ps1') -VmName $VmName -NoSnapshot
 }
 
 Start-Sleep -Seconds 20
 Write-Step 'Taking the snapshot "clean" of the running desktop'
 $null = Invoke-Tool $vmware.VmRun @('-T', 'ws', 'snapshot', $vmx, 'clean')
 
-$info | Add-Member -NotePropertyName ipAddress -NotePropertyValue $ip -Force
-$info | Add-Member -NotePropertyName snapshot -NotePropertyValue 'clean' -Force
-$info | ConvertTo-Json | Set-Content -LiteralPath $infoPath -Encoding utf8NoBOM
-
 Write-Step 'The QA VM is ready.'
 Write-Host ''
 Write-Host "  VM:         $vmx"
 Write-Host "  Guest:      $($info.userName)@$ip (automatic logon, desktop unlocked)"
-Write-Host "  SSH:        ssh -i `"$($info.sshKeyPath)`" -o UserKnownHostsFile=`"$knownHosts`" $($info.userName)@$ip"
+Write-Host "  SSH:        ssh -i `"$($info.sshKeyPath)`" -o UserKnownHostsFile=`"$($info.knownHostsPath)`" $($info.userName)@$ip"
 Write-Host "  Password:   (Import-Clixml '$credentialPath').GetNetworkCredential().Password"
 Write-Host "  Reset:      vmrun -T ws revertToSnapshot `"$vmx`" clean; vmrun -T ws start `"$vmx`" nogui"
 Write-Host "  Watch:      open the .vmx in VMware Workstation; the window attaches to the running VM."
