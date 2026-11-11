@@ -1,7 +1,7 @@
 # 0003: Remote QA runs the server inside a virtual machine
 
 - Status: Accepted (implemented)
-- Date: 2026-11-07, revised 2026-11-10
+- Date: 2026-11-07, revised 2026-11-11
 
 ## Context
 
@@ -31,7 +31,8 @@ We considered these alternatives:
 The MCP server runs inside a Windows VM, in the logged-on user's interactive
 session. The agent stays on the host and connects to the server over the
 network. The design does not depend on a specific hypervisor. The scripts
-support VMware Workstation.
+support VMware Workstation VMs, local Hyper-V VMs, and other Windows machines
+that the host reaches over the network.
 
 1. Interactive desktop readiness. Before physical input, foreground activation,
    or screen capture, the server checks its session and fails with
@@ -44,14 +45,22 @@ support VMware Workstation.
    32 characters. The server rejects requests with an `Origin` header, so web
    pages cannot use it. Stdio stays the default.
 3. Artifacts stay files. Screenshots, sequences, and traces are written to an
-   artifact folder, and responses give their paths. In the VM, the artifact
-   folder is in a host folder that VMware shares into the guest. A path map
+   artifact folder, and responses give their paths. On a QA machine, the
+   artifact folder is in a shared folder: a host folder that VMware shares into
+   the guest, or an SMB share on a Hyper-V VM or another machine. A path map
    makes the server publish host paths, also in sequence manifests, and accept
    host paths for `launch_app` and output paths.
-4. VM scripts. `New-WpfQaVm.ps1` creates the VM with automatic logon, no lock
-   screen, no screen saver, and no automatic updates. `Install-WpfQaServer.ps1`
-   installs the server, which a scheduled task starts at logon in the desktop
-   session, and replaces the snapshot `clean`.
+4. QA machine scripts. `New-WpfQaVm.ps1` creates a VMware VM with automatic
+   logon, no lock screen, no screen saver, and no automatic updates.
+   `Register-WpfQaMachine.ps1` prepares an existing Hyper-V VM or another
+   machine in the same way. Automatic updates stay on there unless the user
+   turns them off. `Install-WpfQaServer.ps1` installs a self-contained server,
+   which a scheduled task starts at logon in the desktop session, and replaces
+   the snapshot or checkpoint. `Reset-WpfQaVm.ps1` reverts or restarts the
+   machine and waits until the server is ready.
+5. SSH for setup only. The scripts use SSH to install the server. MCP traffic
+   uses HTTP. For a remote machine, the server can listen on loopback only, and
+   the client connects through an SSH tunnel.
 
 Two parts of the first plan were dropped:
 
@@ -75,9 +84,16 @@ Two parts of the first plan were dropped:
   results can differ slightly from a developer machine; the environment report
   makes the render tier visible. VMware's 3D adapter gives render tier 2.
 - The tool needs the ASP.NET Core Runtime in addition to the Desktop Runtime,
-  also for stdio. The .NET SDK, which installs the tool, contains both.
+  also for stdio. The .NET SDK, which installs the tool, contains both. The
+  install script publishes a self-contained server, so a QA machine needs no
+  runtime.
 - HTTP has no encryption. On the host-only network of a local VM this is
-  acceptable. Over other networks, use an SSH tunnel to a loopback endpoint.
+  acceptable. Over other networks, use `-Listen Loopback` and an SSH tunnel.
+- Hyper-V can refuse checkpoints for a VM with an assigned GPU. A reset then
+  restarts Windows, which takes about a minute instead of seconds.
+- With GPU partitioning, community reports say that screen captures can be
+  black in the console session while `PrintWindow` captures work. This is not
+  tested, because the test host has no Hyper-V.
 - Windows Update restarted the VM outside active hours although a user was
   logged on, and the VM did not boot after that update. The VM therefore has
   automatic updates turned off. Create a new VM from a current ISO instead of

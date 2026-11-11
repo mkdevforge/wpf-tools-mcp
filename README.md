@@ -116,7 +116,8 @@ Use HTTP when the server runs on a different machine than the MCP client, for
 example in a QA VM. Tools that send input or capture the screen need the
 server to run in the desktop session of that machine. A process that SSH
 starts runs in session 0 and cannot use the desktop. See
-[docs/remote-qa-vm.md](docs/remote-qa-vm.md) for a VM that starts the server
+[docs/remote-qa-vm.md](docs/remote-qa-vm.md) for scripts that install the
+server on a VMware VM, a Hyper-V VM, or another Windows machine, and start it
 at logon.
 
 ```powershell
@@ -779,8 +780,8 @@ still reports as active and unlocked. The check cannot detect this. On a QA
 VM, use the hypervisor's console view, or keep the Remote Desktop window
 restored.
 
-To create a QA VM with VMware Workstation, see
-[docs/remote-qa-vm.md](docs/remote-qa-vm.md).
+To create a QA VM with VMware Workstation, or to prepare a Hyper-V VM or
+another Windows machine, see [docs/remote-qa-vm.md](docs/remote-qa-vm.md).
 
 ### Virtualized Item Realization
 
@@ -1285,7 +1286,8 @@ is supplied.
 - `tests/WpfToolsMcp.SnapshotTests`: NUnit and Verify integration snapshots.
 - `tools/WpfToolsMcp.McpSmokeRunner`: optional black-box smoke runner.
 - `references/snoopwpf`: pinned Snoop git submodule.
-- `scripts/vm`: scripts that create a QA VM and install the server in it.
+- `scripts/vm`: scripts that create or register a QA machine, install the
+  server on it, and reset it.
 
 The PRD and phase review files under `docs/` are historical design and review
 records. The README and MCP-advertised tool schemas are the current usage

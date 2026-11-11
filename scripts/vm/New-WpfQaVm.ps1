@@ -1,4 +1,4 @@
-#Requires -Version 7.2
+#Requires -Version 7.3
 <#
 .SYNOPSIS
 Creates a VMware Workstation Windows 11 VM for remote WPF Tools MCP QA.
@@ -98,22 +98,6 @@ function Get-SdkInstaller {
     }
 
     return $path
-}
-
-function Get-SshPublicKey {
-    if (-not (Test-Path $SshKeyPath)) {
-        Write-Step "Creating SSH key $SshKeyPath"
-        New-Item -ItemType Directory -Force -Path (Split-Path $SshKeyPath) | Out-Null
-        & ssh-keygen -t ed25519 -f $SshKeyPath -N '' -C "wpf-tools-mcp-qa@$env:COMPUTERNAME" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "ssh-keygen failed with exit code $LASTEXITCODE." }
-    }
-
-    $public = "$SshKeyPath.pub"
-    if (-not (Test-Path $public)) {
-        throw "The public key '$public' was not found."
-    }
-
-    return (Get-Content -Raw $public).Trim()
 }
 
 function ConvertTo-XmlText([string] $Value) {
@@ -384,7 +368,7 @@ if (-not $Resume) {
     if (-not $TimeZone) { $TimeZone = (Get-TimeZone).Id }
 
     $sdk = Get-SdkInstaller
-    $publicKey = Get-SshPublicKey
+    $publicKey = Get-QaSshPublicKey $SshKeyPath
     $password = New-GuestPassword
     $credential = [pscredential]::new($UserName, (ConvertTo-SecureString $password -AsPlainText -Force))
 
@@ -397,7 +381,9 @@ if (-not $Resume) {
         $setupDir = Join-Path $staging 'wpf-qa-setup'
         New-Item -ItemType Directory -Force -Path $setupDir | Out-Null
         Set-Content -LiteralPath (Join-Path $staging 'autounattend.xml') -Value (New-AutounattendXml $password) -Encoding utf8NoBOM
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'guest\Setup-Guest.ps1') -Destination $setupDir
+        foreach ($file in @('Setup-Guest.ps1', 'QaMachine.ps1')) {
+            Copy-Item -LiteralPath (Join-Path $PSScriptRoot "guest\$file") -Destination $setupDir
+        }
         Copy-Item -LiteralPath $sdk -Destination (Join-Path $setupDir 'dotnet-sdk-win-x64.exe')
         Set-Content -LiteralPath (Join-Path $setupDir 'authorized_keys') -Value $publicKey -Encoding ascii
 
@@ -414,6 +400,7 @@ if (-not $Resume) {
 
     [ordered]@{
         vmName = $VmName
+        kind = 'vmware'
         vmx = $vmx
         userName = $UserName
         computerName = $ComputerName
@@ -474,7 +461,7 @@ $ip = Get-GuestIpAddress $vmx
 $info = Get-Content -Raw -LiteralPath $infoPath | ConvertFrom-Json
 Write-Step "Checking SSH access to $UserName@$ip"
 $null = Invoke-GuestSsh $info $ip 'Write-Output ([Environment]::UserName)'
-$info | Add-Member -NotePropertyName ipAddress -NotePropertyValue $ip -Force
+$info | Add-Member -NotePropertyName address -NotePropertyValue $ip -Force
 $info | Add-Member -NotePropertyName snapshot -NotePropertyValue 'clean' -Force
 $info | ConvertTo-Json | Set-Content -LiteralPath $infoPath -Encoding utf8NoBOM
 
@@ -492,5 +479,5 @@ Write-Host "  VM:         $vmx"
 Write-Host "  Guest:      $($info.userName)@$ip (automatic logon, desktop unlocked)"
 Write-Host "  SSH:        ssh -i `"$($info.sshKeyPath)`" -o UserKnownHostsFile=`"$($info.knownHostsPath)`" $($info.userName)@$ip"
 Write-Host "  Password:   (Import-Clixml '$credentialPath').GetNetworkCredential().Password"
-Write-Host "  Reset:      vmrun -T ws revertToSnapshot `"$vmx`" clean; vmrun -T ws start `"$vmx`" nogui"
+Write-Host "  Reset:      ./scripts/vm/Reset-WpfQaVm.ps1 -VmName $VmName"
 Write-Host "  Watch:      open the .vmx in VMware Workstation; the window attaches to the running VM."

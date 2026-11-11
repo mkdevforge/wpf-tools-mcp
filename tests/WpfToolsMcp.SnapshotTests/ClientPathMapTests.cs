@@ -36,6 +36,28 @@ public sealed class ClientPathMapTests
     public void ToServer_maps_client_paths_back(string clientPath, string expected) =>
         Assert.That(Map.ToServer(clientPath), Is.EqualTo(expected));
 
+    // Hyper-V VMs and remote machines share a local folder over SMB; the client
+    // sees it under a UNC path that names the machine.
+    private static readonly ClientPathMap SmbMap = new(
+    [
+        new PathMapping(@"C:\WpfQa\shared", @"\\qa-vm.mshome.net\wpf-qa")
+    ]);
+
+    [TestCase(@"C:\WpfQa\shared\artifacts\screenshots\a.png", @"\\qa-vm.mshome.net\wpf-qa\artifacts\screenshots\a.png")]
+    [TestCase(@"c:\wpfqa\SHARED\artifacts", @"\\qa-vm.mshome.net\wpf-qa\artifacts")]
+    [TestCase(@"C:\WpfQa\shared", @"\\qa-vm.mshome.net\wpf-qa")]
+    [TestCase(@"C:\WpfQa\shared-old\a.png", @"C:\WpfQa\shared-old\a.png")]
+    public void ToClient_maps_a_local_server_folder_to_a_unc_client_path(string serverPath, string expected) =>
+        Assert.That(SmbMap.ToClient(serverPath), Is.EqualTo(expected));
+
+    [TestCase(@"\\qa-vm.mshome.net\wpf-qa\apps\App\App.exe", @"C:\WpfQa\shared\apps\App\App.exe")]
+    [TestCase(@"\\QA-VM.MSHOME.NET\WPF-QA\apps\App.exe", @"C:\WpfQa\shared\apps\App.exe")]
+    [TestCase(@"//qa-vm.mshome.net/wpf-qa/apps/App.exe", @"C:\WpfQa\shared\apps\App.exe")]
+    [TestCase(@"\\qa-vm.mshome.net\wpf-qa-other\App.exe", @"\\qa-vm.mshome.net\wpf-qa-other\App.exe")]
+    [TestCase(@"\\other-vm\wpf-qa\App.exe", @"\\other-vm\wpf-qa\App.exe")]
+    public void ToServer_maps_a_unc_client_path_to_the_local_server_folder(string clientPath, string expected) =>
+        Assert.That(SmbMap.ToServer(clientPath), Is.EqualTo(expected));
+
     [Test]
     public void An_empty_map_changes_nothing()
     {

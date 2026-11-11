@@ -55,24 +55,7 @@ function Invoke-Installer {
     }
 }
 
-function Invoke-Native {
-    param([string] $FilePath, [string[]] $Arguments)
-
-    & $FilePath @Arguments | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        throw "$FilePath $($Arguments -join ' ') exited with code $LASTEXITCODE."
-    }
-}
-
-function Set-RegistryValue {
-    param([string] $Path, [string] $Name, $Value, [string] $Type = 'DWord')
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        New-Item -Path $Path -Force | Out-Null
-    }
-
-    New-ItemProperty -LiteralPath $Path -Name $Name -Value $Value -PropertyType $Type -Force | Out-Null
-}
+. (Join-Path $PSScriptRoot 'QaMachine.ps1')
 
 try {
     Invoke-SetupStep 'vmware_tools' {
@@ -106,69 +89,20 @@ try {
     }
 
     Invoke-SetupStep 'openssh_server' {
-        $capability = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' | Select-Object -First 1
-        if (-not $capability) {
-            throw 'The OpenSSH.Server capability is not available on this Windows image.'
-        }
-
-        if ($capability.State -ne 'Installed') {
-            Add-WindowsCapability -Online -Name $capability.Name | Out-Null
-        }
-
-        Set-Service -Name sshd -StartupType Automatic
-        Start-Service -Name sshd
-
-        if (-not (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)) {
-            New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' `
-                -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
-        }
-
-        # sshd reads keys for administrators only from this file, and only if
-        # Administrators and SYSTEM are its sole owners.
-        $keys = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'
-        Copy-Item -LiteralPath (Join-Path $setupRoot 'authorized_keys') -Destination $keys -Force
-        Invoke-Native icacls.exe @($keys, '/inheritance:r', '/grant', '*S-1-5-32-544:F', '/grant', '*S-1-5-18:F')
-
+        Enable-QaOpenSsh -AuthorizedKeys @(Get-Content -LiteralPath (Join-Path $setupRoot 'authorized_keys'))
         Set-RegistryValue 'HKLM:\SOFTWARE\OpenSSH' 'DefaultShell' `
             "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" 'String'
     }
 
     Invoke-SetupStep 'unattended_session' {
-        # Keep automatic logon after the unattend logon count runs out.
+        # Keep the automatic logon from the answer file after its logon count runs out.
         $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
         Set-RegistryValue $winlogon 'AutoAdminLogon' '1' 'String'
         Remove-ItemProperty -LiteralPath $winlogon -Name 'AutoLogonCount' -ErrorAction SilentlyContinue
 
-        # Never sleep, turn off the display, or lock when the display turns off.
-        Invoke-Native powercfg.exe @('/change', 'monitor-timeout-ac', '0')
-        Invoke-Native powercfg.exe @('/change', 'standby-timeout-ac', '0')
-        Invoke-Native powercfg.exe @('/change', 'hibernate-timeout-ac', '0')
-        Invoke-Native powercfg.exe @('/hibernate', 'off')
-        Invoke-Native powercfg.exe @('/setacvalueindex', 'SCHEME_CURRENT', 'SUB_NONE', 'CONSOLELOCK', '0')
-        Invoke-Native powercfg.exe @('/setactive', 'SCHEME_CURRENT')
-
-        # No screen saver and no idle lock.
-        Set-RegistryValue 'HKCU:\Control Panel\Desktop' 'ScreenSaveActive' '0' 'String'
-        Set-RegistryValue 'HKCU:\Control Panel\Desktop' 'ScreenSaverIsSecure' '0' 'String'
-        Set-RegistryValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'InactivityTimeoutSecs' 0
-        Set-RegistryValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization' 'NoLockScreen' 1
-
-        # Toasts can cover the application under test.
-        Set-RegistryValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications' 'ToastEnabled' 0
-
-        # No automatic updates. Windows Update restarts the VM outside active
-        # hours even with a logged-on user, and an update applied this way left
-        # the VM unable to boot. Create a new VM from a current ISO instead.
-        Set-RegistryValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoUpdate' 1
-        Set-RegistryValue 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoRebootWithLoggedOnUsers' 1
-
-        # VMware Tools keeps the clock on host time (tools.syncTime). After a
-        # snapshot revert, the Windows Time service set the clock back to the
-        # snapshot time about a minute after VMware Tools had corrected it. Use
-        # only VMware Tools as the time source.
-        Set-RegistryValue 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config' 'UtilizeSslTimeData' 0
-        Stop-Service -Name W32Time -ErrorAction SilentlyContinue
-        Set-Service -Name W32Time -StartupType Disabled
+        Set-QaDesktopSession
+        Disable-QaAutomaticUpdates
+        Set-QaTimeSource -Hypervisor VMware
     }
 }
 finally {
